@@ -8,6 +8,7 @@ edition = "2021"
 pyo3 = "0.21"
 
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+hound = "3"
 
 # Async runtime and channel primitives
 tokio = { version = "1", features = ["full"] }
@@ -31,3 +32,8 @@ path = "examples/basic.rs"
 [[example]]
 name = "explore_model"
 path = "examples/explore_model.rs"
+
+[[example]]
+name = "synthesize"
+path = "examples/synthesize.rs"
+
