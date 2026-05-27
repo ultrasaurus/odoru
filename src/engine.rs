@@ -90,7 +90,7 @@ impl G2pEngine {
             prepend_site_packages(py, &site_packages)?;
             // Fail fast: if misaki isn't importable we want a clear error now,
             // not a confusing panic inside the worker thread later.
-             py.import_bound("misaki.en").map_err(|e| {
+            py.import_bound("misaki.en").map_err(|e| {
                 G2pError::PythonInit(format!(
                     "Could not import misaki.en from {}: {}",
                     site_packages.display(),
@@ -276,34 +276,36 @@ fn resolve_venv(explicit: Option<&Path>) -> Result<PathBuf, G2pError> {
     Ok(p)
 }
 
-/// Walk `<venv>/lib/` looking for `python3.x/site-packages`.
-/// On M1 Macs the layout is always `lib/python3.xx/site-packages`.
+/// Ask the venv's own Python binary where its site-packages directory is.
+/// This is unambiguous regardless of how many python3.x dirs exist in the venv.
 fn find_site_packages(venv: &Path) -> Result<PathBuf, G2pError> {
-    let lib = venv.join("lib");
+    let python = venv.join("bin").join("python");
 
-    let entries = std::fs::read_dir(&lib).map_err(|e| {
-        G2pError::PythonInit(format!(
-            "Cannot read venv lib dir {}: {e}",
-            lib.display()
-        ))
-    })?;
+    let output = std::process::Command::new(&python)
+        .args(["-c", "import sysconfig; print(sysconfig.get_path('purelib'))"])
+        .output()
+        .map_err(|e| G2pError::PythonInit(format!(
+            "Failed to run venv Python at {}: {e}",
+            python.display()
+        )))?;
 
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.starts_with("python3.") {
-            let sp = entry.path().join("site-packages");
-            if sp.is_dir() {
-                return Ok(sp);
-            }
-        }
+    if !output.status.success() {
+        return Err(G2pError::PythonInit(format!(
+            "venv Python exited with error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
     }
 
-    Err(G2pError::PythonInit(format!(
-        "No python3.x/site-packages directory found inside {}. \
-         Is this a valid venv with misaki installed?",
-        lib.display()
-    )))
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+
+    if path.is_dir() {
+        Ok(path)
+    } else {
+        Err(G2pError::PythonInit(format!(
+            "site-packages reported by venv Python does not exist: {}",
+            path.display()
+        )))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +315,6 @@ fn find_site_packages(venv: &Path) -> Result<PathBuf, G2pError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::sync::Mutex;
     use tempfile::TempDir;
 
@@ -394,87 +395,20 @@ mod tests {
     }
 
     // ── find_site_packages ────────────────────────────────────────────────
-
-    /// Build a minimal fake venv on disk: <root>/lib/python3.xx/site-packages/
-    fn make_fake_venv(python_version: &str) -> TempDir {
-        let dir = TempDir::new().unwrap();
-        let sp = dir
-            .path()
-            .join("lib")
-            .join(format!("python{python_version}"))
-            .join("site-packages");
-        fs::create_dir_all(&sp).unwrap();
-        dir
-    }
+    //
+    // find_site_packages now shells out to the venv's Python binary, so unit
+    // tests can't fake it with a directory structure alone.  Coverage lives in
+    // the integration tests (engine_new_with_env_var_succeeds) where a real
+    // venv is available.  Here we just verify the two error paths that fire
+    // before the subprocess is even attempted.
 
     #[test]
-    fn find_site_packages_standard_layout_returns_path() {
-        let venv = make_fake_venv("3.11");
-        let result = find_site_packages(venv.path());
-        assert!(result.is_ok());
-        assert!(result.unwrap().ends_with("site-packages"));
-    }
-
-    #[test]
-    fn find_site_packages_works_for_any_minor_version() {
-        for minor in ["3.10", "3.11", "3.12", "3.13"] {
-            let venv = make_fake_venv(minor);
-            let result = find_site_packages(venv.path());
-            assert!(
-                result.is_ok(),
-                "expected Ok for python{minor}, got: {:?}",
-                result
-            );
-        }
-    }
-
-    #[test]
-    fn find_site_packages_missing_lib_dir_returns_error() {
-        let dir = TempDir::new().unwrap(); // no lib/ created
+    fn find_site_packages_missing_python_binary_returns_error() {
+        let dir = TempDir::new().unwrap(); // no bin/python inside
         let err = find_site_packages(dir.path()).unwrap_err().to_string();
         assert!(
-            err.contains("Cannot read venv lib dir"),
+            err.contains("Failed to run venv Python"),
             "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn find_site_packages_no_python_subdir_returns_error() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir(dir.path().join("lib")).unwrap(); // lib/ exists but empty
-        let err = find_site_packages(dir.path()).unwrap_err().to_string();
-        assert!(
-            err.contains("No python3.x/site-packages"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn find_site_packages_python_dir_without_site_packages_returns_error() {
-        let dir = TempDir::new().unwrap();
-        // lib/python3.11/ exists but site-packages/ does not
-        fs::create_dir_all(dir.path().join("lib").join("python3.11")).unwrap();
-        let err = find_site_packages(dir.path()).unwrap_err().to_string();
-        assert!(
-            err.contains("No python3.x/site-packages"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn find_site_packages_ignores_non_python_subdirs() {
-        let dir = TempDir::new().unwrap();
-        // Directories that should NOT match the python3.* pattern
-        for name in &["bin", "include", "lib64", "python2.7"] {
-            fs::create_dir_all(
-                dir.path().join("lib").join(name).join("site-packages"),
-            )
-            .unwrap();
-        }
-        let err = find_site_packages(dir.path()).unwrap_err().to_string();
-        assert!(
-            err.contains("No python3.x/site-packages"),
-            "should not match non-python3 dirs, got: {err}"
         );
     }
 }
