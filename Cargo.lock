@@ -333,6 +333,7 @@ dependencies = [
  "hound",
  "ort",
  "pyo3",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",

@@ -33,6 +33,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
+use serde_json;
 use futures::StreamExt;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use ort::{inputs, session::Session, value::Tensor};
@@ -184,7 +185,7 @@ impl Synthesizer {
         // ----------------------------------------------------------------
         // Step 2: synthesize each sentence and collect audio + timestamps
         // ----------------------------------------------------------------
-        let vocab = build_vocab();
+        let vocab = build_vocab(&self.model_dir)?;
         let silence_samples = 2400usize; // 100ms gap between sentences @ 24kHz
         let silence_secs = silence_samples as f32 / 24_000.0;
         let silence = vec![0.0f32; silence_samples];
@@ -367,25 +368,37 @@ fn round3(x: f32) -> f32 {
 // Vocab / tokenizer
 // ---------------------------------------------------------------------------
 
-/// Build Kokoro's phoneme → token ID map.
-/// Each character in a misaki phoneme string maps to a 1-based integer ID.
-pub fn build_vocab() -> std::collections::HashMap<char, usize> {
-    let symbols = [
-        '$', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
-        'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
-        'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-        'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y',
-        'z', 'ɑ', 'ɐ', 'ɒ', 'æ', 'ə', 'ɚ', 'ɛ', 'ɜ', 'ɞ', 'ɟ', 'ɡ', 'ɢ',
-        'ɣ', 'ɤ', 'ɥ', 'ɦ', 'ɧ', 'ɨ', 'ɩ', 'ɪ', 'ɫ', 'ɬ', 'ɭ', 'ɮ', 'ɯ',
-        'ɰ', 'ɱ', 'ɲ', 'ɳ', 'ɴ', 'ɵ', 'ɶ', 'ɷ', 'ɸ', 'ɹ', 'ɺ', 'ɻ', 'ɼ',
-        'ɽ', 'ɾ', 'ɿ', 'ʀ', 'ʁ', 'ʂ', 'ʃ', 'ʄ', 'ʅ', 'ʆ', 'ʇ', 'ʈ', 'ʉ',
-        'ʊ', 'ʋ', 'ʌ', 'ʍ', 'ʎ', 'ʏ', 'ʐ', 'ʑ', 'ʒ', 'ʓ', 'ʔ', 'ʕ', 'ʖ',
-        'ʗ', 'ʘ', 'ʙ', 'ʚ', 'ʛ', 'ʜ', 'ʝ', 'ʞ', 'ʟ', 'ʠ', 'ʡ', 'ʢ', 'ʣ',
-        'ʤ', 'ʥ', 'ʦ', 'ʧ', 'ʨ', 'ʩ', 'ʪ', 'ʫ', 'ʬ', 'ʭ', 'ʮ', 'ʯ', 'ˈ',
-        'ˌ', 'ː', 'ˑ', '˒', '˓', '˔', '˕', '˖', '˗', '˘', '˙', '˚', '˛',
-        '˜', '˝', '̩', 'θ', 'χ', ' ',
-    ];
-    symbols.iter().enumerate().map(|(i, &c)| (c, i + 1)).collect()
+/// Load Kokoro's phoneme → token ID map from `tokenizer.json`.
+///
+/// Uses the file directly rather than a hardcoded list — this is the only
+/// reliable way to get correct IDs, since the file uses non-sequential IDs
+/// (e.g. space=16, ˈ=156, ð=81) that don't match a simple enumeration.
+pub fn build_vocab(model_dir: &Path) -> Result<std::collections::HashMap<char, usize>> {
+    let path = model_dir.join("tokenizer.json");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("Read {}: {e}", path.display()))?;
+
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| anyhow::anyhow!("Parse tokenizer.json: {e}"))?;
+
+    let vocab_obj = json
+        .get("model")
+        .and_then(|m| m.get("vocab"))
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| anyhow::anyhow!("tokenizer.json missing model.vocab"))?;
+
+    let mut map = std::collections::HashMap::new();
+    for (token, id_val) in vocab_obj {
+        let id = id_val
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Non-integer ID for {token:?}"))? as usize;
+        let mut chars = token.chars();
+        if let (Some(c), None) = (chars.next(), chars.next()) {
+            map.insert(c, id);
+        }
+    }
+
+    Ok(map)
 }
 
 /// Convert a phoneme string to token IDs, skipping unknown characters.
@@ -404,20 +417,51 @@ pub fn tokenize(phonemes: &str, vocab: &std::collections::HashMap<char, usize>) 
 mod tests {
     use super::*;
 
+    /// Build a small inline vocab for unit tests — no file I/O needed.
+    fn inline_vocab() -> std::collections::HashMap<char, usize> {
+        [('h', 50usize), ('z', 68), ('\u{00f0}', 81), (' ', 16)]
+            .into_iter()
+            .collect()
+    }
+
     #[test]
     fn tokenize_known_chars() {
-        let vocab = build_vocab();
-        // 'h' is at index 33 in symbols (0-based) → ID 34
+        let vocab = inline_vocab();
         let ids = tokenize("h", &vocab);
-        assert_eq!(ids.len(), 1);
-        assert!(ids[0] > 0);
+        assert_eq!(ids, vec![50]);
     }
 
     #[test]
     fn tokenize_skips_unknown() {
-        let vocab = build_vocab();
+        let vocab = inline_vocab();
         let ids = tokenize("h\x00z", &vocab); // \x00 not in vocab
-        assert_eq!(ids.len(), 2); // only 'h' and 'z'
+        assert_eq!(ids, vec![50, 68]);
+    }
+
+    #[test]
+    fn tokenize_th_sound() {
+        // ð was missing from the old hardcoded vocab
+        let vocab = inline_vocab();
+        let ids = tokenize("\u{00f0}", &vocab);
+        assert_eq!(ids, vec![81]);
+    }
+
+    /// Reads the real tokenizer.json; only runs when $KOKORO_MODEL_DIR is set.
+    #[test]
+    fn build_vocab_from_real_file() {
+        let model_dir = match std::env::var("KOKORO_MODEL_DIR") {
+            Ok(d) => std::path::PathBuf::from(d),
+            Err(_) => {
+                eprintln!("Skipping: $KOKORO_MODEL_DIR not set");
+                return;
+            }
+        };
+        let vocab = build_vocab(&model_dir).expect("build_vocab failed");
+        assert_eq!(vocab.get(&'\u{00f0}'), Some(&81));
+        assert_eq!(vocab.get(&' '),         Some(&16));
+        assert_eq!(vocab.get(&'.'),         Some(&4));
+        assert_eq!(vocab.get(&'\u{02c8}'), Some(&156));
+        assert_eq!(vocab.get(&'\u{0254}'), Some(&76));
     }
 
     #[test]

@@ -9,6 +9,7 @@ pyo3 = "0.21"
 
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 hound = "3"
+serde_json = "1"
 
 # Async runtime and channel primitives
 tokio = { version = "1", features = ["full"] }
