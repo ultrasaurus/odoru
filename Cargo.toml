@@ -1,0 +1,26 @@
+[package]
+name = "ko-odoru"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# PyO3: Rust/Python bridge. No auto-initialize — we control when Python starts.
+pyo3 = "0.21"
+
+# Async runtime and channel primitives
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Ergonomic error types via derive macros
+thiserror = "1"
+
+# Sentence splitting (used in splitter.rs, wired up next)
+unicode-segmentation = "1"
+
+[dev-dependencies]
+# Used in tests to create throwaway venv directory structures on disk.
+tempfile = "3"
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
