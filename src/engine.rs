@@ -47,9 +47,13 @@ struct G2pRequest {
 /// lifetime of the engine.
 ///
 /// Wrap in `Arc` if you need to share across tasks:
-/// ```rust
+/// ```no_run
+/// use std::sync::Arc;
+/// use ko_odoru::G2pEngine;
 /// let engine = Arc::new(G2pEngine::new(None)?);
+/// # Ok::<(), ko_odoru::G2pError>(())
 /// ```
+#[derive(Debug)]
 pub struct G2pEngine {
     /// Sender to the dedicated Python worker thread.
     tx: mpsc::SyncSender<G2pRequest>,
