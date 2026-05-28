@@ -14,6 +14,7 @@ serde_json = "1"
 # Async runtime and channel primitives
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
+async-stream = "0.3"
 
 # Ergonomic error types via derive macros
 thiserror = "1"
@@ -21,6 +22,7 @@ anyhow = "1"
 
 # Sentence splitting (used in splitter.rs, wired up next)
 unicode-segmentation = "1"
+serde = { version = "1.0", features = ["derive"]}
 
 [dev-dependencies]
 # Used in tests to create throwaway venv directory structures on disk.
@@ -37,4 +39,5 @@ path = "examples/explore_model.rs"
 [[example]]
 name = "synthesize"
 path = "examples/synthesize.rs"
+
 

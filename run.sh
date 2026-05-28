@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # run.sh — sources .env and runs a cargo example.
 # Usage:
-#   echo "Hello world." | ./run.sh
-#   echo "Hello world." | ./run.sh --release
+#   echo "Hello world." | ./run.sh run --example basic
+#   ./run.sh test
 
 set -euo pipefail
 
@@ -22,4 +22,4 @@ if [[ -z "${MISAKI_VENV:-}" ]]; then
   exit 1
 fi
 
-exec cargo run ${1:+--$1} --example basic
+exec cargo "$@"

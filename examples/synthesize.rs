@@ -8,10 +8,11 @@
 //!   export DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/python@3.12/3.12.12/Frameworks/Python.framework/Versions/3.12/lib
 //!   cargo run --example synthesize
 
-use ko_odoru::synth::{SynthConfig, Synthesizer};
+use ko_odoru::tts::{save_wav_all, Tts};
 use std::io;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let mut text = String::new();
     println!("Enter text to synthesize (then press return):");
     io::stdin().read_line(&mut text).expect("failed to read stdin");
@@ -21,32 +22,27 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("No text provided.");
     }
 
-    let model_dir = format!("{}/.kokoro", std::env::var("HOME").unwrap());
     let output_path = "output.wav";
 
-    println!("Initializing synthesizer…");
-    let mut synth = Synthesizer::new(&model_dir, None)?;
+    println!("Initializing…");
+    let tts = Tts::builder().build()?;
 
     println!("Synthesizing…");
-    let config = SynthConfig::default();
-    let result = synth.synthesize(&text, &config)?;
-
-    println!("\nSentence timestamps:");
-    println!("{:-<50}", "");
-    for ts in &result.sentences {
-        println!(
-            "[{:6.3}s – {:6.3}s]  {}",
-            ts.start_sec, ts.end_sec, ts.sentence
-        );
+    let mut stream = tts.synthesize(&text);
+    let mut segments = Vec::new();
+    while let Some(result) = stream.next().await {
+        let seg = result?;
+        println!("  [{:6.3}s – {:6.3}s]  {}", seg.transcript.start, seg.transcript.end, seg.transcript.text);
+        segments.push(seg);
     }
-    println!("{:-<50}", "");
-    println!(
-        "Total audio: {:.3}s ({} sentences)",
-        result.samples.len() as f32 / result.sample_rate as f32,
-        result.sentences.len()
-    );
 
-    result.save_wav(output_path)?;
+    println!("{:-<50}", "");
+    let total_secs: f64 = segments.last()
+        .map(|s| s.transcript.end)
+        .unwrap_or(0.0);
+    println!("Total: {:.3}s ({} sentences)", total_secs, segments.len());
+
+    save_wav_all(&segments, output_path, 100)?;
     println!("\nSaved: {output_path}");
 
     Ok(())

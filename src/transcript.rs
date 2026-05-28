@@ -106,7 +106,7 @@ mod tests {
 
         // Re-serialise and round-trip again to confirm symmetry.
         let json = serde_json::to_string(&parsed).unwrap();
-        let reparsed: Timestamps = serde_json::from_str(&json).unwrap();
+        let reparsed: Transcript = serde_json::from_str(&json).unwrap();
         assert_eq!(reparsed.segments[0].text, parsed.segments[0].text);
     }
 }
