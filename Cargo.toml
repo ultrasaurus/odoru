@@ -24,6 +24,15 @@ anyhow = "1"
 unicode-segmentation = "1"
 serde = { version = "1.0", features = ["derive"]}
 
+# server
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+base64 = "0.22"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+
 [dev-dependencies]
 # Used in tests to create throwaway venv directory structures on disk.
 tempfile = "3"
