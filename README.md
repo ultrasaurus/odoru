@@ -24,8 +24,15 @@ edit `.env` and `config.toml`to match your own paths if you changed $HELLO_VENV 
 cp .env.example .env   # unused right now
 ```
 
-## Build & run
+## Build & run server
 
+```
+source .env
+cargo run --bin server
+```
+
+
+# run example
 ```bash
 source .venv/bin/activate
 cargo build
