@@ -1,0 +1,4 @@
+# .cargo/config.toml.example
+# Copy to .cargo/config.toml and update the path to match your local venv.
+[env]
+PYO3_PYTHON = "/Users/sallen/src/claude/ko-odoru/.venv/bin/python3.12"
