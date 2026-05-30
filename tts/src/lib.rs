@@ -7,3 +7,5 @@ pub mod transcript;
 
 pub use engine::{G2pEngine, PhonemeChunk};
 pub use error::G2pError;
+
+pub use tts::{Tts, TtsBuilder, TtsStream, AudioSegment, save_wav_all};

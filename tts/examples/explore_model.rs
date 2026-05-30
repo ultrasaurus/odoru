@@ -12,7 +12,7 @@
 //!   cargo run --example explore_model
 
 use futures::StreamExt;
-use ko_odoru::G2pEngine;
+use tts::G2pEngine;
 use ort::{inputs, session::Session, value::Tensor};
 use std::path::PathBuf;
 

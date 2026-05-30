@@ -19,7 +19,7 @@
 //! ## Example
 //!
 //! ```no_run
-//! use ko_odoru::synth::{Synthesizer, SynthConfig};
+//! use tts::synth::{Synthesizer, SynthConfig};
 //!
 //! let mut synth = Synthesizer::new("/Users/me/.kokoro")?;
 //! let result = synth.synthesize("Hello world. How are you?", &SynthConfig::default())?;

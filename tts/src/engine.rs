@@ -47,9 +47,9 @@ struct G2pRequest {
 /// Wrap in `Arc` if you need to share across tasks:
 /// ```no_run
 /// use std::sync::Arc;
-/// use ko_odoru::G2pEngine;
+/// use tts::G2pEngine;
 /// let engine = Arc::new(G2pEngine::new()?);
-/// # Ok::<(), ko_odoru::G2pError>(())
+/// # Ok::<(), tts::G2pError>(())
 /// ```
 #[derive(Debug)]
 pub struct G2pEngine {

@@ -27,7 +27,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
-use ko_odoru::tts::{AudioSegment, Tts};
+use tts::{AudioSegment, Tts};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;

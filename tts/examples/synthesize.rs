@@ -8,7 +8,7 @@
 //!   export DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/python@3.12/3.12.12/Frameworks/Python.framework/Versions/3.12/lib
 //!   cargo run --example synthesize
 
-use ko_odoru::tts::{save_wav_all, Tts};
+use tts::{save_wav_all, Tts};
 use std::io;
 
 #[tokio::main]

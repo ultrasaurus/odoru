@@ -5,7 +5,7 @@
 //! ## Example
 //!
 //! ```no_run
-//! use ko_odoru::tts::Tts;
+//! use tts::Tts;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {

@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use ko_odoru::{G2pEngine, G2pError};
+use tts::{G2pEngine, G2pError};
 use std::io;
 
 #[tokio::main]

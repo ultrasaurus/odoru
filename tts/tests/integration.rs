@@ -16,12 +16,12 @@
 //! ```
 
 use futures::StreamExt;
-use ko_odoru::{G2pEngine, G2pError};
+use tts::{G2pEngine, G2pError};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /// Collect all chunks from a phonemize stream, panicking on unexpected errors.
-async fn collect_ok(engine: &G2pEngine, text: &str) -> Vec<ko_odoru::PhonemeChunk> {
+async fn collect_ok(engine: &G2pEngine, text: &str) -> Vec<tts::PhonemeChunk> {
     engine
         .phonemize(text)
         .map(|r| r.expect("unexpected G2pError in stream"))
@@ -220,7 +220,7 @@ async fn phonemize_unknown_proper_noun_uses_espeak_fallback() {
 #[tokio::test]
 #[ignore]
 async fn tokenizer_preserves_espeak_phonemes() {
-    use ko_odoru::synth::{build_vocab, tokenize};
+    use tts::synth::{build_vocab, tokenize};
     use std::path::PathBuf;
 
     let model_dir = std::env::var("KOKORO_MODEL_DIR")
