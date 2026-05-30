@@ -465,6 +465,31 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_all_unknown_returns_empty() {
+        // If every character is missing from the vocab the result should be
+        // empty rather than a panic — silent drops are caught at a higher level
+        let vocab = inline_vocab();
+        let ids = tokenize("\x01\x02\x03", &vocab);
+        assert!(ids.is_empty(),
+            "expected empty vec for all-unknown input, got {:?}", ids);
+    }
+
+    #[test]
+    fn tokenize_mixed_known_and_unknown_preserves_order() {
+        // Known chars appear in order; unknown ones are dropped
+        // h=50, \x01=missing, z=68, \x02=missing, h=50
+        let vocab = inline_vocab();
+        let ids = tokenize("h\x01z\x02h", &vocab);
+        assert_eq!(ids, vec![50, 68, 50]);
+    }
+
+    #[test]
+    fn tokenize_empty_string_returns_empty() {
+        let vocab = inline_vocab();
+        assert!(tokenize("", &vocab).is_empty());
+    }
+
+        #[test]
     fn sentence_timestamp_basic() {
         // BOS=10, two phonemes of 20 each, EOS=5
         // start = 0.0 + 10*2/80 = 0.25s

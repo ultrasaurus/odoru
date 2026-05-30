@@ -75,6 +75,11 @@ impl G2pEngine {
                     "Could not import misaki.en — is the venv active and misaki[en] installed?\n  {e}"
                 ))
             })?;
+            py.import("misaki.espeak").map_err(|e| {
+                G2pError::PythonInit(format!(
+                    "Could not import misaki.espeak — is espeak-ng installed? (brew install espeak-ng)\n  {e}"
+                ))
+            })?;
             Ok(())
         })?;
 
@@ -174,7 +179,7 @@ fn python_worker(rx: mpsc::Receiver<G2pRequest>) {
     }
 }
 
-/// Construct `misaki.en.G2P()` and return it as an owned `Py<PyAny>`.
+/// Construct `misaki.en.G2P(fallback=EspeakFallback(False))` and return it as an owned `Py<PyAny>`.
 fn make_g2p_object() -> Result<Py<PyAny>, String> {
     Python::attach(|py| {
         // Misaki parses sys.argv at G2P() construction time.
@@ -182,14 +187,27 @@ fn make_g2p_object() -> Result<Py<PyAny>, String> {
         py.run(c"import sys; sys.argv = ['']", None, None)
             .map_err(|e| format!("Failed to reset sys.argv: {e}"))?;
 
+        let fallback_module = py
+            .import("misaki.espeak")
+            .map_err(|e| format!("import misaki.espeak: {e}"))?;
+        let fallback_class = fallback_module
+            .getattr("EspeakFallback")
+            .map_err(|e| format!("EspeakFallback class not found: {e}"))?;
+        let fallback = fallback_class
+            .call1((false,))
+            .map_err(|e| format!("EspeakFallback(False) failed: {e}"))?;
+
         let module = py
             .import("misaki.en")
             .map_err(|e| format!("import misaki.en: {e}"))?;
         let class = module
             .getattr("G2P")
             .map_err(|e| format!("G2P class not found: {e}"))?;
+        let kwargs = pyo3::types::PyDict::new(py);
+        kwargs.set_item("fallback", fallback)
+            .map_err(|e| format!("kwargs.set_item: {e}"))?;
         let instance = class
-            .call0()
+            .call((), Some(&kwargs))
             .map_err(|e| format!("G2P() constructor failed: {e}"))?;
         Ok(instance.unbind())
     })

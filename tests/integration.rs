@@ -186,3 +186,80 @@ async fn engine_shared_via_arc_across_tasks() {
         result.expect("task panicked");
     }
 }
+
+// ── espeak fallback for unknown proper nouns ───────────────────────────────
+
+/// Verifies that proper nouns unknown to misaki's dictionary (like foreign
+/// names) are phonemized via the espeak fallback rather than silently dropped.
+///
+/// "Contreras" is a Spanish surname that misaki won't have in its English
+/// dictionary — it should fall back to espeak and produce non-empty phonemes.
+#[tokio::test]
+#[ignore]
+async fn phonemize_unknown_proper_noun_uses_espeak_fallback() {
+    let engine = G2pEngine::new().unwrap();
+    let chunks = collect_ok(&engine, "Contreras is the clearest voice.").await;
+
+    assert_eq!(chunks.len(), 1);
+    let phonemes = &chunks[0].phonemes;
+    assert!(!phonemes.is_empty(), "phoneme string was empty for sentence containing 'Contreras'");
+
+    // The phoneme string should be substantially long — if "Contreras" was
+    // silently dropped we'd get far fewer phonemes than expected.
+    // "is the clearest voice" alone would be ~15 chars; with "Contreras" ~25+.
+    assert!(
+        phonemes.chars().count() >= 20,
+        "phoneme string suspiciously short ({} chars) — 'Contreras' may have been dropped: {:?}",
+        phonemes.chars().count(),
+        phonemes
+    );
+}
+
+/// Verifies that the tokenizer doesn't silently drop phonemes for words
+/// phonemized via espeak — espeak may produce characters not in our vocab.
+#[tokio::test]
+#[ignore]
+async fn tokenizer_preserves_espeak_phonemes() {
+    use ko_odoru::synth::{build_vocab, tokenize};
+    use std::path::PathBuf;
+
+    let model_dir = std::env::var("KOKORO_MODEL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("HOME").unwrap()).join(".kokoro")
+        });
+
+    let vocab = build_vocab(&model_dir).expect("build_vocab failed");
+    let engine = G2pEngine::new().unwrap();
+    let chunks = collect_ok(&engine, "Contreras is the clearest voice.").await;
+
+    assert_eq!(chunks.len(), 1);
+    let phonemes = &chunks[0].phonemes;
+
+    let token_ids = tokenize(phonemes, &vocab);
+
+    // Count how many phoneme chars are actually in the vocab
+    let total_chars = phonemes.chars().count();
+    let mapped_chars = phonemes.chars().filter(|c| vocab.contains_key(c)).count();
+    let missing: Vec<char> = phonemes.chars().filter(|c| !vocab.contains_key(c)).collect();
+
+    println!("phonemes: {:?}", phonemes);
+    println!("total chars: {total_chars}, mapped: {mapped_chars}, missing: {}", missing.len());
+    println!("missing chars: {:?}", missing);
+    println!("token_ids: {:?}", token_ids);
+
+    assert!(
+        !token_ids.is_empty(),
+        "all phonemes for 'Contreras' sentence were dropped by tokenizer"
+    );
+
+    // Warn if more than 20% of chars are missing from vocab — suggests
+    // espeak is producing phonemes we don't support
+    let missing_pct = (missing.len() as f64 / total_chars as f64) * 100.0;
+    assert!(
+        missing_pct < 20.0,
+        "{:.0}% of phoneme chars missing from vocab — espeak may be using unsupported symbols: {:?}",
+        missing_pct,
+        missing
+    );
+}
