@@ -8,15 +8,26 @@ The name means "dancing like this" in Japanese — a nod to the [Kokoro](https:/
 
 Requires Python 3.10–3.12 (arm64 on M1 Mac) and a venv with `misaki[en]` installed.
 
+```
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install "misaki[en]"
+pip install click
+cp .env.example .env
+cp .cargo/config.toml.example .cargo/config.toml
+```
+
+edit `.env` and `config.toml`to match your own paths if you changed $HELLO_VENV above
+
+
 ```bash
-./setup.sh
-cp .env.example .env   # fill in the paths setup.sh printed
+cp .env.example .env   # unused right now
 ```
 
 ## Build & run
 
 ```bash
-source .env
+source .venv/bin/activate
 cargo build
 echo "Hello world." | cargo run --example basic
 ```

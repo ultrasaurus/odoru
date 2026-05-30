@@ -1,10 +1,8 @@
-use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 
 use futures::stream::Stream;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
 use tokio::sync::oneshot;
 
 use crate::error::G2pError;
@@ -50,7 +48,7 @@ struct G2pRequest {
 /// ```no_run
 /// use std::sync::Arc;
 /// use ko_odoru::G2pEngine;
-/// let engine = Arc::new(G2pEngine::new(None)?);
+/// let engine = Arc::new(G2pEngine::new()?);
 /// # Ok::<(), ko_odoru::G2pError>(())
 /// ```
 #[derive(Debug)]
@@ -62,50 +60,26 @@ pub struct G2pEngine {
 impl G2pEngine {
     /// Initialise the engine.
     ///
-    /// `venv_path` — path to a Python venv that has `misaki-en` installed.
-    /// If `None`, falls back to the `MISAKI_VENV` environment variable.
+    /// Reads `$VIRTUAL_ENV` (set automatically by `source .venv/bin/activate`)
+    /// to locate the venv's site-packages. If not set, system Python is used.
     ///
     /// This call blocks briefly (~100–300 ms on first run) while Python
     /// starts and Misaki is imported. All subsequent calls are non-blocking.
-    pub fn new(venv_path: Option<&Path>) -> Result<Self, G2pError> {
-        let venv = resolve_venv(venv_path)?;
-        let site_packages = find_site_packages(&venv)?;
-
-        // ----------------------------------------------------------------
-        // Step 1 — tell Python where to find packages BEFORE the
-        // interpreter starts.  PYTHONPATH is read at interpreter init time.
-        // ----------------------------------------------------------------
-        // Safety: we set this once, before pyo3::prepare_freethreaded_python.
-        // Calling code is expected to call G2pEngine::new before any async
-        // work spawns threads that might also read env vars.
-        std::env::set_var("PYTHONPATH", &site_packages);
-
-        // ----------------------------------------------------------------
-        // Step 2 — start the Python interpreter (idempotent after first call).
-        // ----------------------------------------------------------------
-        pyo3::prepare_freethreaded_python();
-
-        // ----------------------------------------------------------------
-        // Step 3 — belt-and-suspenders: also insert site-packages at the
-        // front of sys.path in case PYTHONPATH was already set to something
-        // else before we got here.
-        // ----------------------------------------------------------------
-        Python::with_gil(|py| -> Result<(), G2pError> {
-            prepend_site_packages(py, &site_packages)?;
-            // Fail fast: if misaki isn't importable we want a clear error now,
-            // not a confusing panic inside the worker thread later.
-            py.import_bound("misaki.en").map_err(|e| {
+    pub fn new() -> Result<Self, G2pError> {
+        // Add venv site-packages to sys.path and verify misaki.en is importable.
+        // Fail fast with a clear error if not.
+        Python::attach(|py| -> Result<(), G2pError> {
+            setup_python(py)?;
+            py.import("misaki.en").map_err(|e| {
                 G2pError::PythonInit(format!(
-                    "Could not import misaki.en from {}: {}",
-                    site_packages.display(),
-                    e
+                    "Could not import misaki.en — is the venv active and misaki[en] installed?\n  {e}"
                 ))
             })?;
             Ok(())
         })?;
 
         // ----------------------------------------------------------------
-        // Step 4 — spawn the dedicated Python worker thread.
+        // Step 3 — spawn the dedicated Python worker thread.
         //
         // Why a plain std::thread and not a Tokio task?
         // PyO3's Python::with_gil blocks the OS thread until the GIL is
@@ -200,11 +174,16 @@ fn python_worker(rx: mpsc::Receiver<G2pRequest>) {
     }
 }
 
-/// Construct `misaki.en.G2P()` and return it as an owned `PyObject`.
-fn make_g2p_object() -> Result<PyObject, String> {
-    Python::with_gil(|py| {
+/// Construct `misaki.en.G2P()` and return it as an owned `Py<PyAny>`.
+fn make_g2p_object() -> Result<Py<PyAny>, String> {
+    Python::attach(|py| {
+        // Misaki parses sys.argv at G2P() construction time.
+        // Clear it so cargo test's flags don't cause a SystemExit.
+        py.run(c"import sys; sys.argv = ['']", None, None)
+            .map_err(|e| format!("Failed to reset sys.argv: {e}"))?;
+
         let module = py
-            .import_bound("misaki.en")
+            .import("misaki.en")
             .map_err(|e| format!("import misaki.en: {e}"))?;
         let class = module
             .getattr("G2P")
@@ -212,15 +191,15 @@ fn make_g2p_object() -> Result<PyObject, String> {
         let instance = class
             .call0()
             .map_err(|e| format!("G2P() constructor failed: {e}"))?;
-        Ok(instance.into())
+        Ok(instance.unbind())
     })
 }
 
 /// Call `g2p(sentence)` and extract the phoneme string from the result tuple.
 ///
 /// Misaki returns `(phonemes: str, tokens: list)`.  We only need index 0.
-fn call_g2p(g2p: &PyObject, req: &G2pRequest) -> Result<String, G2pError> {
-    Python::with_gil(|py| {
+fn call_g2p(g2p: &Py<PyAny>, req: &G2pRequest) -> Result<String, G2pError> {
+    Python::attach(|py| {
         // Call the G2P object: result = g2p(sentence)
         let result = g2p
             .call1(py, (&req.sentence,))
@@ -250,66 +229,48 @@ fn call_g2p(g2p: &PyObject, req: &G2pRequest) -> Result<String, G2pError> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve the venv path from the explicit argument or `$MISAKI_VENV`.
-fn resolve_venv(explicit: Option<&Path>) -> Result<PathBuf, G2pError> {
-    if let Some(p) = explicit {
-        if !p.is_dir() {
-            return Err(G2pError::PythonInit(format!(
-                "Provided venv path does not exist: {}",
-                p.display()
-            )));
-        }
-        return Ok(p.to_path_buf());
-    }
+/// Add the active venv's site-packages to `sys.path`.
+///
+/// Reads `$VIRTUAL_ENV` (set automatically by `source .venv/bin/activate`)
+/// and derives the site-packages path from the running Python version.
+/// If `$VIRTUAL_ENV` is not set, this is a no-op — system Python is used.
+fn setup_python(py: Python) -> Result<(), G2pError> {
+    let venv = match std::env::var("VIRTUAL_ENV") {
+        Ok(v) => v,
+        Err(_) => return Ok(()), // no venv active — use system Python
+    };
 
-    let from_env = std::env::var("MISAKI_VENV").map_err(|_| {
-        G2pError::PythonInit(
-            "No venv path given and $MISAKI_VENV is not set. \
-             Run setup.sh first, then export MISAKI_VENV=<path>."
-                .into(),
-        )
-    })?;
+    let version = py
+        .eval(c"__import__('sys').version_info[:2]", None, None)
+        .map_err(|e| G2pError::PythonInit(format!("Failed to get Python version: {e}")))?;
 
-    let p = PathBuf::from(from_env);
-    if !p.is_dir() {
-        return Err(G2pError::PythonInit(format!(
-            "$MISAKI_VENV points to a non-existent directory: {}",
-            p.display()
-        )));
-    }
-    Ok(p)
-}
+    let (major, minor): (u8, u8) = version
+        .extract()
+        .map_err(|e| G2pError::PythonInit(format!("Failed to extract Python version: {e}")))?;
 
-/// Ask the venv's own Python binary where its site-packages directory is.
-/// This is unambiguous regardless of how many python3.x dirs exist in the venv.
-fn find_site_packages(venv: &Path) -> Result<PathBuf, G2pError> {
-    let python = venv.join("bin").join("python");
+    let site_packages = format!("{}/lib/python{}.{}/site-packages", venv, major, minor);
 
-    let output = std::process::Command::new(&python)
-        .args(["-c", "import sysconfig; print(sysconfig.get_path('purelib'))"])
-        .output()
-        .map_err(|e| G2pError::PythonInit(format!(
-            "Failed to run venv Python at {}: {e}",
-            python.display()
-        )))?;
+    let sys = py
+        .import("sys")
+        .map_err(|e| G2pError::PythonInit(format!("import sys: {e}")))?;
 
-    if !output.status.success() {
-        return Err(G2pError::PythonInit(format!(
-            "venv Python exited with error: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
+    // Reset sys.argv to prevent misaki from parsing cargo test's flags
+    // (some versions call an argument parser at G2P() construction time).
+    sys.getattr("argv")
+        .map_err(|e| G2pError::PythonInit(format!("sys.argv: {e}")))?
+        .call_method1("clear", ())
+        .map_err(|e| G2pError::PythonInit(format!("sys.argv.clear: {e}")))?;
+    sys.getattr("argv")
+        .map_err(|e| G2pError::PythonInit(format!("sys.argv: {e}")))?
+        .call_method1("append", ("",))
+        .map_err(|e| G2pError::PythonInit(format!("sys.argv.append: {e}")))?;
 
-    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    sys.getattr("path")
+        .map_err(|e| G2pError::PythonInit(format!("sys.path: {e}")))?
+        .call_method1("insert", (0, &site_packages))
+        .map_err(|e| G2pError::PythonInit(format!("sys.path.insert: {e}")))?;
 
-    if path.is_dir() {
-        Ok(path)
-    } else {
-        Err(G2pError::PythonInit(format!(
-            "site-packages reported by venv Python does not exist: {}",
-            path.display()
-        )))
-    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -318,131 +279,12 @@ fn find_site_packages(venv: &Path) -> Result<PathBuf, G2pError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::Mutex;
-    use tempfile::TempDir;
-
-    // Serialise every test that touches env vars.
-    // std::env::set_var / remove_var are not thread-safe across parallel tests.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    // ── resolve_venv ──────────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_venv_explicit_valid_dir_returns_path() {
-        let dir = TempDir::new().unwrap();
-        let result = resolve_venv(Some(dir.path()));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), dir.path());
-    }
-
-    #[test]
-    fn resolve_venv_explicit_nonexistent_path_returns_error() {
-        let result = resolve_venv(Some(Path::new("/this/does/not/exist")));
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("does not exist"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn resolve_venv_no_arg_no_env_var_returns_error() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("MISAKI_VENV");
-
-        let result = resolve_venv(None);
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("MISAKI_VENV"),
-            "error should mention MISAKI_VENV, got: {err}"
-        );
-    }
-
-    #[test]
-    fn resolve_venv_env_var_valid_dir_returns_path() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let dir = TempDir::new().unwrap();
-        std::env::set_var("MISAKI_VENV", dir.path());
-
-        let result = resolve_venv(None);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), dir.path());
-
-        std::env::remove_var("MISAKI_VENV");
-    }
-
-    #[test]
-    fn resolve_venv_env_var_nonexistent_dir_returns_error() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        std::env::set_var("MISAKI_VENV", "/no/such/dir");
-
-        let result = resolve_venv(None);
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("non-existent"),
-            "unexpected error: {err}"
-        );
-
-        std::env::remove_var("MISAKI_VENV");
-    }
-
-    // Explicit path takes priority over env var even when both are set.
-    #[test]
-    fn resolve_venv_explicit_overrides_env_var() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let env_dir = TempDir::new().unwrap();
-        let explicit_dir = TempDir::new().unwrap();
-        std::env::set_var("MISAKI_VENV", env_dir.path());
-
-        let result = resolve_venv(Some(explicit_dir.path())).unwrap();
-        assert_eq!(result, explicit_dir.path());
-
-        std::env::remove_var("MISAKI_VENV");
-    }
-
-    // ── find_site_packages ────────────────────────────────────────────────
+    // Unit tests for engine internals are minimal since most behavior
+    // requires a live Python interpreter, which is covered by the
+    // integration tests in tests/integration.rs.
     //
-    // find_site_packages now shells out to the venv's Python binary, so unit
-    // tests can't fake it with a directory structure alone.  Coverage lives in
-    // the integration tests (engine_new_with_env_var_succeeds) where a real
-    // venv is available.  Here we just verify the two error paths that fire
-    // before the subprocess is even attempted.
-
-    #[test]
-    fn find_site_packages_missing_python_binary_returns_error() {
-        let dir = TempDir::new().unwrap(); // no bin/python inside
-        let err = find_site_packages(dir.path()).unwrap_err().to_string();
-        assert!(
-            err.contains("Failed to run venv Python"),
-            "unexpected error: {err}"
-        );
-    }
+    // Run integration tests with:
+    //   source .venv/bin/activate && cargo test --test integration -- --ignored
 }
 
-/// Insert `site_packages` at position 0 of `sys.path` if not already present.
-fn prepend_site_packages(py: Python<'_>, site_packages: &Path) -> Result<(), G2pError> {
-    let sp_str = site_packages.to_string_lossy().to_string();
 
-    let sys = py
-        .import_bound("sys")
-        .map_err(|e| G2pError::PythonInit(format!("import sys: {e}")))?;
-
-    let path_any = sys
-        .getattr("path")
-        .map_err(|e| G2pError::PythonInit(format!("sys.path not found: {e}")))?;
-
-    let path = path_any
-        .downcast::<PyList>()
-        .map_err(|e| G2pError::PythonInit(format!("sys.path not a list: {e}")))?;
-
-    let already_present = path.iter().any(|item| {
-        item.extract::<String>()
-            .map(|s| s == sp_str)
-            .unwrap_or(false)
-    });
-
-    if !already_present {
-        path.insert(0, &sp_str)
-            .map_err(|e| G2pError::PythonInit(format!("sys.path.insert failed: {e}")))?;
-    }
-
-    Ok(())
-}

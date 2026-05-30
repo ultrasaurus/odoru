@@ -8,8 +8,7 @@
 //!   - Raw output values (audio samples + duration tensor)
 //!
 //! Usage:
-//!   export MISAKI_VENV=~/.misaki-g2p/venv
-//!   export PYO3_PYTHON=/opt/homebrew/bin/python3.12
+//!   source .venv/bin/activate
 //!   cargo run --example explore_model
 
 use futures::StreamExt;
@@ -42,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     println!("━━━ Step 1: Phonemize via misaki-g2p ━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("Input: {:?}", TEST_SENTENCE);
 
-    let engine = G2pEngine::new(None).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let engine = G2pEngine::new().map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut stream = engine.phonemize(TEST_SENTENCE);
 
     let mut all_phonemes: Vec<(usize, String, String)> = Vec::new();

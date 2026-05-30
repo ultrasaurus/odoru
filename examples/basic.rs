@@ -12,7 +12,7 @@ async fn main() -> Result<(), G2pError> {
     println!("working...");
 
     // Initialise the engine (venv path from $MISAKI_VENV).
-    let engine = G2pEngine::new(None)?;
+    let engine = G2pEngine::new()?;
 
     // Stream phoneme chunks as sentences finish.
     let mut stream = engine.phonemize(text);

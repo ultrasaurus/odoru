@@ -21,7 +21,7 @@
 //! ```no_run
 //! use ko_odoru::synth::{Synthesizer, SynthConfig};
 //!
-//! let mut synth = Synthesizer::new("/Users/me/.kokoro", None)?;
+//! let mut synth = Synthesizer::new("/Users/me/.kokoro")?;
 //! let result = synth.synthesize("Hello world. How are you?", &SynthConfig::default())?;
 //! result.save_wav("output.wav")?;
 //! for ts in &result.sentences {
@@ -120,7 +120,7 @@ impl Synthesizer {
     ///   Typically `~/.kokoro`.
     /// - `venv_path`: path to the misaki-g2p venv. If `None`, reads
     ///   `$MISAKI_VENV`.
-    pub fn new(model_dir: impl AsRef<Path>, venv_path: Option<&Path>) -> Result<Self> {
+    pub fn new(model_dir: impl AsRef<Path>) -> Result<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();
         let model_path = model_dir.join("model.onnx");
 
@@ -148,7 +148,7 @@ impl Synthesizer {
             .map_err(|e| anyhow::anyhow!("Load model: {e}"))?;
         eprintln!("Model ready.");
 
-        let g2p = G2pEngine::new(venv_path)
+        let g2p = G2pEngine::new()
             .map_err(|e| anyhow::anyhow!("G2P engine init: {e}"))?;
 
         Ok(Self { model_dir, session, g2p })

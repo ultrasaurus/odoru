@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# PyO3: Rust/Python bridge. No auto-initialize — we control when Python starts.
-pyo3 = "0.21"
+# PyO3: Rust/Python bridge. 
+pyo3 = { version = "0.28", features = ["auto-initialize"] }
 
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 hound = "3"

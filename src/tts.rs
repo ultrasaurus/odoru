@@ -123,7 +123,6 @@ pub struct TtsBuilder {
     voice: String,
     speed: f32,
     model_dir: PathBuf,
-    venv_path: Option<PathBuf>,
 }
 
 impl TtsBuilder {
@@ -138,7 +137,6 @@ impl TtsBuilder {
             voice: "am_puck".into(),
             speed: 1.0,
             model_dir,
-            venv_path: None,
         }
     }
 
@@ -160,13 +158,7 @@ impl TtsBuilder {
         self
     }
 
-    /// Override the misaki-g2p venv path (default: `$MISAKI_VENV`).
-    pub fn venv_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.venv_path = Some(path.into());
-        self
-    }
-
-    /// Build the `Tts` engine. Fails early if the model or venv can't be loaded.
+/// Build the `Tts` engine. Fails early if the model or venv can't be loaded.
     pub fn build(self) -> Result<Tts> {
         let model_path = self.model_dir.join("model.onnx");
         if !model_path.exists() {
@@ -193,8 +185,7 @@ impl TtsBuilder {
             .map_err(|e| anyhow::anyhow!("Load model: {e}"))?;
         eprintln!("Model ready.");
 
-        let venv = self.venv_path.as_deref();
-        let g2p = G2pEngine::new(venv)
+        let g2p = G2pEngine::new()
             .map_err(|e| anyhow::anyhow!("G2P engine: {e}"))?;
 
         let vocab = crate::synth::build_vocab(&self.model_dir)?;
@@ -447,8 +438,8 @@ mod tests {
     /// Build a Tts for testing, skipping if env vars aren't set.
     /// Returns None if MISAKI_VENV or KOKORO_MODEL_DIR is unavailable.
     fn try_build_tts() -> Option<Tts> {
-        if std::env::var("MISAKI_VENV").is_err() {
-            eprintln!("Skipping: $MISAKI_VENV not set");
+        if std::env::var("VIRTUAL_ENV").is_err() {
+            eprintln!("Skipping: venv not active (source .venv/bin/activate)");
             return None;
         }
         Some(Tts::builder().build().expect("Tts::build failed"))

@@ -6,9 +6,7 @@
 //! # Running locally
 //!
 //! ```bash
-//! ./setup.sh
-//! export MISAKI_VENV=~/.misaki-g2p/venv
-//! export PYO3_PYTHON=~/.misaki-g2p/venv/bin/python
+//! source .venv/bin/activate
 //!
 //! # Run only integration tests
 //! cargo test --test integration -- --ignored
@@ -33,28 +31,32 @@ async fn collect_ok(engine: &G2pEngine, text: &str) -> Vec<ko_odoru::PhonemeChun
 
 // ── Engine initialisation ──────────────────────────────────────────────────
 
-/// Smoke test: if this fails, all others will too — check your MISAKI_VENV.
+/// Smoke test: if this fails, all others will too — run: source .venv/bin/activate
 #[tokio::test]
 #[ignore]
 async fn engine_new_with_env_var_succeeds() {
-    G2pEngine::new(None).expect(
-        "G2pEngine::new failed — is MISAKI_VENV set and does it contain misaki-en?",
+    G2pEngine::new().expect(
+        "G2pEngine::new failed — is the venv active and misaki[en] installed?",
     );
 }
 
 #[tokio::test]
 #[ignore]
-async fn engine_new_with_explicit_path_succeeds() {
-    let venv = std::env::var("MISAKI_VENV")
-        .expect("MISAKI_VENV must be set to run integration tests");
-    G2pEngine::new(Some(std::path::Path::new(&venv)))
-        .expect("G2pEngine::new failed with explicit path");
+async fn engine_new_with_active_venv_succeeds() {
+    // VIRTUAL_ENV is set automatically when the venv is active
+    let venv = std::env::var("VIRTUAL_ENV")
+        .expect("VIRTUAL_ENV must be set — run: source .venv/bin/activate");
+    assert!(!venv.is_empty());
+    G2pEngine::new().expect("G2pEngine::new failed — is misaki[en] installed in the venv?");
 }
 
 #[tokio::test]
 #[ignore]
-async fn engine_new_with_bad_venv_returns_python_init_error() {
-    let result = G2pEngine::new(Some(std::path::Path::new("/tmp"))); // exists, but no misaki
+async fn engine_new_with_bad_virtual_env_returns_python_init_error() {
+    // Temporarily point VIRTUAL_ENV at a dir with no misaki installed
+    std::env::set_var("VIRTUAL_ENV", "/tmp");
+    let result = G2pEngine::new();
+    std::env::remove_var("VIRTUAL_ENV");
     assert!(
         matches!(result, Err(G2pError::PythonInit(_))),
         "expected PythonInit error, got: {:?}",
@@ -67,7 +69,7 @@ async fn engine_new_with_bad_venv_returns_python_init_error() {
 #[tokio::test]
 #[ignore]
 async fn phonemize_single_sentence_returns_one_chunk() {
-    let engine = G2pEngine::new(None).unwrap();
+    let engine = G2pEngine::new().unwrap();
     let chunks = collect_ok(&engine, "Hello world.").await;
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].index, 0);
@@ -79,7 +81,7 @@ async fn phonemize_single_sentence_returns_one_chunk() {
 #[tokio::test]
 #[ignore]
 async fn phonemize_empty_input_returns_empty_stream() {
-    let engine = G2pEngine::new(None).unwrap();
+    let engine = G2pEngine::new().unwrap();
     let chunks = collect_ok(&engine, "").await;
     assert!(chunks.is_empty());
 }
@@ -87,7 +89,7 @@ async fn phonemize_empty_input_returns_empty_stream() {
 #[tokio::test]
 #[ignore]
 async fn phonemize_whitespace_only_returns_empty_stream() {
-    let engine = G2pEngine::new(None).unwrap();
+    let engine = G2pEngine::new().unwrap();
     let chunks = collect_ok(&engine, "   \n   \n   ").await;
     assert!(chunks.is_empty());
 }
@@ -98,7 +100,7 @@ async fn phonemize_whitespace_only_returns_empty_stream() {
 #[tokio::test]
 #[ignore]
 async fn phonemize_multi_sentence_preserves_order() {
-    let engine = G2pEngine::new(None).unwrap();
+    let engine = G2pEngine::new().unwrap();
     let input = "The cat sat on the mat.\nThe dog ran in the fog.\nThe hen laid an egg.";
 
     let chunks = collect_ok(&engine, input).await;
@@ -116,7 +118,7 @@ async fn phonemize_multi_sentence_preserves_order() {
 #[tokio::test]
 #[ignore]
 async fn phonemize_chunk_indices_are_zero_based_and_contiguous() {
-    let engine = G2pEngine::new(None).unwrap();
+    let engine = G2pEngine::new().unwrap();
     let input = "One.\nTwo.\nThree.\nFour.\nFive.";
 
     let chunks = collect_ok(&engine, input).await;
@@ -146,7 +148,7 @@ async fn phonemize_chunk_indices_are_zero_based_and_contiguous() {
 #[tokio::test]
 #[ignore]
 async fn engine_can_be_reused_across_multiple_phonemize_calls() {
-    let engine = G2pEngine::new(None).unwrap();
+    let engine = G2pEngine::new().unwrap();
 
     for i in 0..5 {
         let text = format!("Call number {i}.");
@@ -163,7 +165,7 @@ async fn engine_shared_via_arc_across_tasks() {
     use std::sync::Arc;
     use tokio::task::JoinSet;
 
-    let engine = Arc::new(G2pEngine::new(None).unwrap());
+    let engine = Arc::new(G2pEngine::new().unwrap());
     let mut set = JoinSet::new();
 
     for i in 0..4 {
