@@ -7,6 +7,13 @@ edition = "2021"
 name = "dl"
 path = "src/main.rs"
 
+
 [dependencies]
+config = { path = "../config" }
+hound = "3"
+tts = { path = "../tts" }
 dl = { path = "../dl" }
 clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+anyhow = "1"
