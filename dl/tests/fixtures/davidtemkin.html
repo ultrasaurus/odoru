@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesa — The view from above</title>
+<meta name="description" content="Mesa: a spatial canvas for your files and media that you and your AI share — a working argument for a hybrid visual-and-conversational interface.">
+<!-- Explicit no-favicon: prevents browser fallback to cached origin icons. -->
+<link rel="icon" href="data:,">
+<meta property="og:title" content="A spatial canvas that you and your AI share">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://davidtemkin.com/about-mesa/">
+<meta property="og:image" content="https://davidtemkin.com/about-mesa/assets/poster.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Mesa — a vintage poster of a mesa landscape, with the wordmark MESA · THE VIEW FROM ABOVE.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="A spatial canvas that you and your AI share">
+<meta name="twitter:image" content="https://davidtemkin.com/about-mesa/assets/poster.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:ital,wght@0,400;0,500;0,700;0,800;1,400;1,700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FBF5E8; --cream:#F2E6D1; --cream-soft:#EADBC0; --cream-deep:#DCC9A9;
+  --ink:#1F1A24; --muted:#6F5F5A; --rule:#C9B5A0;
+  --rust:#B05A3F; --rust-deep:#8B3F2A; --terracotta:#C97250;
+  --plum:#3A2D3F; --lavender:#A593B0; --sage:#8B9173;
+  --font-display:'Libre Franklin', 'Helvetica Neue', Arial, sans-serif; --font-body:'EB Garamond', Georgia, 'Times New Roman', serif; --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;color:var(--ink);background:var(--paper);font-family:var(--font-body);font-weight:500;
+  font-size:21px;line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.masthead{max-width:940px;margin:0 auto;padding:34px 24px 0;text-align:center}
+img.hero{display:block;width:100%;max-width:680px;margin:0 auto 48px;border-radius:6px;box-shadow:0 6px 26px rgba(38,28,46,.16)}
+.wrap{max-width:680px;margin:0 auto;padding:0 24px 120px}
+h1,h2,h3{font-family:var(--font-display);color:var(--ink);line-height:1.1;font-weight:700;letter-spacing:-.01em}
+h1.display{font-size:48px;font-weight:800;letter-spacing:-.015em;margin:.5em 0 .28em;text-align:center}
+.subtitle{font-family:var(--font-body);font-size:23px;font-style:italic;font-weight:500;color:var(--muted);text-align:center;
+  max-width:34ch;margin:0 auto 6px;line-height:1.4}
+.byline{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);text-align:center;margin:1.5em auto 0}
+h2{font-size:31px;letter-spacing:-.01em;margin:2.1em 0 .5em}
+h3{font-size:21px;margin:1.9em 0 .35em}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+p{margin:0 0 1.05em}
+strong{font-weight:600}em{font-style:italic}
+/* principle run-in headings: Franklin at body size reads clearly distinct from the
+   Garamond body (bold Garamond barely does). Scoped to top-level paragraph leads,
+   so inline bold and the blockquote aside keep the serif. */
+.wrap>p.principle>strong{font-family:var(--font-display);font-weight:700;font-size:.95em;letter-spacing:-.005em}
+/* "A note on how this was built." aside: body Garamond (not the big italic pull-quote),
+   Franklin run-in lead, keeping the blockquote left rule. */
+blockquote.aside{font-family:var(--font-body);font-size:21px;font-style:normal;font-weight:500;line-height:1.6;color:var(--ink)}
+blockquote.aside strong{font-family:var(--font-display);font-weight:700;font-size:.95em;letter-spacing:-.005em}
+a{color:var(--rust-deep);text-decoration:none;border-bottom:1px solid var(--cream-deep)}
+a:hover{border-color:var(--rust)}
+hr{border:0;border-top:1px solid var(--rule);margin:2.6em 0}
+blockquote{margin:1.7em 0;padding:.2em 0 .2em 1.25em;border-left:3px solid var(--terracotta);
+  font-family:var(--font-body);font-size:24px;font-style:italic;font-weight:600;line-height:1.35;color:var(--plum)}
+code{font-family:var(--font-mono);font-size:.82em;background:var(--cream-soft);padding:1px 5px;border-radius:3px;color:var(--rust-deep)}
+ul,ol{padding-left:1.3em}li{margin:.25em 0}
+/* shots & media */
+figure{margin:1.8em 0}
+figure.shot img{width:100%;border-radius:6px;display:block;box-shadow:0 4px 20px rgba(38,28,46,.12)}
+figcaption,.trio-cap{font-family:var(--font-mono);font-size:12px;line-height:1.5;letter-spacing:.02em;color:var(--muted);margin-top:9px}
+.trio-cap{margin-top:9px}
+.tag{display:inline-block;background:var(--rust);color:var(--paper);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;padding:2px 7px;border-radius:3px;margin-right:6px;vertical-align:1px}
+.frame{position:relative;aspect-ratio:16/9;border-radius:6px;background:var(--plum) center/cover no-repeat;
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
+.frame::after{content:"";position:absolute;inset:0;background:rgba(38,28,46,.28)}
+.frame.empty{background:var(--cream-soft);border:1.5px dashed var(--cream-deep)}
+.frame.empty::after{background:none}
+.frame .play{position:relative;z-index:1;width:0;height:0;border-style:solid;border-width:15px 0 15px 26px;
+  border-color:transparent transparent transparent #FBF5E8;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35))}
+.frame.empty .play{border-left-color:var(--rust);filter:none;opacity:.7}
+/* ---- mesa-video: shared player (custom controls; reused for every clip on the page).
+   Variants set sizing/aspect (.sidebar small portrait; future variants for hero/etc.). */
+.mesa-video{display:block;margin:1.8em auto}
+.mesa-video .mv-player{position:relative;overflow:hidden;border-radius:14px;line-height:0;background:var(--cream-soft)}
+.mesa-video video{display:block;width:100%;height:auto;cursor:pointer}
+.mesa-video.sidebar{max-width:240px;margin:1.6em auto}
+.mesa-video.big{max-width:680px}
+.mv-play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:64px;height:64px;border-radius:50%;border:0;cursor:pointer;padding:0;
+  background:rgba(38,28,46,.55);display:flex;align-items:center;justify-content:center;
+  transition:opacity .15s ease,background .15s ease}
+.mv-play svg{margin-left:3px}
+.mv-play:hover{background:rgba(38,28,46,.75)}
+.mesa-video[data-playing="true"] .mv-play{opacity:0;pointer-events:none}
+.mv-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;
+  padding:10px 12px;background:linear-gradient(to top,rgba(38,28,46,.6),rgba(38,28,46,0));
+  opacity:0;pointer-events:none;transition:opacity .25s ease}
+.mesa-video.mv-show-bar .mv-bar{opacity:1;pointer-events:auto}
+.mv-scrub{flex:1;height:3px;cursor:pointer;-webkit-appearance:none;appearance:none;
+  background:rgba(251,245,232,.3);border-radius:2px;outline:none;border:0;padding:0;margin:0}
+.mv-scrub::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#FBF5E8;cursor:pointer}
+.mv-scrub::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#FBF5E8;cursor:pointer}
+.mv-toggle,.mv-full{background:transparent;border:0;cursor:pointer;width:26px;height:26px;padding:0;flex:none;
+  display:flex;align-items:center;justify-content:center}
+.mv-icon-pause{display:none}
+.mesa-video[data-playing="true"] .mv-icon-play{display:none}
+.mesa-video[data-playing="true"] .mv-icon-pause{display:inline}
+a.demo{display:block;border:0;margin:1.8em 0}
+a.demo .frame{cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
+a.demo:hover .frame{transform:translateY(-2px);box-shadow:0 10px 30px rgba(38,28,46,.24)}
+.frame .launch{position:relative;z-index:1;font-family:var(--font-display);font-weight:700;font-size:18px;
+  color:var(--paper);background:var(--rust);padding:11px 22px;border-radius:6px;box-shadow:0 3px 12px rgba(0,0,0,.3)}
+a.demo:hover .frame .launch{background:var(--rust-deep)}
+.ph{aspect-ratio:16/9;border:1.5px dashed var(--cream-deep);background:var(--cream-soft);border-radius:6px;
+  display:flex;align-items:center;justify-content:center}
+.diagram .ph{aspect-ratio:21/9}
+.play.diag{border-left-color:var(--sage)}
+.svg-fig{margin:2em 0;text-align:center}
+.svg-fig object{display:inline-block;vertical-align:top}
+.svg-fig figcaption{margin-top:4px;text-align:center}
+.trio{display:flex;gap:16px;align-items:flex-start;margin:2em 0}
+.trio .video,.trio .svg-fig{flex:1;margin:0}
+.trio .svg-fig object{max-width:100%}
+.fn-rule{margin-top:3em}
+.footnotes{font-size:15px;color:var(--muted);padding-left:1.2em}
+.fnref a{border:0;color:var(--rust);font-weight:600}
+.fnback{border:0;margin-left:4px}
+@media print{
+  body{font-size:12pt}
+  .masthead{padding-top:0}
+  figure,blockquote,h2,h3{break-inside:avoid}h2,h3{break-after:avoid}
+}
+@media (max-width:680px){
+  h1.display{font-size:32px}h2{font-size:24px}body{font-size:18px}
+  .trio{flex-direction:column}
+}
+/* ---- warm dark mode ---- the same palette family at dusk:
+   deep plum-charcoal page, cream foreground, accents lifted for contrast.
+   Auto-switches when the OS pref flips (no JS). */
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#1F1820; --cream:#2A2128; --cream-soft:#322832; --cream-deep:#443A45;
+    --ink:#F2E6D1; --muted:#B4A496; --rule:#443A45;
+    --rust:#D27954; --rust-deep:#D27954; --terracotta:#D38770;
+    --plum:#C7B5D0; --lavender:#A593B0; --sage:#9CAE85;
+  }
+  img.hero{box-shadow:0 6px 26px rgba(0,0,0,.55)}
+  figure.shot img{box-shadow:0 4px 20px rgba(0,0,0,.45)}
+  .frame::after{background:rgba(0,0,0,.42)}
+  a.demo:hover .frame{box-shadow:0 10px 30px rgba(0,0,0,.55)}
+}
+</style>
+</head><body>
+<header class="masthead">
+<h1 class="sr-only">Mesa</h1>
+<img class="hero" src="assets/poster.jpg" alt="Mesa — The view from above">
+</header>
+<main class="wrap">
+
+
+<h1 class="display">Zoom out and find your bearings.</h1>
+<p class="subtitle">A spatial canvas for your files and media — where everything has a place, where you and your AI work from the same view.</p>
+<p class="byline">By David Temkin&nbsp;·&nbsp;May 2026</p>
+<hr>
+<h2>Computing got visual. Then it stopped.</h2>
+<p><em>In the beginning was the command line.</em><sup class="fnref"><a id="fnref1" href="#fn1">1</a></sup> Computing started out textual and conversational: you typed something, the machine typed back. Turn-taking.</p>
+<p>Over the next half-century, computing grew steadily more visual. Command lines gave way to graphical interfaces — the mouse, the window, the desktop. Then the web; then the iPhone. Then social feeds that even an infant can navigate; then VR. Each step toward something more visual, more interactive, more direct — the 1980s even coined a term for the idea: <em>direct manipulation.</em> You don’t tell the system what you want; you do it, by acting on the thing itself.</p>
+<figure class="svg-fig wide"><object type="image/svg+xml" data="assets/diagrams/timeline.svg" style="width:100%;max-width:740px;aspect-ratio:820/200;height:auto"></object></figure>
+<p>And then AI arrived, and the industry reversed course. The most consequential new interfaces are textual and conversational again. It’s telling that Claude Code — a tool that changed how software gets written — shipped as a literal command-line tool: half a century of evolution toward the visual, and today’s frontier is once again a terminal with a blinking cursor.</p>
+<p>But the conversational interface isn’t an endpoint. Seeing and conversing are different modes, and human <em>spatial</em> perception is not something AI obsoletes. Nobody is going to replace their iPhone with a voice assistant, however good the assistant gets — not because the technology isn’t ready, but because <em>seeing where things are</em> is one of the things people do best, often better than reading, describing, or remembering names.</p>
+<p>So the next interface won’t choose between them — it will be both at once. That’s what Mesa is. The visual context is the AI context; what you’re looking at is what the agent sees. Ask about a document in front of you and the agent already has it; point at something and tell it what to do with it — summarize it, research it, rearrange by importance. It’s what you’re reaching for when you drag files into ChatGPT, Claude, or NotebookLM — except in Mesa the files are already in their place. And the agent, in turn, does what you can’t do by hand: curating and arranging at a scale a person can’t match. There is more information to manage per person than ever, with less structure than ever, because AI is now generating it. What’s missing is the shared place where you and the agent can both see what you have and act on it together.</p>
+<blockquote>
+<p><em>The visual and the conversational aren’t rivals. The next interface needs both — a space you can see, and an agent you can talk to.</em></p>
+</blockquote>
+<hr>
+<h2>Files have lost their place.</h2>
+<p>An interface, in the end, is how you work with data — and files are the oldest, most stubborn way we store it. Which makes it strange that this is the corner of computing that has barely budged.</p>
+<p>How we keep files hasn’t really changed since 1984. Folders contain files. Files have names. You navigate by clicking through a hierarchy, reading names, and hoping you remember what’s inside. The structure holds your stuff, but it loses your thinking. The most ordinary task in computing — keeping things and finding them again — has stood still while everything around it was reinvented several times over.</p>
+<figure class="shot"><img src="assets/system1.webp" alt="Macintosh System Software, 1984"><figcaption><span class="tag">1984</span> MACINTOSH SYSTEM SOFTWARE, 1984.</figcaption></figure>
+<p>And the problem has quietly gotten worse. Most of us now keep things across four or five cloud services that don’t know about each other. We make far more than we used to — drafts, screenshots, AI-generated images, voice memos, PDFs we never finished. The names get less helpful as the volume climbs; the folders get less meaningful as everything scatters across them. At some point a lot of us just give up — no organization at all, leaning on an ever-less-effective search to turn up the one thing we’re after.</p>
+<p>I built Mesa because the difficulty of simply seeing my own work had stopped feeling like a personal annoyance and started feeling like a real gap — between how much we now keep and how little the tools for keeping it have changed. It’s an attempt to advance the visual, spatial side of computing — to give files a place again, and to do it in the age of AI, with an AI agent as a first-class participant in a visual environment rather than the replacement for one.</p>
+<hr>
+<h2>The canvas</h2>
+<p>Mesa is a spatial canvas for information — for anything you can see and interact with: media, widgets, notes, bookmarks. Files appear as themselves — thumbnails, previews, contents — at whatever level of detail the current zoom affords. Folders are replaced by <strong>frames</strong>: bounded, named regions you can nest, color, and arrange. You navigate by zooming. Position carries meaning: what’s next to what, what’s grouped with what, what you’ve put first.</p>
+<figure class="mesa-video big"><div class="mv-player"><video src="assets/video/hero.mp4" poster="assets/video/hero.jpg" style="aspect-ratio:1280/700" playsinline preload="metadata" muted></video><button class="mv-play" aria-label="Play"><svg viewBox="0 0 24 24" width="28" height="28" fill="#FBF5E8"><polygon points="6,4 20,12 6,20"/></svg></button><div class="mv-bar"><button class="mv-toggle" aria-label="Play/pause"><svg class="mv-icon-play" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><polygon points="3,2 14,8 3,14"/></svg><svg class="mv-icon-pause" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><rect x="3" y="2" width="3.5" height="12"/><rect x="9.5" y="2" width="3.5" height="12"/></svg></button><input type="range" class="mv-scrub" min="0" max="0" step="0.01" value="0" aria-label="Seek"><button class="mv-full" aria-label="Fullscreen"><svg viewBox="0 0 16 16" width="14" height="14" stroke="#FBF5E8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,5.5 2.5,2.5 5.5,2.5"/><polyline points="10.5,2.5 13.5,2.5 13.5,5.5"/><polyline points="13.5,10.5 13.5,13.5 10.5,13.5"/><polyline points="5.5,13.5 2.5,13.5 2.5,10.5"/></svg></button></div></div><figcaption><span class="tag">Video</span> A tour of the canvas: navigate, open a file, scroll, play a video, edit, zoom back out.</figcaption></figure>
+<p>You don’t open a file in a new tab, or a separate application. It opens where it lives, at the spot you found it. A PDF renders inline, page by page. A text file can be edited on the spot. A video plays in place. An audio file shows its waveform. Click outside and the canvas comes back. Mesa keeps you oriented by erasing the line between the icon you see and the “real,” opened file — they’re the same thing.</p>
+<p>You can connect Mesa to your Google Drive, and it turns your folder hierarchy into a navigable, zoomable space you can take in at a glance. You can also upload directly, from your computer or your phone. Nothing moves from where it lives — Mesa is just where you — and your AI agent — arrange and work with it.</p>
+<figure class="mesa-video big"><div class="mv-player"><video src="assets/video/reorganize.mp4" poster="assets/video/reorganize.jpg" style="aspect-ratio:1908/1540" playsinline preload="metadata" muted></video><button class="mv-play" aria-label="Play"><svg viewBox="0 0 24 24" width="28" height="28" fill="#FBF5E8"><polygon points="6,4 20,12 6,20"/></svg></button><div class="mv-bar"><button class="mv-toggle" aria-label="Play/pause"><svg class="mv-icon-play" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><polygon points="3,2 14,8 3,14"/></svg><svg class="mv-icon-pause" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><rect x="3" y="2" width="3.5" height="12"/><rect x="9.5" y="2" width="3.5" height="12"/></svg></button><input type="range" class="mv-scrub" min="0" max="0" step="0.01" value="0" aria-label="Seek"><button class="mv-full" aria-label="Fullscreen"><svg viewBox="0 0 16 16" width="14" height="14" stroke="#FBF5E8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,5.5 2.5,2.5 5.5,2.5"/><polyline points="10.5,2.5 13.5,2.5 13.5,5.5"/><polyline points="13.5,10.5 13.5,13.5 10.5,13.5"/><polyline points="5.5,13.5 2.5,13.5 2.5,10.5"/></svg></button></div></div><figcaption><span class="tag">Video</span> Reorganize a frame’s contents by file type; undo puts everything back where it was.</figcaption></figure>
+<p>The canvas isn’t only for files. The same render pipeline, the same coordinate space, the same gestures can host anything that draws and takes input — a live data widget, a small game, a terminal session — placed where you put it, beside everything else.</p>
+<div class="trio"><figure class="svg-fig"><object type="image/svg+xml" data="assets/diagrams/widget-game.svg" style="width:100%;max-width:400px;aspect-ratio:400/300;height:auto"></object><figcaption>A game</figcaption></figure><figure class="svg-fig"><object type="image/svg+xml" data="assets/diagrams/widget-ticker.svg" style="width:100%;max-width:400px;aspect-ratio:400/300;height:auto"></object><figcaption>Live data</figcaption></figure><figure class="svg-fig"><object type="image/svg+xml" data="assets/diagrams/widget-terminal.svg" style="width:100%;max-width:400px;aspect-ratio:400/300;height:auto"></object><figcaption>A terminal</figcaption></figure></div>
+<hr>
+<h2>A few principles.</h2>
+<p class="principle"><strong>Visibility is the default, not a view mode.</strong> Most file managers hide contents behind names and offer “preview” as a feature. Mesa inverts it: you always see contents, and the name is visible but secondary. You stop searching by name and start recognizing things on sight.</p>
+<p class="principle"><strong>Zoom is the primary verb.</strong> Not pan-with-some-zoom, not a slider on a flat layout. Open a file: zoom. See the overview: zoom out. Move between frames: zoom. Commit to that as the central gesture and the rest of the interaction model falls out of it.</p>
+<p class="principle"><strong>Place carries meaning.</strong> Where you put something is a form of organization. Mesa treats spatial arrangement as a first-class property — what’s near what, what’s grouped, what sits at the top of a frame.</p>
+<p class="principle"><strong>The thumbnail is the document.</strong> Ordinary computing splits the world in two: files (data) and applications (programs that open them); you launch one to deal with the other. Mesa has no application to open into and nowhere else to send you — the thumbnail you see <em>is</em> the document, rendered and alive, and it opens right where it sits: no modal, no new tab, no split pane. And the document needn’t be a file at all; the same surface hosts a widget, a game, or a terminal.</p>
+<p class="principle"><strong>The AI sees what you see.</strong> The agent shares your view of the canvas. What’s on screen is its context; it can look at and act on the surface exactly as you do — no uploading, no describing, no separate “AI mode.” You and the agent are working on the same thing, at the same time.</p>
+<p class="principle"><strong>Arrangement is separate from content.</strong> Your things aren’t trapped in a single folder hierarchy. In Mesa, the same item can sit in several places at once, and any given arrangement is a cheap, disposable view over a shared pool — spin one up for a project, throw it away when you’re done, and nothing is copied or moved.</p>
+<p class="principle"><strong>Everything is reversible.</strong> Any change, from any source, at any scale, can be undone. It’s what makes handing the canvas to an agent safe (more on that below).</p>
+<hr>
+<h2>Try it</h2>
+<h3>This is the actual product, not a video.</h3>
+<p><em>No account. Nothing saved. Pan, zoom, click into files. Works on touch and trackpad — opens in a new tab.</em></p>
+<p>The public demo is the canvas itself — fully interactive, with a set of sample files to roam. The agent isn’t part of it; that runs in the account version, which I’m sharing selectively for now. You can see the agent at work in the videos here, or <a href="mailto:temkin+web@gmail.com">email me</a> for access.</p>
+<a class="demo" href="/mesa/" target="_blank" rel="noopener"><div class="frame" style="background-image:url(assets/screen.jpg)"><span class="launch">Open the live demo&nbsp;↗</span></div></a>
+<hr>
+<h2>How it works</h2>
+<blockquote class="aside">
+<p class="aside-lead"><strong>A note on how this was built.</strong> Mesa is a four-month solo project, built with modern AI coding tools. Is it “vibe coded”? I’d call it vibe <em>engineered</em>. AI wrote the code; the judgment behind it was mine — the architecture, the interaction design, and the granular calls about what to build, how to structure it, where to spend the effort, and which defaults to throw out. It comes to over 100,000 lines of TypeScript — roughly 40,000 in the client and 32,000 in the server, with the rest split between build tooling and an end-to-end test suite that runs against a real Postgres database and container, not mocks. The whole thing runs in production on a Google Cloud VM that costs about $30 a month. What follows is a tour of the decisions.</p>
+</blockquote>
+<p>The short version, if this isn’t your thing: Mesa turned into a sort of browser-in-a-browser — its own layout and rendering, hit-testing, scroll physics, and zoom — because the browser’s defaults didn’t fit. Skip ahead if you’d like.</p>
+<h3>It isn’t built like a web page.</h3>
+<p>Start with the most consequential decision: Mesa isn’t built around the browser’s document model. A normal web app composes HTML elements and lets the browser lay them out, style them, and scroll them. Mesa doesn’t — it draws pixels to a single canvas, the way a game engine or a native app does. There aren’t thousands of DOM nodes for the browser to manage; instead, there’s a scene that Mesa lays out and renders itself. That one choice is why it can feel like an application instead of a document — and it’s what makes everything below both possible and necessary, because once you opt out of the browser’s document-oriented machinery, you have to build your own.</p>
+<h3>Why it feels native.</h3>
+<p>It was essential never to break the illusion of a space you can move through freely, without interruption or pause. Any rich graphical interface is a projected illusion, and the more visual it gets, the harder that illusion is to sustain: a dropped frame, a tenth-of-a-second stall, any gap in continuity, and it shatters. An iPhone that lagged behind your finger, or stuttered as you swiped, would feel like an entirely different — and far less compelling — product. So 60 fps was a hard floor, even with a thousand objects in a scene that can take longer than a single frame to draw.</p>
+<p>Mesa runs the canvas across two threads, and the rule is absolute: the thread that listens to your fingers is never the thread that draws pixels. They pass buffers back and forth; they never share state. When you pan or pinch, the input thread responds immediately — it shifts the existing bitmap with a CSS transform while the other thread renders the next frame. By the time that frame arrives your fingers have moved, so the input thread re-stitches it with a fresh transform.</p>
+<figure class="svg-fig"><object type="image/svg+xml" data="assets/diagrams/fig-threads.svg" style="width:100%;max-width:600px;aspect-ratio:600/280;height:auto"></object></figure>
+<p>So 60 fps isn’t a benchmark Mesa hits; it’s a property of the architecture — input handling is structurally not allowed to block on rendering. The pinch isn’t waiting for the canvas; the canvas is catching up to the pinch.</p>
+<h3>Getting the touch physics right</h3>
+<p>“Native feel” isn’t only frame rate — it’s the physics of touchscreen interaction: how a flick decelerates, how a pinch resists at the limits, how a view springs back when you overshoot. Because Mesa runs its own canvas rather than the browser’s, it has to supply that physics itself. There are JavaScript libraries that can fill this gap, but they’re crude; an app built on this foundation would feel “off” to even a casual user. So rather than tune them by eye, I built a small SwiftUI app that captured a real iPhone’s scroll-view state at 60 Hz, then used an AI agent to fit deceleration, rubber-banding, and spring models to the recordings. Mesa’s touch physics come straight out of that fit. That’s what was needed to make Mesa truly feel at home on an iPhone.</p>
+<figure class="mesa-video sidebar"><div class="mv-player"><video src="assets/video/touch-physics.mp4" poster="assets/video/touch-physics.jpg" style="aspect-ratio:1180/2556" playsinline preload="metadata" muted></video><button class="mv-play" aria-label="Play"><svg viewBox="0 0 24 24" width="28" height="28" fill="#FBF5E8"><polygon points="6,4 20,12 6,20"/></svg></button><div class="mv-bar"><button class="mv-toggle" aria-label="Play/pause"><svg class="mv-icon-play" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><polygon points="3,2 14,8 3,14"/></svg><svg class="mv-icon-pause" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><rect x="3" y="2" width="3.5" height="12"/><rect x="9.5" y="2" width="3.5" height="12"/></svg></button><input type="range" class="mv-scrub" min="0" max="0" step="0.01" value="0" aria-label="Seek"><button class="mv-full" aria-label="Fullscreen"><svg viewBox="0 0 16 16" width="14" height="14" stroke="#FBF5E8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,5.5 2.5,2.5 5.5,2.5"/><polyline points="10.5,2.5 13.5,2.5 13.5,5.5"/><polyline points="13.5,10.5 13.5,13.5 10.5,13.5"/><polyline points="5.5,13.5 2.5,13.5 2.5,10.5"/></svg></button></div></div></figure>
+<h3>Always show something, instantly.</h3>
+<p>When a file is only a few pixels wide, the right thing to draw isn’t a full-resolution thumbnail you’ve spent 200 milliseconds fetching — it’s something approximately right that’s already there. Mesa keeps an 8×8 color blob — about 200 bytes — inline in the data for every file, so the roughest version of anything needs no image to fetch at all. As you zoom in, it swaps in the smallest stored thumbnail that’s still big enough for your current zoom.</p>
+<figure class="svg-fig"><object type="image/svg+xml" data="assets/diagrams/fig-tiers.svg" style="width:100%;max-width:600px;aspect-ratio:600/200;height:auto"></object></figure>
+<p>The effect is that you never stare at an empty rectangle. Something is always there, at the right detail for what you’re doing, with sharper versions fading in as they arrive.</p>
+<h3>In the end was the command line.</h3>
+<p>I wanted Mesa to have an AI agent that could operate on the canvas — rearrange things, make frames, sort items, research and bring in new content, follow instructions in plain language. The standard way to do this is to let the model call functions inside your app: you hand it a set of operations, describe each one, and hope it picks the right ones for the task. I built that first, and the agent just wasn’t very good — it fumbled the calls, misread results, and couldn’t recover from its own mistakes. And no fixed set of functions ever covered the open-ended things people actually ask for.</p>
+<p>Then came a better idea, obvious in hindsight: LLMs already speak Unix. Every model has been pretrained on enormous amounts of shell commands — <code>cat</code>, <code>grep</code>, <code>find</code>, <code>mv</code>, <code>rm</code>, <code>sed</code>, <code>xargs</code>, <code>awk</code> — typed by millions of people over decades and preserved in reams of documentation and code. Handing it a bespoke set of functions asks it to ignore the deepest body of file-manipulation knowledge it has, in favor of a small, custom vocabulary whose pieces don’t combine into anything larger.</p>
+<p>So Mesa presents the canvas to the agent as a real filesystem — frames are directories, files are files — even though underneath it’s Postgres and cloud storage, not files on a disk. The agent gets a shell, the standard Unix tools, and a handful of Mesa-specific commands that follow the same conventions (they even have their own <code>man(1)</code> pages). It can compose and pipe them, and write a script when a task calls for one.</p>
+<figure class="svg-fig"><object type="image/svg+xml" data="assets/diagrams/fig-agent.svg" style="width:100%;max-width:600px;aspect-ratio:600/380;height:auto"></object></figure>
+<p>The agent runs in its own container, and a FUSE layer maps ordinary file operations onto canvas mutations. <code>mv drafts/budget.pdf review/</code> moves the file on the canvas; <code>grep -r invoice .</code> returns matches. Each command is one Mesa “turn,” captured and committed atomically — one Cmd-Z away.</p>
+<p>And here’s the critical part: it’s safe. Anything the agent does, at any scale, can be undone — anything at all. That matters, because the alternative is an agent that asks your permission before every risky step, and that leads one of two places: you get tired and start rubber-stamping until it burns you, or you never trust it enough to get the value out of it.</p>
+<p>Under the hood, every change in Mesa — a user gesture, an agent command, a background import, all of it — is recorded as a list of invertible primitive operations. There are ten of them, and each one carries the data needed to reverse itself. The applier is mechanically symmetric: walk the list forward to apply, inverted to undo. There’s no per-feature undo logic anywhere; there’s just the list.</p>
+<blockquote>
+<p><em>The agent can run <code>rm -rf *</code> — and Cmd-Z brings everything back.</em></p>
+</blockquote>
+<figure class="mesa-video big"><div class="mv-player"><video src="assets/video/rm-undo.mp4" poster="assets/video/rm-undo.jpg" style="aspect-ratio:1908/1540" playsinline preload="metadata" muted></video><button class="mv-play" aria-label="Play"><svg viewBox="0 0 24 24" width="28" height="28" fill="#FBF5E8"><polygon points="6,4 20,12 6,20"/></svg></button><div class="mv-bar"><button class="mv-toggle" aria-label="Play/pause"><svg class="mv-icon-play" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><polygon points="3,2 14,8 3,14"/></svg><svg class="mv-icon-pause" viewBox="0 0 16 16" width="13" height="13" fill="#FBF5E8"><rect x="3" y="2" width="3.5" height="12"/><rect x="9.5" y="2" width="3.5" height="12"/></svg></button><input type="range" class="mv-scrub" min="0" max="0" step="0.01" value="0" aria-label="Seek"><button class="mv-full" aria-label="Fullscreen"><svg viewBox="0 0 16 16" width="14" height="14" stroke="#FBF5E8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5,5.5 2.5,2.5 5.5,2.5"/><polyline points="10.5,2.5 13.5,2.5 13.5,5.5"/><polyline points="13.5,10.5 13.5,13.5 10.5,13.5"/><polyline points="5.5,13.5 2.5,13.5 2.5,10.5"/></svg></button></div></div><figcaption><span class="tag">Video</span> <code>rm -rf *</code> inside a frame, then again on the whole canvas — undo brings everything back.</figcaption></figure>
+<p>The agent still has to be careful, of course. But it can afford to be more useful, precisely because the floor under it is solid.</p>
+<hr>
+<h2>How I got here.</h2>
+<p>I worked on a pre-web hypertext system at Brown in the late 1980s called Intermedia: spatial information, visual-first browsing, and the idea that the <em>arrangement</em> of things is separate from their content. Some of what’s in Mesa is recognizably descended from that work, four decades later, by way of nearly every job since.</p>
+<p>I joined the original Newton team at Apple in 1992 — Apple’s first mobile device, and one of the first gesture-driven interfaces. Later I founded Laszlo Systems, building rich web applications back when the web was mostly static pages loaded one at a time. At AOL I shipped Alto Mail, a swing at visual innovation in a stale category. At Brave I helped rethink what a user-respecting browser could be; at Google, what privacy-respecting advertising might look like. More recently I co-founded Trainspot, working on data and AI infrastructure.</p>
+<p>Each taught me something about the same problem I keep circling: how the things we make and keep should relate to one another, and how the tools we use to work with them keep getting in the way. Mesa is the thing those projects kept circling — the one I finally built.</p>
+<hr>
+<h2>What’s next?</h2>
+<p>Mesa sits somewhere between a prototype and a production app — a concept car: it runs, it’s rough at the edges, and it’s definitely not built for mass production. Right now it’s an argument, made in working code, for what a hybrid interaction model can look like.</p>
+<p>There are a number of directions it could go: a focused app for a field where visual, spatial browsing is central — for photographers, say, or architects; a surface inside a larger platform that would benefit from this hybrid way of working; or a product that layers over the file, photo, and note apps people already use. We’ll see.</p>
+<p>I’d like to hear what you think — whether you want to try it with your own files, talk about it, extend it, or build on it inside your own work. You can reach me at <a href="mailto:temkin+web@gmail.com">temkin+web@gmail.com</a>.</p>
+<hr>
+<p><em>Higher ground for everything you keep.</em></p>
+<p>David Temkin works where new computing platforms meet their users — in product, design, and engineering. Mesa is his latest project. Previously: co-founder of Trainspot, Cola, and Laszlo Systems; product leadership at Google, Brave, AOL, and Palm; engineering on Newton at Apple and on Intermedia at Brown.</p>
+<p><a href="https://davidtemkin.com">davidtemkin.com</a> · <a href="https://www.linkedin.com/in/davidtemkin/">LinkedIn</a> · <a href="mailto:temkin+web@gmail.com">Contact</a></p>
+
+<hr class="fn-rule">
+<ol class="footnotes"><li id="fn1">Neal Stephenson, <em>In the Beginning Was the Command Line</em> (1999). <a class="fnback" href="#fnref1">↩</a></li></ol>
+</main>
+<script>
+(() => {
+  // Custom video controls for every .mesa-video on the page — minimal vanilla JS,
+  // no native <video controls> (so iOS doesn't draw its full-screen control overlay).
+  document.querySelectorAll('.mesa-video').forEach(fig => {
+    const v       = fig.querySelector('video');
+    const playBtn = fig.querySelector('.mv-play');
+    const fullBtn = fig.querySelector('.mv-full');
+    const scrub   = fig.querySelector('.mv-scrub');
+    if (!v) return;
+    fig.dataset.playing = 'false';
+    let timer;
+    const showBar = () => {
+      fig.classList.add('mv-show-bar');
+      clearTimeout(timer);
+      if (!v.paused) timer = setTimeout(() => fig.classList.remove('mv-show-bar'), 2500);
+    };
+    v.addEventListener('click', () => v.paused ? v.play() : v.pause());
+    v.addEventListener('play',  () => { fig.dataset.playing = 'true';  showBar(); });
+    v.addEventListener('pause', () => { fig.dataset.playing = 'false'; fig.classList.remove('mv-show-bar'); });
+    v.addEventListener('ended', () => { fig.dataset.playing = 'false'; });
+    v.addEventListener('mousemove',  showBar);
+    v.addEventListener('touchstart', showBar);
+    if (playBtn) playBtn.addEventListener('click', e => { e.stopPropagation(); v.play(); });
+    const toggleBtn = fig.querySelector('.mv-toggle');
+    if (toggleBtn) toggleBtn.addEventListener('click', e => { e.stopPropagation(); v.paused ? v.play() : v.pause(); });
+    if (scrub) {
+      v.addEventListener('loadedmetadata', () => { scrub.max = v.duration; });
+      v.addEventListener('timeupdate',     () => { if (!scrub.matches(':active')) scrub.value = v.currentTime; });
+      scrub.addEventListener('input',      () => { v.currentTime = +scrub.value; });
+    }
+    if (fullBtn) fullBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const inFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (inFs) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else if (v.webkitEnterFullscreen) {        // iOS Safari native full-screen player
+        v.webkitEnterFullscreen();
+      } else if (fig.requestFullscreen) {
+        fig.requestFullscreen();
+      } else if (fig.webkitRequestFullscreen) {
+        fig.webkitRequestFullscreen();
+      }
+    });
+  });
+})();
+</script>
+</body></html>

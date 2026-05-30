@@ -1,44 +1,22 @@
 [package]
-name = "ko-odoru"
+name = "tts"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# PyO3: Rust/Python bridge. 
 pyo3 = { version = "0.28", features = ["auto-initialize"] }
-
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 hound = "3"
 serde_json = "1"
-
-# Async runtime and channel primitives
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 async-stream = "0.3"
-
-# Ergonomic error types via derive macros
 thiserror = "1"
 anyhow = "1"
-
-# Sentence splitting (used in splitter.rs, wired up next)
 unicode-segmentation = "1"
-serde = { version = "1.0", features = ["derive"]}
-
-# caching
-dashmap = "6"
-sha2 = "0.10"
-
-# server
-axum = { version = "0.7", features = ["ws"] }
-tower-http = { version = "0.5", features = ["fs", "cors"] }
-base64 = "0.22"
-
-[[bin]]
-name = "server"
-path = "src/bin/server.rs"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
-# Used in tests to create throwaway venv directory structures on disk.
 tempfile = "3"
 
 [[example]]
@@ -52,5 +30,3 @@ path = "examples/explore_model.rs"
 [[example]]
 name = "synthesize"
 path = "examples/synthesize.rs"
-
-
