@@ -246,7 +246,7 @@ async fn main() -> anyhow::Result<()> {
         cache: Arc::new(DashMap::new()),
     });
 
-    let frontend_dir = ["frontend/dist", "../frontend/dist"]
+    let frontend_dir = ["app/frontend/dist","frontend/dist", "../frontend/dist"]
         .iter()
         .map(std::path::PathBuf::from)
         .find(|p| p.exists());
