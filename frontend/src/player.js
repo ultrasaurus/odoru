@@ -95,7 +95,7 @@ export class Player {
                 const startTime = prev ? prev.endTime : 0;
                 const endTime = startTime + duration;
                 this.queue.enqueue(samples);
-                this.segments.push({ transcript: msg.transcript, startTime, endTime, samples });
+                this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end });
                 this.renderSegment(msg.transcript, this.segments.length - 1);
                 if (this.segments.length === 1)
                     this.onReadyCb?.();
@@ -170,7 +170,14 @@ export class Player {
             this.startTracking();
         });
         this.container.appendChild(span);
-        if (index < this.segments.length - 1 || transcript.text.endsWith('.')) {
+        const seg = this.segments[index];
+        if (seg?.paragraphEnd) {
+            // Paragraph break — add a block-level spacer
+            const br = document.createElement('div');
+            br.className = 'paragraph-break';
+            this.container.appendChild(br);
+        }
+        else {
             this.container.appendChild(document.createTextNode(' '));
         }
         this.segmentEls.push(span);

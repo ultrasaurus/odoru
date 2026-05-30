@@ -278,3 +278,9 @@ html, body {
   color: var(--text-dim);
   padding: 1rem 0;
 }
+
+/* Paragraph break between sentence groups */
+.paragraph-break {
+  display: block;
+  height: 1em;
+}

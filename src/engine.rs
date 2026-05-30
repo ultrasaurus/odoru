@@ -115,7 +115,10 @@ impl G2pEngine {
 
         // Sentence splitting lives in splitter.rs — wired up in the next step.
         // For now, a line-based stub so the bridge is testable end-to-end.
-        let sentences: Vec<String> = crate::splitter::split(&text);
+        let sentences: Vec<String> = crate::splitter::split(&text)
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
 
         // Build one future per sentence and collect into a FuturesOrdered so
         // results always emerge in sentence order regardless of processing time.

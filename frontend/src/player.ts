@@ -4,6 +4,8 @@ interface SegmentMsg {
   index: number
   transcript: Segment
   audio: string // base64 f32le PCM @ 24000 Hz
+  cached: boolean
+  paragraph_end: boolean
 }
 
 interface DoneMsg {
@@ -86,6 +88,7 @@ export class Player {
     startTime: number
     endTime: number
     samples: Float32Array<ArrayBuffer>
+    paragraphEnd: boolean
   }> = []
   private segmentEls: HTMLElement[] = []
   private activeIndex = -1
@@ -137,7 +140,7 @@ export class Player {
         const endTime = startTime + duration
 
         this.queue.enqueue(samples)
-        this.segments.push({ transcript: msg.transcript, startTime, endTime, samples })
+        this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end })
         this.renderSegment(msg.transcript, this.segments.length - 1)
 
         if (this.segments.length === 1) this.onReadyCb?.()
@@ -227,7 +230,13 @@ export class Player {
     })
 
     this.container.appendChild(span)
-    if (index < this.segments.length - 1 || transcript.text.endsWith('.')) {
+    const seg = this.segments[index]
+    if (seg?.paragraphEnd) {
+      // Paragraph break — add a block-level spacer
+      const br = document.createElement('div')
+      br.className = 'paragraph-break'
+      this.container.appendChild(br)
+    } else {
       this.container.appendChild(document.createTextNode(' '))
     }
     this.segmentEls.push(span)

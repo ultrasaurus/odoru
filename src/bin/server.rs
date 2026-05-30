@@ -44,6 +44,7 @@ struct CachedSegment {
     transcript_start: f64,
     transcript_end: f64,
     transcript_text: String,
+    paragraph_end: bool,
     /// Pre-encoded base64 f32le PCM — ready to send directly.
     audio_b64: String,
 }
@@ -58,6 +59,7 @@ impl CachedSegment {
             transcript_start: seg.transcript.start,
             transcript_end: seg.transcript.end,
             transcript_text: seg.transcript.text.clone(),
+            paragraph_end: seg.paragraph_end,
             audio_b64: B64.encode(&bytes),
         }
     }
@@ -108,6 +110,7 @@ struct SegmentMsg<'a> {
     transcript: TranscriptJson<'a>,
     audio: &'a str,
     cached: bool,
+    paragraph_end: bool,
 }
 
 #[derive(Serialize)]
@@ -147,6 +150,7 @@ async fn send_segment(
         },
         audio: &seg.audio_b64,
         cached,
+        paragraph_end: seg.paragraph_end,
     };
     let json = serde_json::to_string(&msg).unwrap();
     sender.send(Message::Text(json.into())).await.is_ok()

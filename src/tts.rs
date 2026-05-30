@@ -48,9 +48,11 @@ pub struct AudioSegment {
     pub samples: Vec<f32>,
     /// Always 24000.
     pub sample_rate: u32,
-    /// Sentence text and timing. `words` is empty until word-level alignment
-    /// is implemented — see `single_segment_start_end_match_words` test.
+    /// Sentence text and timing.
     pub transcript: Segment,
+    /// True if this is the last sentence in its paragraph.
+    /// Use to add visual spacing in the UI or longer audio gaps.
+    pub paragraph_end: bool,
 }
 
 impl AudioSegment {
@@ -265,10 +267,13 @@ pub struct TtsStream {
 impl TtsStream {
     fn new(text: String, inner: Arc<Mutex<TtsInner>>, config: Arc<TtsConfig>) -> Self {
         let stream = async_stream::try_stream! {
+            // Split into sentences with paragraph boundary info
+            let sentences = crate::splitter::split(&text);
+
             // Phonemize all sentences up front
             let phoneme_chunks = {
                 let guard = inner.lock().await;
-                    let mut stream = guard.g2p.phonemize(&text);
+                let mut stream = guard.g2p.phonemize(&text);
                 let mut chunks: Vec<(String, String)> = Vec::new();
                 while let Some(result) = stream.next().await {
                     match result {
@@ -284,8 +289,12 @@ impl TtsStream {
             }
 
             let mut time_offset = 0.0f32;
-            let silence_samples = 2400usize; // 100ms @ 24kHz
-            let silence_secs = silence_samples as f32 / 24_000.0;
+            // Silence between sentences within a paragraph
+            let sentence_silence_samples = 2400usize; // 100ms @ 24kHz
+            let sentence_silence_secs = sentence_silence_samples as f32 / 24_000.0;
+            // Silence after a paragraph break
+            let paragraph_silence_samples = 12000usize; // 500ms @ 24kHz
+            let paragraph_silence_secs = paragraph_silence_samples as f32 / 24_000.0;
 
             for (i, (sentence, phonemes)) in phoneme_chunks.iter().enumerate() {
                 let token_ids = crate::synth::tokenize(phonemes, &config.vocab);
@@ -299,17 +308,30 @@ impl TtsStream {
                     run_inference(&mut guard.session, &token_ids, &config, &config.model_dir)?
                 };
 
+                // Look up paragraph_end from splitter output — match by sentence text
+                let paragraph_end = sentences
+                    .iter()
+                    .find(|s| &s.text == sentence)
+                    .map(|s| s.paragraph_end)
+                    .unwrap_or(false);
+
                 let segment = sentence_to_segment(sentence, &durations, time_offset);
                 let chunk_secs = samples.len() as f32 / 24_000.0;
                 time_offset += chunk_secs;
+
                 if i + 1 < phoneme_chunks.len() {
-                    time_offset += silence_secs;
+                    if paragraph_end {
+                        time_offset += paragraph_silence_secs;
+                    } else {
+                        time_offset += sentence_silence_secs;
+                    }
                 }
 
                 yield AudioSegment {
                     samples,
                     sample_rate: 24_000,
                     transcript: segment,
+                    paragraph_end,
                 };
             }
         };
