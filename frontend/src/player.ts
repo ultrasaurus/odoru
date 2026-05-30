@@ -28,6 +28,9 @@ class AudioQueue {
   private ctx: AudioContext
   private nextStartTime = 0
   private started = false
+  // AudioContext clock value when the first buffer of the current play/seek
+  // was scheduled. Used to compute elapsed time since last seek.
+  firstStartTime = 0
 
   constructor() {
     this.ctx = new AudioContext({ sampleRate: 24000 })
@@ -35,7 +38,7 @@ class AudioQueue {
 
   get currentTime() { return this.ctx.currentTime }
 
-  enqueue(samples: Float32Array<ArrayBuffer>): { startTime: number; endTime: number } {
+  enqueue(samples: Float32Array<ArrayBuffer>): void {
     const buf = this.ctx.createBuffer(1, samples.length, 24000)
     buf.copyToChannel(samples, 0)
 
@@ -44,20 +47,15 @@ class AudioQueue {
     src.connect(this.ctx.destination)
 
     if (!this.started) {
-      // Small initial buffer to avoid glitches
       this.nextStartTime = this.ctx.currentTime + 0.05
+      this.firstStartTime = this.nextStartTime
       this.started = true
     } else {
-      // On cache hits segments arrive faster than real-time — ensure we never
-      // schedule a buffer in the past relative to the AudioContext clock
       this.nextStartTime = Math.max(this.nextStartTime, this.ctx.currentTime + 0.01)
     }
 
-    const startTime = this.nextStartTime
-    src.start(startTime)
+    src.start(this.nextStartTime)
     this.nextStartTime += buf.duration
-
-    return { startTime, endTime: this.nextStartTime }
   }
 
   resume() { return this.ctx.resume() }
@@ -67,10 +65,9 @@ class AudioQueue {
   reset() {
     this.ctx.close()
     this.ctx = new AudioContext({ sampleRate: 24000 })
-    // Resume immediately — we're always called from a click handler (user gesture),
-    // so this is the right moment to unlock the AudioContext.
-    this.ctx.resume()
+    this.ctx.resume() // unlock while still in user gesture
     this.nextStartTime = 0
+    this.firstStartTime = 0
     this.started = false
   }
 }
@@ -81,7 +78,15 @@ class AudioQueue {
 
 export class Player {
   private queue: AudioQueue
-  private segments: Array<{ transcript: Segment; startTime: number; endTime: number; samples: Float32Array<ArrayBuffer> }> = []
+  private segments: Array<{
+    transcript: Segment
+    // Audio-relative positions in seconds — stable across seeks.
+    // startTime = sum of durations of all preceding segments.
+    // endTime   = startTime + this segment's duration.
+    startTime: number
+    endTime: number
+    samples: Float32Array<ArrayBuffer>
+  }> = []
   private segmentEls: HTMLElement[] = []
   private activeIndex = -1
   private rafId = 0
@@ -91,6 +96,10 @@ export class Player {
   private endedCbs: Array<() => void> = []
   private onReadyCb: (() => void) | null = null
   private onErrorCb: ((msg: string) => void) | null = null
+
+  // Seconds into the full audio where the current play session started.
+  // = segments[seekIndex].startTime, updated on each seek.
+  private seekOffset = 0
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -115,39 +124,33 @@ export class Player {
     this.ws.onmessage = (ev: MessageEvent) => {
       const msg: ServerMsg = JSON.parse(ev.data)
 
-      if (isError(msg)) {
-        this.onErrorCb?.(msg.error)
-        return
-      }
-
-      if (isDone(msg)) {
-        this.ws?.close()
-        return
-      }
+      if (isError(msg)) { this.onErrorCb?.(msg.error); return }
+      if (isDone(msg))  { this.ws?.close(); return }
 
       if (isSegment(msg)) {
         const samples = decodeF32PCM(msg.audio)
-        const { startTime, endTime } = this.queue.enqueue(samples)
+        const duration = samples.length / 24000
 
+        // Audio-relative start = end of previous segment (or 0)
+        const prev = this.segments[this.segments.length - 1]
+        const startTime = prev ? prev.endTime : 0
+        const endTime = startTime + duration
+
+        this.queue.enqueue(samples)
         this.segments.push({ transcript: msg.transcript, startTime, endTime, samples })
         this.renderSegment(msg.transcript, this.segments.length - 1)
 
-        // Signal ready on first segment
-        if (this.segments.length === 1) {
-          this.onReadyCb?.()
-        }
+        if (this.segments.length === 1) this.onReadyCb?.()
       }
     }
 
-    this.ws.onerror = () => {
-      this.onErrorCb?.('WebSocket error')
-    }
+    this.ws.onerror = () => { this.onErrorCb?.('WebSocket error') }
   }
 
-  onReady(cb: () => void): void   { this.onReadyCb = cb }
-  onError(cb: (msg: string) => void): void { this.onErrorCb = cb }
-  onEnded(cb: () => void): void   { this.endedCbs.push(cb) }
-  onTimeUpdate(cb: (t: number) => void): void { this.timeUpdateCbs.push(cb) }
+  onReady(cb: () => void): void                    { this.onReadyCb = cb }
+  onError(cb: (msg: string) => void): void         { this.onErrorCb = cb }
+  onEnded(cb: () => void): void                    { this.endedCbs.push(cb) }
+  onTimeUpdate(cb: (t: number) => void): void      { this.timeUpdateCbs.push(cb) }
 
   async play(): Promise<void> {
     await this.queue.resume()
@@ -169,10 +172,17 @@ export class Player {
 
   get paused(): boolean { return this.queue.state !== 'running' }
 
-  // Total duration based on queued segments so far
+  // Total duration of all segments — stable, never changes with seeks.
   get duration(): number {
     const last = this.segments[this.segments.length - 1]
-    return last ? last.endTime - (this.segments[0]?.startTime ?? 0) : 0
+    return last ? last.endTime : 0
+  }
+
+  // Current playback position in seconds relative to the full audio.
+  // seekOffset anchors us to the right place after a seek.
+  get position(): number {
+    const elapsed = Math.max(0, this.queue.currentTime - this.queue.firstStartTime)
+    return Math.min(this.seekOffset + elapsed, this.duration)
   }
 
   // ---------------------------------------------------------------------------
@@ -186,10 +196,10 @@ export class Player {
     this.segments = []
     this.segmentEls = []
     this.activeIndex = -1
+    this.seekOffset = 0
   }
 
   private renderSegment(transcript: Segment, index: number): void {
-    // Remove loading placeholder on first segment
     if (index === 0) this.container.innerHTML = ''
 
     const span = document.createElement('span')
@@ -197,21 +207,19 @@ export class Player {
     span.textContent = transcript.text
     span.dataset.index = String(index)
 
-    span.addEventListener('click', async () => {
+    span.addEventListener('click', () => {
       this.stopTracking()
-      this.queue.reset()
-      // Clear old highlight before resetting activeIndex
       if (this.activeIndex >= 0) {
         this.segmentEls[this.activeIndex]?.classList.remove('active')
       }
       this.activeIndex = -1
 
-      // Re-enqueue all segments from the clicked index onward
+      // seekOffset is just the audio-relative startTime of the clicked segment
+      this.seekOffset = this.segments[index].startTime
+
+      this.queue.reset()
       for (let i = index; i < this.segments.length; i++) {
-        const seg = this.segments[i]
-        const { startTime, endTime } = this.queue.enqueue(seg.samples)
-        seg.startTime = startTime
-        seg.endTime = endTime
+        this.queue.enqueue(this.segments[i].samples)
       }
 
       this.highlightSegment(index)
@@ -229,13 +237,15 @@ export class Player {
     const lastEndedIndex = { value: -1 }
 
     const tick = () => {
-      const t = this.queue.currentTime
-      this.timeUpdateCbs.forEach(cb => cb(t))
-      this.highlightCurrent(t)
+      const pos = this.position
+      this.timeUpdateCbs.forEach(cb => cb(pos))
+      this.highlightCurrent()
 
-      // Check if all segments have finished playing
+      // Detect end of playback
       const last = this.segments[this.segments.length - 1]
-      if (last && t >= last.endTime && lastEndedIndex.value < this.segments.length - 1) {
+      if (last && this.queue.currentTime >= this.queue.firstStartTime +
+          (last.endTime - this.seekOffset) &&
+          lastEndedIndex.value < this.segments.length - 1) {
         lastEndedIndex.value = this.segments.length - 1
         this.stopTracking()
         this.endedCbs.forEach(cb => cb())
@@ -251,11 +261,13 @@ export class Player {
     cancelAnimationFrame(this.rafId)
   }
 
-  private highlightCurrent(t: number): void {
+  private highlightCurrent(): void {
+    // Convert AudioContext clock to audio-relative position for segment lookup
+    const pos = this.position
     let found = -1
     for (let i = 0; i < this.segments.length; i++) {
       const s = this.segments[i]
-      if (t >= s.startTime && t < s.endTime) {
+      if (pos >= s.startTime && pos < s.endTime) {
         found = i
         break
       }
