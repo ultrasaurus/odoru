@@ -4,6 +4,8 @@ use clap::{Parser, ValueEnum};
 use config::AudioConfig;
 use dl::{ParsedArticle, OutputFormat};
 use tts::Tts;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "dl", about = "Download a web article as markdown or plain text")]
@@ -30,6 +32,18 @@ enum Format {
     Text,
 }
 
+fn spinner(msg: &str) -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    pb.set_message(msg.to_string());
+    pb.enable_steady_tick(Duration::from_millis(80));
+    pb
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -39,13 +53,27 @@ async fn main() -> anyhow::Result<()> {
         Format::Text => OutputFormat::Text,
     };
 
-    // Run synchronous dl work in a blocking thread so it doesn't
-    // conflict with the tokio runtime
+    let sp = spinner(&format!("Fetching {}...", cli.url));
     let url = cli.url.clone();
-    let article = tokio::task::spawn_blocking(move || {
+    let article = match tokio::task::spawn_blocking(move || {
         dl::fetch_and_extract(&url, format)
-    })
-    .await??;
+    }).await? {
+        Err(dl::ArticleError::ExtractionFailed) => {
+            sp.finish_with_message("✗ Extraction failed");
+            return Ok(());
+        }
+        Err(e) => {
+            sp.finish_with_message(format!("✗ Error: {}", e));
+            return Ok(());
+        }
+        Ok(a) => {
+            sp.finish_with_message(format!(
+                "✔ {}",
+                a.title.as_deref().unwrap_or("Untitled")
+            ));
+            a
+        }
+    };
 
     if cli.frontmatter {
         print!("{}", render_frontmatter(&article));
@@ -58,11 +86,11 @@ async fn main() -> anyhow::Result<()> {
 
     if cli.audio {
         let wav_path = wav_filename(&article);
-        println!("Synthesizing audio to {}...", wav_path);
+        let sp = spinner("Synthesizing audio...");
         let tts = Tts::builder().build()?;
         let config = AudioConfig::default();
-        audio::synthesize_to_wav(&article.content, &wav_path, &tts, &config).await?;
-        eprintln!("Done.");
+        audio::synthesize_to_wav(&article.content, &wav_path, &tts, &config, &sp).await?;
+        sp.finish_with_message(format!("✔ Audio saved to {}", wav_path));
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 use config::{AudioConfig, silence_samples};
 use hound::{WavSpec, WavWriter, SampleFormat};
+use indicatif::{ProgressBar};
 use tts::{AudioSegment, Tts};
 
 pub async fn synthesize_to_wav(
@@ -7,6 +8,7 @@ pub async fn synthesize_to_wav(
     path: &str,
     tts: &Tts,
     config: &AudioConfig,
+    sp: &ProgressBar,
 ) -> anyhow::Result<()> {
     let spec = WavSpec {
         channels: 1,
@@ -20,7 +22,7 @@ pub async fn synthesize_to_wav(
 
     while let Some(result) = stream.next().await {
         let seg: AudioSegment = result?;
-        println!("saving: {}", seg.transcript.text);
+        sp.set_message(format!("Synthesizing: {}", seg.transcript.text));
         // Write the segment samples
         for sample in &seg.samples {
             writer.write_sample(*sample)?;
