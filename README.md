@@ -27,7 +27,6 @@ cp .env.example .env   # unused right now
 ## Build & run server
 
 ```
-source .env
 cargo run --bin server
 ```
 
