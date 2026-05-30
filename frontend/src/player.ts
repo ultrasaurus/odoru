@@ -47,6 +47,10 @@ class AudioQueue {
       // Small initial buffer to avoid glitches
       this.nextStartTime = this.ctx.currentTime + 0.05
       this.started = true
+    } else {
+      // On cache hits segments arrive faster than real-time — ensure we never
+      // schedule a buffer in the past relative to the AudioContext clock
+      this.nextStartTime = Math.max(this.nextStartTime, this.ctx.currentTime + 0.01)
     }
 
     const startTime = this.nextStartTime
@@ -63,6 +67,9 @@ class AudioQueue {
   reset() {
     this.ctx.close()
     this.ctx = new AudioContext({ sampleRate: 24000 })
+    // Resume immediately — we're always called from a click handler (user gesture),
+    // so this is the right moment to unlock the AudioContext.
+    this.ctx.resume()
     this.nextStartTime = 0
     this.started = false
   }
@@ -74,7 +81,7 @@ class AudioQueue {
 
 export class Player {
   private queue: AudioQueue
-  private segments: Array<{ transcript: Segment; startTime: number; endTime: number }> = []
+  private segments: Array<{ transcript: Segment; startTime: number; endTime: number; samples: Float32Array<ArrayBuffer> }> = []
   private segmentEls: HTMLElement[] = []
   private activeIndex = -1
   private rafId = 0
@@ -105,7 +112,7 @@ export class Player {
       this.ws!.send(JSON.stringify({ text }))
     }
 
-    this.ws.onmessage = async (ev: MessageEvent) => {
+    this.ws.onmessage = (ev: MessageEvent) => {
       const msg: ServerMsg = JSON.parse(ev.data)
 
       if (isError(msg)) {
@@ -122,7 +129,7 @@ export class Player {
         const samples = decodeF32PCM(msg.audio)
         const { startTime, endTime } = this.queue.enqueue(samples)
 
-        this.segments.push({ transcript: msg.transcript, startTime, endTime })
+        this.segments.push({ transcript: msg.transcript, startTime, endTime, samples })
         this.renderSegment(msg.transcript, this.segments.length - 1)
 
         // Signal ready on first segment
@@ -190,23 +197,25 @@ export class Player {
     span.textContent = transcript.text
     span.dataset.index = String(index)
 
-    // Click to seek: resume from this segment's scheduled start time
     span.addEventListener('click', async () => {
-      // AudioContext doesn't support seeking, so we reset and re-enqueue
-      // from this segment onward — simple and reliable for short texts
-      const fromIndex = index
+      this.stopTracking()
       this.queue.reset()
+      // Clear old highlight before resetting activeIndex
+      if (this.activeIndex >= 0) {
+        this.segmentEls[this.activeIndex]?.classList.remove('active')
+      }
       this.activeIndex = -1
 
-      for (let i = fromIndex; i < this.segments.length; i++) {
-        // We don't have samples cached — for now just highlight and play from start
-        // TODO: cache samples per segment to enable mid-stream seeking
+      // Re-enqueue all segments from the clicked index onward
+      for (let i = index; i < this.segments.length; i++) {
+        const seg = this.segments[i]
+        const { startTime, endTime } = this.queue.enqueue(seg.samples)
+        seg.startTime = startTime
+        seg.endTime = endTime
       }
 
-      // For now: clicking a segment highlights it and plays from beginning
-      // Full seeking requires caching Float32Array per segment (Phase 2)
-      this.highlightSegment(fromIndex)
-      await this.play()
+      this.highlightSegment(index)
+      this.startTracking()
     })
 
     this.container.appendChild(span)
