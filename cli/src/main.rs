@@ -44,6 +44,18 @@ fn spinner(msg: &str) -> ProgressBar {
     pb
 }
 
+fn audio_progress(total: usize) -> ProgressBar {
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} Synthesizing {pos}/{len} sentences...")
+            .unwrap(),
+    );
+    pb.enable_steady_tick(Duration::from_millis(80));
+    pb
+}
+
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -83,14 +95,14 @@ async fn main() -> anyhow::Result<()> {
         Format::Markdown => article.content.clone(),
     };
     print!("{}", content);
-
     if cli.audio {
         let wav_path = wav_filename(&article);
-        let sp = spinner("Synthesizing audio...");
         let tts = Tts::builder().build()?;
         let config = AudioConfig::default();
-        audio::synthesize_to_wav(&article.content, &wav_path, &tts, &config, &sp).await?;
-        sp.finish_with_message(format!("✔ Audio saved to {}", wav_path));
+        let total = tts::splitter::split(&article.content).len();
+        let pb = audio_progress(total);
+        audio::synthesize_to_wav(&article.content, &wav_path, &tts, &config, &pb).await?;
+        pb.finish_with_message(format!("✔ Audio saved to {}", wav_path));
     }
 
     Ok(())

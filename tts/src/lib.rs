@@ -1,6 +1,6 @@
 mod engine;
 mod error;
-pub(crate) mod splitter;
+pub mod splitter;
 pub mod synth;
 pub mod tts;
 pub mod transcript;

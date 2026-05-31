@@ -22,7 +22,6 @@ pub async fn synthesize_to_wav(
 
     while let Some(result) = stream.next().await {
         let seg: AudioSegment = result?;
-        sp.set_message(format!("Synthesizing: {}", seg.transcript.text));
         // Write the segment samples
         for sample in &seg.samples {
             writer.write_sample(*sample)?;
@@ -40,6 +39,7 @@ pub async fn synthesize_to_wav(
         for sample in silence_samples(silence_ms, config.sample_rate) {
             writer.write_sample(sample)?;
         }
+        sp.inc(1);
     }
 
     writer.finalize()?;
