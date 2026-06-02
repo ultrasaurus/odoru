@@ -1,3 +1,4 @@
+mod augment;
 mod error;
 mod fetch;
 
@@ -56,7 +57,55 @@ fn setup_python(py: Python) -> PyResult<()> {
     Ok(())
 }
 
+/// Fetch metadata (title, author, date, description, canonical URL) via trafilatura.
+/// Content extraction is intentionally left to the caller for known site types.
+fn extract_metadata(
+    py: Python,
+    html: &str,
+    url: &str,
+) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), ArticleError> {
+    let module = PyModule::from_code(
+        py,
+        c_str!(include_str!("parser.py")),
+        c"parser.py",
+        c"parser",
+    )?;
+
+    let result = module
+        .getattr("extract_metadata")?
+        .call1((html, url))?;
+
+    Ok((
+        result.get_item("title")?.extract()?,
+        result.get_item("authors")?.extract()?,
+        result.get_item("date")?.extract()?,
+        result.get_item("description")?.extract()?,
+        result.get_item("url")?.extract()?,
+    ))
+}
+
 pub fn extract(html: &str, url: &str, format: OutputFormat) -> Result<ParsedArticle, ArticleError> {
+    if augment::is_augment_site(url) {
+        let content = augment::extract_content(html)
+            .ok_or(ArticleError::ExtractionFailed)?;
+
+        return Python::attach(|py| {
+            setup_python(py)?;
+            let (title, authors_raw, date, description, canonical_url) =
+                extract_metadata(py, html, url)?;
+
+            Ok(ParsedArticle {
+                url: canonical_url.unwrap_or_else(|| url.to_string()),
+                title,
+                authors: parse_authors(authors_raw.as_deref()),
+                date,
+                description,
+                content,
+            })
+        });
+    }
+
+    // Generic path: full extraction via trafilatura
     Python::attach(|py| {
         setup_python(py)?;
 

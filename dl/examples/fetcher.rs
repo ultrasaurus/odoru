@@ -1,7 +1,8 @@
 use dl::{fetch_and_extract, OutputFormat};
 
 fn main() -> Result<(), dl::ArticleError> {
-    let url = "https://ultrasaurus.com/2019/04/when-reality-is-broken-change-the-rules/";
+    // let url: &str = "https://ultrasaurus.com/2019/04/when-reality-is-broken-change-the-rules/";
+    let url: &str = "https://dougengelbart.org/content/view/148/";
 
     match fetch_and_extract(url, OutputFormat::Markdown) {
         Err(dl::ArticleError::ExtractionFailed) => println!("Extraction failed"),
@@ -10,7 +11,8 @@ fn main() -> Result<(), dl::ArticleError> {
             println!("Title: {:?}", article.title);
             println!("Authors: {:?}", article.authors);
             println!("Date: {:?}", article.date);
-            println!("\n{}", &article.content[..500.min(article.content.len())]);
+            // println!("\n{}", &article.content[..2000.min(article.content.len())]);
+            println!("\n{}", &article.content);
         }
     }
 
