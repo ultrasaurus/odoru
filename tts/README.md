@@ -1,8 +1,6 @@
-# ko-odoru
+# odoru tts
 
 Rust library that converts text to phonemes using [Misaki G2P](https://github.com/hexgrad/misaki), exposed as an async Tokio stream. Each sentence yields a `PhonemeChunk` as it completes.
-
-The name means "dancing like this" in Japanese — a nod to the [Kokoro](https://pypi.org/project/kokoro/) TTS ecosystem this is designed to feed into.
 
 ## Setup
 

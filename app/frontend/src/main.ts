@@ -6,7 +6,7 @@ const app = document.getElementById('app')!
 app.innerHTML = `
   <div class="layout">
     <header class="header">
-      <div class="logo">▶ ko-odoru</div>
+      <div class="logo">▶ odoru</div>
     </header>
 
     <main class="main">
