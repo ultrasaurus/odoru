@@ -1,0 +1,20 @@
+/// Compile and execute a Python source string embedded in the binary,
+/// returning the resulting module object.
+///
+/// Use with `c_str!(include_str!("my_script.py"))` to embed a `.py` file
+/// at compile time. The returned `Py<PyAny>` can be stored and reused
+/// across GIL acquisitions.
+///
+/// # Example
+/// ```
+/// use pyo3::prelude::*;
+/// use pyo3::ffi::c_str;
+/// Python::attach(|py| {
+///     let module = py_venv::embed_module(
+///         py,
+///         c_str!("def hello(): return 'world'"),
+///         c"example.py",
+///         c"example",
+///     ).unwrap();
+/// });
+/// ```

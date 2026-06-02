@@ -1476,6 +1476,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "py-venv"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+]
+
+[[package]]
 name = "pyo3"
 version = "0.28.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

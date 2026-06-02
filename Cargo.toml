@@ -1,3 +1,3 @@
 [workspace]
-members = [ "app", "config", "cli",  "dl", "tts",]
+members = ["app", "config", "cli", "dl", "py-venv", "tts"]
 resolver = "2"
