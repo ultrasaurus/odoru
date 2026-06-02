@@ -28,11 +28,15 @@ anyhow = "1"
 # Sentence splitting
 unicode-segmentation = "1"
 
+# Shared utilities (frontmatter, voice loading)
+util = { path = "../util" }
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"
+util = { path = "../util" }
 
 [[example]]
 name = "basic"

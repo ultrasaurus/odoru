@@ -13,6 +13,7 @@
 use futures::StreamExt;
 use tts::{G2pEngine, TtsEngine, Backend};
 use std::sync::Mutex;
+use util::voice::VoiceDef;
 
 // Serialize all tests — Python state and VIRTUAL_ENV are process-global.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -229,6 +230,89 @@ async fn tts_engine_segment_timestamps_are_monotonic() {
         assert!(w[1].transcript.start >= w[0].transcript.end);
     }
 }
+
+// ── F5-TTS backend ────────────────────────────────────────────────────────
+
+/// Build an F5 engine from `voices/sarah` at the workspace root,
+/// or skip if the directory doesn't exist or the venv isn't active.
+fn try_build_f5_engine() -> Option<TtsEngine> {
+    if std::env::var("VIRTUAL_ENV").is_err() {
+        eprintln!("Skipping F5 test: venv not active");
+        return None;
+    }
+
+    // CARGO_MANIFEST_DIR points to tts/ — workspace root is one level up.
+    let voices_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../voices");
+    let sarah_dir = voices_dir.join("sarah");
+
+    if !sarah_dir.exists() {
+        eprintln!("Skipping F5 test: voices/sarah not found at {}", sarah_dir.display());
+        return None;
+    }
+
+    let def = match VoiceDef::load(&sarah_dir) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Skipping F5 test: failed to load voices/sarah: {e}");
+            return None;
+        }
+    };
+
+    let voice = tts::Voice::F5Tts {
+        name: def.name,
+        voice_ref: def.voice_ref,
+        ref_text: def.ref_text,
+        speed: def.speed,
+        cfg_strength: def.cfg_strength,
+    };
+
+    Some(
+        TtsEngine::builder()
+            .backend(tts::Backend::F5Tts { voices: vec![voice], workers: 1 })
+            .build()
+            .expect("F5 engine build failed"),
+    )
+}
+
+#[tokio::test]
+#[ignore]
+async fn f5_backend_synthesizes_audio() {
+    let _lock = lock();
+    let Some(engine) = try_build_f5_engine() else { return; };
+
+    let mut stream = engine.synthesize("Hello world.");
+    let seg = stream.next().await.expect("stream ended early").expect("segment error");
+
+    assert!(!seg.samples.is_empty(), "no samples returned");
+    assert_eq!(seg.sample_rate, 24_000);
+    assert_eq!(seg.index, 0);
+    assert!(seg.transcript.end > seg.transcript.start);
+    assert!(stream.next().await.is_none(), "expected exactly one segment");
+}
+
+#[tokio::test]
+#[ignore]
+async fn f5_backend_multi_sentence_timestamps_monotonic() {
+    let _lock = lock();
+    let Some(engine) = try_build_f5_engine() else { return; };
+
+    let mut stream = engine.synthesize("The cat sat on the mat. The dog ran in the fog.");
+    let mut segments = vec![];
+    while let Some(result) = stream.next().await {
+        segments.push(result.expect("segment error"));
+    }
+
+    assert_eq!(segments.len(), 2);
+    assert!(
+        segments[1].transcript.start >= segments[0].transcript.end,
+        "timestamps not monotonic: {:.3} vs {:.3}",
+        segments[0].transcript.end,
+        segments[1].transcript.start,
+    );
+}
+
+// ── Word-level timestamps (deferred) ──────────────────────────────────────
 
 /// Word-level timestamps — ignored until word alignment is implemented.
 #[tokio::test]
