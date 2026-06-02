@@ -1,11 +1,57 @@
-mod engine;
-mod error;
+//! # tts
+//!
+//! Multi-backend streaming TTS library.
+//!
+//! Supports Kokoro (Rust ONNX + Python G2P) and F5-TTS (Python MLX),
+//! with a Mock backend for testing.
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use tts::{TtsEngine, Backend};
+//! use futures::StreamExt;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), tts::TtsError> {
+//!     let engine = TtsEngine::builder()
+//!         .backend(Backend::Mock)
+//!         .build()?;
+//!
+//!     let mut stream = engine.synthesize("Hello world.");
+//!     while let Some(result) = stream.next().await {
+//!         let seg = result?;
+//!         println!("[{:.3}–{:.3}] {}", seg.transcript.start, seg.transcript.end, seg.transcript.text);
+//!     }
+//!     Ok(())
+//! }
+//! ```
+
+// Shared infrastructure
 pub mod splitter;
-pub mod synth;
-pub mod tts;
+pub mod chunk;
+pub mod backend;
 pub mod transcript;
 
-pub use engine::{G2pEngine, PhonemeChunk};
-pub use error::G2pError;
+// Python integration (internal)
+pub(crate) mod python;
 
-pub use tts::{Tts, TtsBuilder, TtsStream, AudioSegment, save_wav_all};
+// TTS engine — public API
+mod error;
+mod engine;
+mod mock;
+
+pub use error::TtsError;
+pub use engine::{TtsEngine, TtsEngineBuilder, AudioStream, TtsBackend};
+
+// Backends
+pub mod kokoro;
+pub mod f5;
+
+// G2P engine (used by Kokoro, exposed for examples/tests)
+mod g2p;
+pub use g2p::{G2pEngine, PhonemeChunk, G2pError};
+
+// Convenience re-exports
+pub use chunk::{AudioSegment, Segment};
+pub use backend::{Backend, Voice};
+pub use kokoro::save_wav_all;

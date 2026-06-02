@@ -1,12 +1,13 @@
 use config::{AudioConfig, silence_samples};
 use hound::{WavSpec, WavWriter, SampleFormat};
-use indicatif::{ProgressBar};
-use tts::{AudioSegment, Tts};
+use indicatif::ProgressBar;
+use futures::StreamExt;
+use tts::{AudioSegment, TtsEngine};
 
 pub async fn synthesize_to_wav(
     text: &str,
     path: &str,
-    tts: &Tts,
+    engine: &TtsEngine,
     config: &AudioConfig,
     sp: &ProgressBar,
 ) -> anyhow::Result<()> {
@@ -18,16 +19,14 @@ pub async fn synthesize_to_wav(
     };
 
     let mut writer = WavWriter::create(path, spec)?;
-    let mut stream = tts.synthesize(text);
+    let mut stream = engine.synthesize(text);
 
     while let Some(result) = stream.next().await {
         let seg: AudioSegment = result?;
-        // Write the segment samples
         for sample in &seg.samples {
             writer.write_sample(*sample)?;
         }
 
-        // Insert silence based on context
         let silence_ms = if is_heading_boundary(&seg) {
             config.heading_silence_ms
         } else if seg.paragraph_end {
@@ -47,6 +46,5 @@ pub async fn synthesize_to_wav(
 }
 
 fn is_heading_boundary(seg: &AudioSegment) -> bool {
-    // A heading boundary is a paragraph end whose text looks like a heading
     seg.paragraph_end && seg.transcript.text.starts_with('#')
 }

@@ -7,13 +7,12 @@
 //!
 //! Protocol:
 //!   client → server: { "text": "..." }
-//!   server → client: { "index": 0, "transcript": {...}, "audio": "<base64 f32le PCM>" }
+//!   server → client: { "index": 0, "transcript": {...}, "audio": "<base64 f32le PCM>", "paragraph_end": bool }
 //!   server → client: { "done": true }
 //!
 //! Cache:
-//!   Key: SHA-256(text + voice + speed)
+//!   Key: SHA-256(text + voice)
 //!   Value: Vec<CachedSegment> — fully rendered segments ready to stream
-//!   Cache hits stream at memory speed (~0 latency), no TTS required.
 
 use axum::{
     extract::{
@@ -27,7 +26,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
-use tts::{AudioSegment, Tts};
+use tts::{AudioSegment, Backend, TtsEngine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -37,15 +36,13 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 // Cache
 // ---------------------------------------------------------------------------
 
-/// A fully-rendered segment stored in the cache.
-/// Samples are kept as raw f32 to avoid repeated encode/decode.
 #[derive(Clone)]
 struct CachedSegment {
+    index: usize,
     transcript_start: f64,
     transcript_end: f64,
     transcript_text: String,
     paragraph_end: bool,
-    /// Pre-encoded base64 f32le PCM — ready to send directly.
     audio_b64: String,
 }
 
@@ -56,6 +53,7 @@ impl CachedSegment {
             bytes.extend_from_slice(&s.to_le_bytes());
         }
         Self {
+            index: seg.index,
             transcript_start: seg.transcript.start,
             transcript_end: seg.transcript.end,
             transcript_text: seg.transcript.text.clone(),
@@ -67,14 +65,11 @@ impl CachedSegment {
 
 type Cache = Arc<DashMap<String, Vec<CachedSegment>>>;
 
-/// Compute a cache key from the request text, voice, and speed.
-fn cache_key(text: &str, voice: &str, speed: f32) -> String {
+fn cache_key(text: &str, voice: &str) -> String {
     let mut h = Sha256::new();
     h.update(text.as_bytes());
     h.update(b"|");
     h.update(voice.as_bytes());
-    h.update(b"|");
-    h.update(speed.to_le_bytes());
     format!("{:x}", h.finalize())
 }
 
@@ -84,7 +79,7 @@ fn cache_key(text: &str, voice: &str, speed: f32) -> String {
 
 #[derive(Clone)]
 struct AppState {
-    tts: Arc<Tts>,
+    tts: Arc<TtsEngine>,
     cache: Cache,
 }
 
@@ -97,12 +92,9 @@ struct SynthRequest {
     text: String,
     #[serde(default = "default_voice")]
     voice: String,
-    #[serde(default = "default_speed")]
-    speed: f32,
 }
 
 fn default_voice() -> String { "am_puck".into() }
-fn default_speed() -> f32    { 1.0 }
 
 #[derive(Serialize)]
 struct SegmentMsg<'a> {
@@ -137,12 +129,11 @@ async fn send_error(sender: &mut futures::stream::SplitSink<WebSocket, Message>,
 
 async fn send_segment(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
-    index: usize,
     seg: &CachedSegment,
     cached: bool,
 ) -> bool {
     let msg = SegmentMsg {
-        index,
+        index: seg.index,
         transcript: TranscriptJson {
             start: seg.transcript_start,
             end: seg.transcript_end,
@@ -170,7 +161,6 @@ async fn ws_handler(
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
 
-    // Wait for a synthesis request
     let req = loop {
         match receiver.next().await {
             Some(Ok(Message::Text(msg))) => {
@@ -185,14 +175,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         }
     };
 
-    let key = cache_key(&req.text, &req.voice, req.speed);
+    let key = cache_key(&req.text, &req.voice);
 
-    // ── Cache hit: stream pre-rendered segments immediately ──────────────────
+    // ── Cache hit ────────────────────────────────────────────────────────────
     if let Some(segments) = state.cache.get(&key) {
         eprintln!("Cache hit for key {}", &key[..8]);
-        for (i, seg) in segments.iter().enumerate() {
-            if !send_segment(&mut sender, i, seg, true).await {
-                return; // client disconnected
+        for seg in segments.iter() {
+            if !send_segment(&mut sender, seg, true).await {
+                return;
             }
         }
         let done = serde_json::to_string(&DoneMsg { done: true }).unwrap();
@@ -200,30 +190,27 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         return;
     }
 
-    // ── Cache miss: synthesize, cache, and stream simultaneously ─────────────
+    // ── Cache miss: synthesize, cache, stream ────────────────────────────────
     eprintln!("Cache miss — synthesizing…");
     let mut stream = state.tts.synthesize(&req.text);
     let mut rendered: Vec<CachedSegment> = Vec::new();
-    let mut index = 0usize;
 
     while let Some(result) = stream.next().await {
         match result {
             Ok(seg) => {
                 let cached_seg = CachedSegment::from_segment(&seg);
-                if !send_segment(&mut sender, index, &cached_seg, false).await {
-                    return; // client disconnected — don't cache incomplete result
+                if !send_segment(&mut sender, &cached_seg, false).await {
+                    return;
                 }
                 rendered.push(cached_seg);
-                index += 1;
             }
             Err(e) => {
                 send_error(&mut sender, &format!("Synthesis error: {e}")).await;
-                return; // don't cache on error
+                return;
             }
         }
     }
 
-    // Store in cache only after successful completion
     eprintln!("Caching {} segments for key {}", rendered.len(), &key[..8]);
     state.cache.insert(key, rendered);
 
@@ -238,7 +225,22 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     eprintln!("Initializing TTS engine…");
-    let tts = Tts::builder().build()?;
+
+    let model_dir = std::env::var("KOKORO_MODEL_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            std::path::PathBuf::from(home).join(".kokoro")
+        });
+
+    let tts = TtsEngine::builder()
+        .backend(Backend::Kokoro {
+            model_dir,
+            voice: "am_puck".into(),
+            speed: 1.0,
+        })
+        .build()?;
+
     eprintln!("TTS ready.");
 
     let state = Arc::new(AppState {
@@ -246,7 +248,7 @@ async fn main() -> anyhow::Result<()> {
         cache: Arc::new(DashMap::new()),
     });
 
-    let frontend_dir = ["app/frontend/dist","frontend/dist", "../frontend/dist"]
+    let frontend_dir = ["app/frontend/dist", "frontend/dist", "../frontend/dist"]
         .iter()
         .map(std::path::PathBuf::from)
         .find(|p| p.exists());
@@ -260,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Serving frontend from {}", dir.display());
         app = app.nest_service("/", ServeDir::new(dir));
     } else {
-        eprintln!("Warning: frontend/dist not found — run `cd frontend && npm run build`");
+        eprintln!("Warning: frontend/dist not found — run `cd app/frontend && npm run build`");
     }
 
     let addr = "0.0.0.0:3000";

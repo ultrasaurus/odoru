@@ -3,7 +3,7 @@ mod audio;
 use clap::{Parser, ValueEnum};
 use config::AudioConfig;
 use dl::{ParsedArticle, OutputFormat};
-use tts::Tts;
+use tts::{Backend, TtsEngine};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 
@@ -55,7 +55,6 @@ fn audio_progress(total: usize) -> ProgressBar {
     pb
 }
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -95,13 +94,29 @@ async fn main() -> anyhow::Result<()> {
         Format::Markdown => article.content.clone(),
     };
     print!("{}", content);
+
     if cli.audio {
         let wav_path = wav_filename(&article);
-        let tts = Tts::builder().build()?;
+
+        let model_dir = std::env::var("KOKORO_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                std::path::PathBuf::from(home).join(".kokoro")
+            });
+
+        let engine = TtsEngine::builder()
+            .backend(Backend::Kokoro {
+                model_dir,
+                voice: "am_puck".into(),
+                speed: 1.0,
+            })
+            .build()?;
+
         let config = AudioConfig::default();
         let total = tts::splitter::split(&article.content).len();
         let pb = audio_progress(total);
-        audio::synthesize_to_wav(&article.content, &wav_path, &tts, &config, &pb).await?;
+        audio::synthesize_to_wav(&article.content, &wav_path, &engine, &config, &pb).await?;
         pb.finish_with_message(format!("✔ Audio saved to {}", wav_path));
     }
 

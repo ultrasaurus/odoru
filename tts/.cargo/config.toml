@@ -1,4 +1,3 @@
-# .cargo/config.toml.example
-# Copy to .cargo/config.toml and update the path to match your local venv.
-[env]
-PYO3_PYTHON = "/Users/sallen/src/claude/ko-odoru/.venv/bin/python3.12"
+# tts/.cargo/config.toml
+# Inherits from workspace root .cargo/config.toml — no overrides needed.
+# Delete this file or leave it empty; the root config handles everything.

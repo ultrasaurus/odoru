@@ -1,4 +1,4 @@
-//! Integration tests for the Misaki G2P bridge.
+//! Integration tests for the G2P bridge and TtsEngine.
 //!
 //! These tests require a real Python venv with `misaki-en` installed.
 //! They are marked `#[ignore]` so they don't run in CI without setup.
@@ -16,11 +16,10 @@
 //! ```
 
 use futures::StreamExt;
-use tts::{G2pEngine, G2pError};
+use tts::{G2pEngine, G2pError, TtsEngine, Backend};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/// Collect all chunks from a phonemize stream, panicking on unexpected errors.
 async fn collect_ok(engine: &G2pEngine, text: &str) -> Vec<tts::PhonemeChunk> {
     engine
         .phonemize(text)
@@ -29,9 +28,16 @@ async fn collect_ok(engine: &G2pEngine, text: &str) -> Vec<tts::PhonemeChunk> {
         .await
 }
 
-// ── Engine initialisation ──────────────────────────────────────────────────
+fn try_build_engine() -> Option<TtsEngine> {
+    if std::env::var("VIRTUAL_ENV").is_err() {
+        eprintln!("Skipping: venv not active (source .venv/bin/activate)");
+        return None;
+    }
+    Some(TtsEngine::builder().backend(Backend::Mock).build().expect("build failed"))
+}
 
-/// Smoke test: if this fails, all others will too — run: source .venv/bin/activate
+// ── G2pEngine initialisation ───────────────────────────────────────────────
+
 #[tokio::test]
 #[ignore]
 async fn engine_new_with_env_var_succeeds() {
@@ -43,7 +49,6 @@ async fn engine_new_with_env_var_succeeds() {
 #[tokio::test]
 #[ignore]
 async fn engine_new_with_active_venv_succeeds() {
-    // VIRTUAL_ENV is set automatically when the venv is active
     let venv = std::env::var("VIRTUAL_ENV")
         .expect("VIRTUAL_ENV must be set — run: source .venv/bin/activate");
     assert!(!venv.is_empty());
@@ -53,7 +58,6 @@ async fn engine_new_with_active_venv_succeeds() {
 #[tokio::test]
 #[ignore]
 async fn engine_new_with_bad_virtual_env_returns_python_init_error() {
-    // Temporarily point VIRTUAL_ENV at a dir with no misaki installed
     std::env::set_var("VIRTUAL_ENV", "/tmp");
     let result = G2pEngine::new();
     std::env::remove_var("VIRTUAL_ENV");
@@ -64,7 +68,7 @@ async fn engine_new_with_bad_virtual_env_returns_python_init_error() {
     );
 }
 
-// ── phonemize — basic correctness ─────────────────────────────────────────
+// ── G2P phonemize ──────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[ignore]
@@ -74,7 +78,6 @@ async fn phonemize_single_sentence_returns_one_chunk() {
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].index, 0);
     assert_eq!(chunks[0].sentence, "Hello world.");
-    // Phoneme string must be non-empty; exact value is Misaki's business.
     assert!(!chunks[0].phonemes.is_empty(), "phoneme string was empty");
 }
 
@@ -94,71 +97,41 @@ async fn phonemize_whitespace_only_returns_empty_stream() {
     assert!(chunks.is_empty());
 }
 
-// ── phonemize — ordering ───────────────────────────────────────────────────
-
-/// Chunks must arrive in sentence order, not in arbitrary completion order.
 #[tokio::test]
 #[ignore]
 async fn phonemize_multi_sentence_preserves_order() {
     let engine = G2pEngine::new().unwrap();
     let input = "The cat sat on the mat.\nThe dog ran in the fog.\nThe hen laid an egg.";
-
     let chunks = collect_ok(&engine, input).await;
-
     assert_eq!(chunks.len(), 3);
-    assert_eq!(chunks[0].index, 0);
-    assert_eq!(chunks[1].index, 1);
-    assert_eq!(chunks[2].index, 2);
     assert_eq!(chunks[0].sentence, "The cat sat on the mat.");
     assert_eq!(chunks[1].sentence, "The dog ran in the fog.");
     assert_eq!(chunks[2].sentence, "The hen laid an egg.");
 }
 
-/// Indices must be contiguous, zero-based, and match sentence position.
 #[tokio::test]
 #[ignore]
 async fn phonemize_chunk_indices_are_zero_based_and_contiguous() {
     let engine = G2pEngine::new().unwrap();
-    let input = "One.\nTwo.\nThree.\nFour.\nFive.";
-
-    let chunks = collect_ok(&engine, input).await;
-
+    let chunks = collect_ok(&engine, "One.\nTwo.\nThree.\nFour.\nFive.").await;
     assert_eq!(chunks.len(), 5);
-    for (expected_idx, chunk) in chunks.iter().enumerate() {
-        assert_eq!(
-            chunk.index, expected_idx,
-            "chunk at position {expected_idx} had index {}",
-            chunk.index
-        );
+    for (i, chunk) in chunks.iter().enumerate() {
+        assert_eq!(chunk.index, i);
     }
 }
 
-// ── phonemize — error handling ─────────────────────────────────────────────
-
-// G2pFailed error path tests are omitted: Misaki is intentionally robust and
-// handles unusual input (null bytes, symbols, empty-ish strings) without raising
-// Python exceptions. The stream-continues-after-error logic in engine.rs is
-// correct, but there is no reliable way to trigger G2pFailed through the public
-// API without access to Misaki internals. If a real failure mode is identified,
-// add a targeted test here.
-
-// ── phonemize — repeated use ───────────────────────────────────────────────
-
-/// The same engine should be usable across multiple phonemize calls.
 #[tokio::test]
 #[ignore]
 async fn engine_can_be_reused_across_multiple_phonemize_calls() {
     let engine = G2pEngine::new().unwrap();
-
     for i in 0..5 {
         let text = format!("Call number {i}.");
         let chunks = collect_ok(&engine, &text).await;
-        assert_eq!(chunks.len(), 1, "call {i} returned wrong chunk count");
-        assert!(!chunks[0].phonemes.is_empty(), "call {i} returned empty phonemes");
+        assert_eq!(chunks.len(), 1);
+        assert!(!chunks[0].phonemes.is_empty());
     }
 }
 
-/// Engine wrapped in Arc can be shared across concurrent tasks.
 #[tokio::test]
 #[ignore]
 async fn engine_shared_via_arc_across_tasks() {
@@ -187,26 +160,16 @@ async fn engine_shared_via_arc_across_tasks() {
     }
 }
 
-// ── espeak fallback for unknown proper nouns ───────────────────────────────
+// ── espeak fallback ────────────────────────────────────────────────────────
 
-/// Verifies that proper nouns unknown to misaki's dictionary (like foreign
-/// names) are phonemized via the espeak fallback rather than silently dropped.
-///
-/// "Contreras" is a Spanish surname that misaki won't have in its English
-/// dictionary — it should fall back to espeak and produce non-empty phonemes.
 #[tokio::test]
 #[ignore]
 async fn phonemize_unknown_proper_noun_uses_espeak_fallback() {
     let engine = G2pEngine::new().unwrap();
     let chunks = collect_ok(&engine, "Contreras is the clearest voice.").await;
-
     assert_eq!(chunks.len(), 1);
     let phonemes = &chunks[0].phonemes;
-    assert!(!phonemes.is_empty(), "phoneme string was empty for sentence containing 'Contreras'");
-
-    // The phoneme string should be substantially long — if "Contreras" was
-    // silently dropped we'd get far fewer phonemes than expected.
-    // "is the clearest voice" alone would be ~15 chars; with "Contreras" ~25+.
+    assert!(!phonemes.is_empty());
     assert!(
         phonemes.chars().count() >= 20,
         "phoneme string suspiciously short ({} chars) — 'Contreras' may have been dropped: {:?}",
@@ -215,51 +178,77 @@ async fn phonemize_unknown_proper_noun_uses_espeak_fallback() {
     );
 }
 
-/// Verifies that the tokenizer doesn't silently drop phonemes for words
-/// phonemized via espeak — espeak may produce characters not in our vocab.
 #[tokio::test]
 #[ignore]
 async fn tokenizer_preserves_espeak_phonemes() {
-    use tts::synth::{build_vocab, tokenize};
+    use tts::kokoro::{build_vocab, tokenize};
     use std::path::PathBuf;
 
     let model_dir = std::env::var("KOKORO_MODEL_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(std::env::var("HOME").unwrap()).join(".kokoro")
-        });
+        .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap()).join(".kokoro"));
 
     let vocab = build_vocab(&model_dir).expect("build_vocab failed");
     let engine = G2pEngine::new().unwrap();
     let chunks = collect_ok(&engine, "Contreras is the clearest voice.").await;
-
     assert_eq!(chunks.len(), 1);
     let phonemes = &chunks[0].phonemes;
-
     let token_ids = tokenize(phonemes, &vocab);
 
-    // Count how many phoneme chars are actually in the vocab
     let total_chars = phonemes.chars().count();
-    let mapped_chars = phonemes.chars().filter(|c| vocab.contains_key(c)).count();
     let missing: Vec<char> = phonemes.chars().filter(|c| !vocab.contains_key(c)).collect();
 
-    println!("phonemes: {:?}", phonemes);
-    println!("total chars: {total_chars}, mapped: {mapped_chars}, missing: {}", missing.len());
-    println!("missing chars: {:?}", missing);
-    println!("token_ids: {:?}", token_ids);
+    assert!(!token_ids.is_empty(), "all phonemes were dropped by tokenizer");
 
-    assert!(
-        !token_ids.is_empty(),
-        "all phonemes for 'Contreras' sentence were dropped by tokenizer"
-    );
-
-    // Warn if more than 20% of chars are missing from vocab — suggests
-    // espeak is producing phonemes we don't support
     let missing_pct = (missing.len() as f64 / total_chars as f64) * 100.0;
     assert!(
         missing_pct < 20.0,
-        "{:.0}% of phoneme chars missing from vocab — espeak may be using unsupported symbols: {:?}",
-        missing_pct,
-        missing
+        "{:.0}% of phoneme chars missing from vocab: {:?}",
+        missing_pct, missing
     );
+}
+
+// ── TtsEngine tests ────────────────────────────────────────────────────────
+
+#[tokio::test]
+#[ignore]
+async fn tts_engine_single_sentence_yields_one_segment() {
+    let Some(engine) = try_build_engine() else { return; };
+    let mut stream = engine.synthesize("Hello world.");
+    let seg = stream.next().await.unwrap().expect("segment failed");
+    assert!(!seg.samples.is_empty());
+    assert_eq!(seg.sample_rate, 24_000);
+    assert_eq!(seg.index, 0);
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+#[ignore]
+async fn tts_engine_segment_timestamps_are_monotonic() {
+    let Some(engine) = try_build_engine() else { return; };
+    let mut stream = engine.synthesize("Hello world. The cat sat on the mat. How are you?");
+    let mut segments = vec![];
+    while let Some(result) = stream.next().await {
+        segments.push(result.expect("segment failed"));
+    }
+    assert_eq!(segments.len(), 3);
+    for w in segments.windows(2) {
+        assert!(w[1].transcript.start >= w[0].transcript.end,
+            "segment {} start {:.3} < segment {} end {:.3}",
+            w[1].index, w[1].transcript.start, w[0].index, w[0].transcript.end);
+    }
+}
+
+/// Word-level timestamps — ignored until word alignment is implemented.
+#[tokio::test]
+#[ignore]
+async fn single_segment_start_end_match_words() {
+    let Some(engine) = try_build_engine() else { return; };
+    // This test validates word-level timestamp alignment once implemented.
+    // For now it just checks the segment streams correctly.
+    let mut stream = engine.synthesize("Hello world.");
+    let seg = stream.next().await.unwrap().expect("segment failed");
+    assert!(stream.next().await.is_none());
+    assert!(!seg.samples.is_empty());
+    assert_eq!(seg.index, 0);
 }
