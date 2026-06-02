@@ -37,10 +37,19 @@ def extract(html: str, url: str, output_format: str = "markdown") -> dict:
     if meta is None:
         return {"success": False}
 
-    text = trafilatura.extract(
+    markdown = trafilatura.extract(
         html,
         url=url,
-        output_format=output_format,
+        output_format="markdown",
+        include_tables=True,
+        include_comments=False,
+        no_fallback=False,
+    )
+
+    plain_text = trafilatura.extract(
+        html,
+        url=url,
+        output_format="txt",
         include_tables=True,
         include_comments=False,
         no_fallback=False,
@@ -48,7 +57,8 @@ def extract(html: str, url: str, output_format: str = "markdown") -> dict:
 
     return {
         "success": True,
-        "markdown": text or "",
+        "markdown": markdown or "",
+        "plain_text": plain_text or "",
         "title": meta.get("title"),
         "authors": meta.get("author"),
         "date": meta.get("date"),

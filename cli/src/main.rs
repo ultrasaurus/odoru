@@ -2,17 +2,18 @@ mod audio;
 
 use clap::{Parser, ValueEnum};
 use config::AudioConfig;
-use dl::{ParsedArticle, OutputFormat};
+use dl::ParsedArticle;
 use tts::{Backend, TtsEngine};
 use util::voice::VoiceDef;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::Path;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "dl", about = "Download a web article as markdown or plain text")]
+#[command(name = "dl", about = "Fetch a URL or read a local file (.txt, .html) as markdown or plain text")]
 struct Cli {
-    /// URL to fetch and extract
-    url: String,
+    /// URL to fetch, or path to a local .txt or .html file
+    input: String,
 
     /// Output format
     #[arg(long, value_enum, default_value_t = Format::Markdown)]
@@ -105,32 +106,72 @@ fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// Load article content from a local file or URL.
+///
+/// Local files: `.txt` (read directly) or `.html` (extract via trafilatura).
+/// Any other extension is an error. If the input is not an existing file path,
+/// it is treated as a URL.
+fn load_input(input: &str) -> anyhow::Result<(ParsedArticle, Option<String>)> {
+    let path = Path::new(input);
+    if path.exists() {
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        match ext {
+            "txt" => {
+                let content = std::fs::read_to_string(path)?;
+                let stem = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("output")
+                    .to_string();
+                let article = ParsedArticle {
+                    url: input.to_string(),
+                    title: None,
+                    authors: vec![],
+                    date: None,
+                    description: None,
+                    content: content.clone(),
+                    plain_text: content,
+                };
+                Ok((article, Some(format!("{stem}.wav"))))
+            }
+            "html" => {
+                let html = std::fs::read_to_string(path)?;
+                let article = dl::extract(&html, input)
+                    .map_err(|e| anyhow::anyhow!("Extraction failed: {e}"))?;
+                Ok((article, None))
+            }
+            other => anyhow::bail!(
+                "Unsupported file extension '.{other}'. Only .txt and .html are supported."
+            ),
+        }
+    } else if input.starts_with("http://") || input.starts_with("https://") {
+        let article = dl::fetch_and_extract(input)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok((article, None))
+    } else {
+        anyhow::bail!("'{}' is not an existing file and does not look like a URL (expected http:// or https://)", input)
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let format = match cli.format {
-        Format::Markdown => OutputFormat::Markdown,
-        Format::Text => OutputFormat::Text,
-    };
-
-    let sp = spinner(&format!("Fetching {}...", cli.url));
-    let url = cli.url.clone();
-    let article = match tokio::task::spawn_blocking(move || {
-        dl::fetch_and_extract(&url, format)
+    let sp = spinner(&format!("Loading {}...", cli.input));
+    let input = cli.input.clone();
+    let input_display = cli.input.clone();
+    let (article, wav_path_override) = match tokio::task::spawn_blocking(move || {
+        load_input(&input)
     }).await? {
-        Err(dl::ArticleError::ExtractionFailed) => {
-            sp.finish_with_message("✗ Extraction failed");
-            return Ok(());
-        }
         Err(e) => {
-            sp.finish_with_message(format!("✗ Error: {}", e));
+            sp.finish_with_message(format!("✗ {e}"));
             return Ok(());
         }
         Ok(a) => {
             sp.finish_with_message(format!(
                 "✔ {}",
-                a.title.as_deref().unwrap_or("Untitled")
+                a.0.title.as_deref().unwrap_or(&input_display)
             ));
             a
         }
@@ -140,19 +181,19 @@ async fn main() -> anyhow::Result<()> {
         print!("{}", render_frontmatter(&article));
     }
     let content = match cli.format {
-        Format::Text => double_space_paragraphs(&article.content),
+        Format::Text => double_space_paragraphs(&article.plain_text),
         Format::Markdown => article.content.clone(),
     };
     print!("{}", content);
 
     if cli.audio {
-        let wav_path = wav_filename(&article);
+        let wav_path = wav_path_override.unwrap_or_else(|| wav_filename(&article));
         let backend = build_backend(cli.backend)?;
         let engine = TtsEngine::builder().backend(backend).build()?;
         let config = AudioConfig::default();
-        let total = tts::splitter::split(&article.content).len();
+        let total = tts::splitter::split(&article.plain_text).len();
         let pb = audio_progress(total);
-        audio::synthesize_to_wav(&article.content, &wav_path, &engine, &config, &pb).await?;
+        audio::synthesize_to_wav(&article.plain_text, &wav_path, &engine, &config, &pb).await?;
         pb.finish_with_message(format!("✔ Audio saved to {}", wav_path));
     }
 
@@ -229,6 +270,7 @@ mod tests {
             authors: vec![],
             description: None,
             content: String::new(),
+            plain_text: String::new(),
         }
     }
 
@@ -296,6 +338,32 @@ mod tests {
         let input = "Just one line.";
         let output = double_space_paragraphs(input);
         assert_eq!(output, "Just one line.\n");
+    }
+
+    // ── load_input ─────────────────────────────────────────────────────
+
+    #[test]
+    fn load_input_txt_reads_content_and_sets_wav_name() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut tmp = NamedTempFile::with_suffix(".txt").unwrap();
+        write!(tmp, "Hello world.").unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        let stem = tmp.path().file_stem().unwrap().to_str().unwrap().to_string();
+
+        let (article, wav) = load_input(&path).unwrap();
+        assert_eq!(article.plain_text, "Hello world.");
+        assert_eq!(article.content, "Hello world.");
+        assert_eq!(wav, Some(format!("{stem}.wav")));
+    }
+
+    #[test]
+    fn load_input_unsupported_extension_errors() {
+        use tempfile::NamedTempFile;
+        let tmp = NamedTempFile::with_suffix(".pdf").unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        assert!(load_input(&path).is_err());
     }
 
     // ── build_backend ─────────────────────────────────────────────────────

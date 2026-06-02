@@ -13,21 +13,10 @@ pub struct ParsedArticle {
     pub authors: Vec<String>,
     pub date: Option<String>,
     pub description: Option<String>,
+    /// Article content as markdown (headings, bold, links preserved).
     pub content: String,
-}
-
-pub enum OutputFormat {
-    Markdown,
-    Text,
-}
-
-impl OutputFormat {
-    fn as_str(&self) -> &'static str {
-        match self {
-            OutputFormat::Markdown => "markdown",
-            OutputFormat::Text => "txt",
-        }
-    }
+    /// Article content as plain text (for TTS — no markdown syntax).
+    pub plain_text: String,
 }
 
 fn parse_authors(raw: Option<&str>) -> Vec<String> {
@@ -84,7 +73,7 @@ fn extract_metadata(
     ))
 }
 
-pub fn extract(html: &str, url: &str, format: OutputFormat) -> Result<ParsedArticle, ArticleError> {
+pub fn extract(html: &str, url: &str) -> Result<ParsedArticle, ArticleError> {
     if augment::is_augment_site(url) {
         let content = augment::extract_content(html)
             .ok_or(ArticleError::ExtractionFailed)?;
@@ -100,6 +89,7 @@ pub fn extract(html: &str, url: &str, format: OutputFormat) -> Result<ParsedArti
                 authors: parse_authors(authors_raw.as_deref()),
                 date,
                 description,
+                plain_text: content.clone(),
                 content,
             })
         });
@@ -118,7 +108,7 @@ pub fn extract(html: &str, url: &str, format: OutputFormat) -> Result<ParsedArti
 
         let result = module
             .getattr("extract")?
-            .call1((html, url, format.as_str()))?;
+            .call1((html, url))?;
 
         let success: bool = result.get_item("success")?.extract()?;
         if !success {
@@ -132,13 +122,14 @@ pub fn extract(html: &str, url: &str, format: OutputFormat) -> Result<ParsedArti
             date: result.get_item("date")?.extract()?,
             description: result.get_item("description")?.extract()?,
             content: result.get_item("markdown")?.extract()?,
+            plain_text: result.get_item("plain_text")?.extract()?,
         })
     })
 }
 
-pub fn fetch_and_extract(url: &str, format: OutputFormat) -> Result<ParsedArticle, ArticleError> {
+pub fn fetch_and_extract(url: &str) -> Result<ParsedArticle, ArticleError> {
     let html = fetch::fetch(url)?;
-    extract(&html, url, format)
+    extract(&html, url)
 }
 
 #[cfg(test)]

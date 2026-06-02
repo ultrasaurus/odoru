@@ -20,9 +20,17 @@ pub async fn synthesize_to_wav(
 
     let mut writer = WavWriter::create(path, spec)?;
     let mut stream = engine.synthesize(text);
+    let mut segments_written = 0usize;
 
     while let Some(result) = stream.next().await {
-        let seg: AudioSegment = result?;
+        let seg: AudioSegment = match result {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Warning: skipping segment: {e}");
+                sp.inc(1);
+                continue;
+            }
+        };
         for sample in &seg.samples {
             writer.write_sample(*sample)?;
         }
@@ -38,10 +46,16 @@ pub async fn synthesize_to_wav(
         for sample in silence_samples(silence_ms, config.sample_rate) {
             writer.write_sample(sample)?;
         }
+        segments_written += 1;
         sp.inc(1);
     }
 
     writer.finalize()?;
+
+    if segments_written == 0 {
+        anyhow::bail!("No segments synthesized successfully");
+    }
+
     Ok(())
 }
 
