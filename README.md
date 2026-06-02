@@ -38,11 +38,11 @@ cargo install --path cli
 
 # F5 (slow — ~7 min for a short article)
 ```
-dl --audio --backend f5 http://ultrasaurus.com
+dl --audio --backend f5 https://ultrasaurus.com/2015/10/software-isnt-real/
 ```
 # Kokoro (needs KOKORO_MODEL_DIR set)
 ```
-dl --audio --backend kokoro http://ultrasaurus.com
+dl --audio --backend kokoro https://ultrasaurus.com/2015/10/software-isnt-real/.com
 ```
 
 ## Known Issues
