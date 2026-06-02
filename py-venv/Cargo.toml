@@ -8,3 +8,12 @@ pyo3 = { version = "0.28", features = ["auto-initialize"] }
 
 [dev-dependencies]
 pyo3 = { version = "0.28", features = ["auto-initialize"] }
+tokio = { version = "1", features = ["full"] }
+
+[[example]]
+name = "hello"
+path = "examples/hello.rs"
+
+[[example]]
+name = "async_hello"
+path = "examples/async_hello.rs"

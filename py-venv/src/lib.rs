@@ -33,8 +33,33 @@ use pyo3::types::{PyDict, PyModule};
 use std::ffi::CStr;
 
 // ---------------------------------------------------------------------------
-// Venv setup
+// Entry point
 // ---------------------------------------------------------------------------
+
+/// Acquire the Python GIL and run a closure.
+///
+/// This is the main entry point for all Python interaction. The closure
+/// receives a `Python<'py>` token required by other `py_venv` functions.
+///
+/// **Never hold across `.await`** — the GIL blocks the OS thread while held.
+/// In async code, use `tokio::task::spawn_blocking` to move GIL work off
+/// the async executor.
+///
+/// # Example
+/// ```
+/// py_venv::with_python(|py| {
+///     py_venv::setup(py).unwrap();
+///     Ok::<_, pyo3::PyErr>(())
+/// }).unwrap();
+/// ```
+pub fn with_python<F, T, E>(f: F) -> Result<T, E>
+where
+    F: for<'py> FnOnce(Python<'py>) -> Result<T, E>,
+    E: From<PyErr>,
+{
+    Python::attach(f)
+}
+
 
 /// Add the active venv's site-packages to `sys.path` and reset `sys.argv`.
 ///
