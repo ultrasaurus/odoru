@@ -5,6 +5,7 @@ use config::AudioConfig;
 use dl::ParsedArticle;
 use tts::{Backend, TtsEngine};
 use util::voice::VoiceDef;
+use util::cache;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 use std::time::Duration;
@@ -23,9 +24,18 @@ struct Cli {
     #[arg(long)]
     frontmatter: bool,
 
+    /// Skip the article cache — always fetch and overwrite
+    #[arg(long)]
+    no_cache: bool,
+
     /// Also synthesize audio to a WAV file
     #[arg(long)]
     audio: bool,
+
+    /// Output path for the WAV file, or directory to write into.
+    /// Defaults to out/<name>.wav in the current directory.
+    #[arg(short, long, value_name = "PATH")]
+    output: Option<String>,
 
     /// TTS backend to use when --audio is set
     #[arg(long, value_enum, default_value_t = AudioBackend::Kokoro)]
@@ -111,7 +121,7 @@ fn workspace_root() -> std::path::PathBuf {
 /// Local files: `.txt` (read directly) or `.html` (extract via trafilatura).
 /// Any other extension is an error. If the input is not an existing file path,
 /// it is treated as a URL.
-fn load_input(input: &str) -> anyhow::Result<(ParsedArticle, Option<String>)> {
+fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Option<String>)> {
     let path = Path::new(input);
     if path.exists() {
         let ext = path.extension()
@@ -133,7 +143,7 @@ fn load_input(input: &str) -> anyhow::Result<(ParsedArticle, Option<String>)> {
                     content: content.clone(),
                     plain_text: content,
                 };
-                Ok((article, Some(format!("{stem}.wav"))))
+                Ok((article, Some(stem)))
             }
             "html" => {
                 let html = std::fs::read_to_string(path)?;
@@ -146,12 +156,71 @@ fn load_input(input: &str) -> anyhow::Result<(ParsedArticle, Option<String>)> {
             ),
         }
     } else if input.starts_with("http://") || input.starts_with("https://") {
+        // Check cache first
+        if !no_cache {
+            if let Some(hit) = cache::lookup(input)? {
+                let article = ParsedArticle {
+                    url: hit.url,
+                    title: hit.title,
+                    authors: hit.authors,
+                    date: hit.date,
+                    description: hit.description,
+                    content: hit.content,
+                    plain_text: hit.plain_text,
+                };
+                return Ok((article, None));
+            }
+        }
+
+        // Cache miss or --no-cache: fetch and store
         let article = dl::fetch_and_extract(input)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        if let Err(e) = cache::store(
+            &article.url,
+            article.title.as_deref(),
+            &article.authors,
+            article.date.as_deref(),
+            article.description.as_deref(),
+            &article.content,
+            &article.plain_text,
+        ) {
+            eprintln!("Warning: failed to cache article: {e}");
+        }
+
         Ok((article, None))
     } else {
         anyhow::bail!("'{}' is not an existing file and does not look like a URL (expected http:// or https://)", input)
     }
+}
+
+/// Resolve the final WAV output path.
+///
+/// - If `-o` is given and is an existing directory: write `<dir>/<stem>.wav`
+/// - If `-o` is given and is a file path: use it directly (creates parent dirs)
+/// - If `-o` is absent: write to `out/<stem>.wav` in the current directory
+fn resolve_wav_path(output: Option<&str>, stem: &str) -> anyhow::Result<std::path::PathBuf> {
+    let path = match output {
+        Some(o) => {
+            let p = std::path::PathBuf::from(o);
+            if p.is_dir() {
+                p.join(format!("{stem}.wav"))
+            } else {
+                p
+            }
+        }
+        None => std::path::PathBuf::from("out").join(format!("{stem}.wav")),
+    };
+
+    // Create parent directory if needed
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("Could not create output directory {}: {e}", parent.display()))?;
+        }
+    }
+
+    Ok(path)
 }
 
 #[tokio::main]
@@ -161,18 +230,17 @@ async fn main() -> anyhow::Result<()> {
     let sp = spinner(&format!("Loading {}...", cli.input));
     let input = cli.input.clone();
     let input_display = cli.input.clone();
+    let no_cache = cli.no_cache;
     let (article, wav_path_override) = match tokio::task::spawn_blocking(move || {
-        load_input(&input)
+        load_input(&input, no_cache)
     }).await? {
         Err(e) => {
             sp.finish_with_message(format!("✗ {e}"));
             return Ok(());
         }
         Ok(a) => {
-            sp.finish_with_message(format!(
-                "✔ {}",
-                a.0.title.as_deref().unwrap_or(&input_display)
-            ));
+            let label = a.0.title.as_deref().unwrap_or(&input_display);
+            sp.finish_with_message(format!("✔ {}", label));
             a
         }
     };
@@ -187,14 +255,16 @@ async fn main() -> anyhow::Result<()> {
     print!("{}", content);
 
     if cli.audio {
-        let wav_path = wav_path_override.unwrap_or_else(|| wav_filename(&article));
+        let stem = wav_path_override
+            .unwrap_or_else(|| wav_filename(&article));
+        let wav_path = resolve_wav_path(cli.output.as_deref(), &stem)?;
         let backend = build_backend(cli.backend)?;
         let engine = TtsEngine::builder().backend(backend).build()?;
         let config = AudioConfig::default();
         let total = tts::splitter::split(&article.plain_text).len();
         let pb = audio_progress(total);
-        audio::synthesize_to_wav(&article.plain_text, &wav_path, &engine, &config, &pb).await?;
-        pb.finish_with_message(format!("✔ Audio saved to {}", wav_path));
+        audio::synthesize_to_wav(&article.plain_text, wav_path.to_str().unwrap(), &engine, &config, &pb).await?;
+        pb.finish_with_message(format!("✔ Audio saved to {}", wav_path.display()));
     }
 
     Ok(())
@@ -340,6 +410,33 @@ mod tests {
         assert_eq!(output, "Just one line.\n");
     }
 
+    // ── resolve_wav_path ───────────────────────────────────────────────
+
+    #[test]
+    fn resolve_wav_path_no_output_uses_out_dir() {
+        let path = resolve_wav_path(None, "my-article").unwrap();
+        assert_eq!(path, std::path::PathBuf::from("out/my-article.wav"));
+        // created the dir
+        assert!(std::path::Path::new("out").is_dir());
+    }
+
+    #[test]
+    fn resolve_wav_path_explicit_file() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let out = dir.path().join("custom.wav");
+        let path = resolve_wav_path(Some(out.to_str().unwrap()), "ignored").unwrap();
+        assert_eq!(path, out);
+    }
+
+    #[test]
+    fn resolve_wav_path_directory_appends_stem() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let path = resolve_wav_path(Some(dir.path().to_str().unwrap()), "my-stem").unwrap();
+        assert_eq!(path, dir.path().join("my-stem.wav"));
+    }
+
     // ── load_input ─────────────────────────────────────────────────────
 
     #[test]
@@ -355,7 +452,7 @@ mod tests {
         let (article, wav) = load_input(&path).unwrap();
         assert_eq!(article.plain_text, "Hello world.");
         assert_eq!(article.content, "Hello world.");
-        assert_eq!(wav, Some(format!("{stem}.wav")));
+        assert_eq!(wav, Some(stem));
     }
 
     #[test]

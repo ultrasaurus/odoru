@@ -29,26 +29,76 @@ python -m spacy download en_core_web_sm
 If you skip this step, the first call to `G2P()` will attempt to download it
 automatically, which can cause confusing errors in some environments.
 
-always run `cargo run -p app` from the workspace root, with the frontend built at `app/frontend/dist`
 
-## Install CLI locally
-```
+## CLI
+
+Install the `dl` binary:
+
+```bash
 cargo install --path cli
 ```
 
-# F5 (slow — ~7 min for a short article)
+### Usage
+
 ```
-dl --audio --backend f5 https://ultrasaurus.com/2015/10/software-isnt-real/
+dl [OPTIONS] <INPUT>
 ```
-# Kokoro (needs KOKORO_MODEL_DIR set)
+
+`<INPUT>` is a URL, a local `.txt` file, or a local `.html` file.
+
+```bash
+# Fetch a URL and print as markdown
+dl https://ultrasaurus.com/2015/10/software-isnt-real/
+
+# Read a local text file
+dl abstract.txt
+
+# Print as plain text
+dl --format text https://ultrasaurus.com/2015/10/software-isnt-real/
+
+# Synthesize audio with Kokoro (fast, needs $KOKORO_MODEL_DIR)
+dl --audio --backend kokoro abstract.txt
+
+# Synthesize audio with F5-TTS (slow, ~7 min for a short article)
+dl --audio --backend f5 abstract.txt
+
+# Write audio to a specific path or directory
+dl --audio --backend kokoro -o /tmp/out.wav abstract.txt
+dl --audio --backend kokoro -o /tmp/ abstract.txt
 ```
-dl --audio --backend kokoro https://ultrasaurus.com/2015/10/software-isnt-real/.com
+
+Audio is written to `out/<name>.wav` by default (directory created if needed).
+Override with `-o <path>` — if the path is an existing directory, the filename
+is derived from the input as usual.
+
+### Backends
+
+| Backend | Speed | Notes |
+|---------|-------|-------|
+| `kokoro` | Fast | ONNX inference. Requires `$KOKORO_MODEL_DIR`. |
+| `f5` | Slow (~0.17x realtime on M1) | MLX inference. Requires `voices/sarah/`. |
+| `mock` | Instant | Sine wave, no model weights needed. For testing. |
+
+### Pronunciation overrides
+
+Edit `tts_overrides.txt` in the workspace root to customize how words are
+spoken by the F5 backend. Changes take effect on the next run — no recompile
+needed. See the file for format and examples.
+
+
+## App server
+
+Always run from the workspace root, with the frontend built at `app/frontend/dist`:
+
+```bash
+cargo run -p app
 ```
+
 
 ## Known Issues
 
 In general, if anything works, consider it a happy surprise.
 
 ### CLI
-- Segfault on exit when `--audio` is used. This is a PyO3/tokio shutdown 
+- Segfault on exit when `--audio` is used. This is a PyO3/tokio shutdown
   ordering issue. All output is written successfully before the crash occurs.
