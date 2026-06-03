@@ -38,7 +38,7 @@ class AudioQueue {
     reset() {
         this.ctx.close();
         this.ctx = new AudioContext({ sampleRate: 24000 });
-        this.ctx.resume(); // unlock while still in user gesture
+        this.ctx.suspend();
         this.nextStartTime = 0;
         this.firstStartTime = 0;
         this.started = false;

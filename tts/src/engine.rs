@@ -51,6 +51,31 @@ impl TtsEngine {
         names
     }
 
+    /// Return the cache key string for a named voice, or `None` if unknown.
+    pub fn voice_cache_key(&self, voice_name: &str) -> Option<String> {
+        self.voices.get(voice_name).map(|v| v.cache_key())
+    }
+
+    /// Check whether every sentence in `text` is already in the audio disk cache
+    /// for the given voice. Returns `None` if the voice name is not found.
+    /// Only meaningful for the F5 backend (Kokoro is never cached).
+    pub fn all_audio_cached(&self, text: &str, voice_name: &str) -> Option<bool> {
+        let voice = self.voices.get(voice_name)?.clone();
+        let sentences = splitter::split(text);
+        let all_cached = sentences.iter()
+            .filter(|s| !s.text.trim().is_empty())
+            .all(|s| {
+                if let crate::backend::Voice::F5Tts { .. } = &voice {
+                    let normalized = crate::f5::normalizer::normalize(&s.text);
+                    let key = audio_cache::cache_key(&normalized, &voice.cache_key());
+                    audio_cache::lookup(&key).is_some()
+                } else {
+                    false // Kokoro not cached
+                }
+            });
+        Some(all_cached)
+    }
+
     /// Synthesise `text` using the named voice, streaming one `AudioSegment` per sentence.
     /// Returns an error stream if `voice_name` is not found.
     pub fn synthesize(&self, text: &str, voice_name: &str) -> AudioStream {

@@ -189,6 +189,17 @@ async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 #[derive(Deserialize)]
 struct DocQuery {
     url: String,
+    /// Optional voice name — if provided, `cached.audio` reflects whether all
+    /// sentences are in the audio disk cache for that voice.
+    voice: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CachedInfo {
+    content: bool,
+    /// Voice cache key string (e.g. "f5:sarah:0.85:2.0") if all audio is cached
+    /// for the requested voice; `null` otherwise or if no voice was requested.
+    audio: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -199,10 +210,13 @@ struct DocResponse {
     date: Option<String>,
     plain_text: String,
     content: String,
-    cached: bool,
+    cached: CachedInfo,
 }
 
-async fn get_doc(Query(q): Query<DocQuery>) -> impl IntoResponse {
+async fn get_doc(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<DocQuery>,
+) -> impl IntoResponse {
     if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
         return (
             StatusCode::BAD_REQUEST,
@@ -210,8 +224,22 @@ async fn get_doc(Query(q): Query<DocQuery>) -> impl IntoResponse {
         ).into_response();
     }
 
+    // Helper: check audio cache for all sentences in `text` for the requested voice.
+    let audio_cached = |plain_text: &str| -> Option<String> {
+        let voice_name = q.voice.as_deref()?;
+        let all_cached = state.tts.all_audio_cached(plain_text, voice_name)?;
+        if all_cached {
+            // Return the voice cache key so the client knows exactly which voice
+            // version is cached (encodes backend + params).
+            state.tts.voice_cache_key(voice_name)
+        } else {
+            None
+        }
+    };
+
     match cache::lookup(&q.url) {
         Ok(Some(hit)) => {
+            let audio = audio_cached(&hit.plain_text);
             return Json(DocResponse {
                 url: hit.url,
                 title: hit.title,
@@ -219,7 +247,7 @@ async fn get_doc(Query(q): Query<DocQuery>) -> impl IntoResponse {
                 date: hit.date,
                 plain_text: hit.plain_text,
                 content: hit.content,
-                cached: true,
+                cached: CachedInfo { content: true, audio },
             }).into_response();
         }
         Ok(None) => {}
@@ -253,6 +281,7 @@ async fn get_doc(Query(q): Query<DocQuery>) -> impl IntoResponse {
         eprintln!("Cache store error: {e}");
     }
 
+    let audio = audio_cached(&article.plain_text);
     Json(DocResponse {
         url: article.url,
         title: article.title,
@@ -260,7 +289,7 @@ async fn get_doc(Query(q): Query<DocQuery>) -> impl IntoResponse {
         date: article.date,
         plain_text: article.plain_text,
         content: article.content,
-        cached: false,
+        cached: CachedInfo { content: false, audio },
     }).into_response()
 }
 
