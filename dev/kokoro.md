@@ -1,5 +1,8 @@
+# Kokoro developement
 
-download all english voices
+kokoro is installed in ~/.kokoro
+
+## download all english voices
 
 ```
 cd ~/.kokoro/voices
