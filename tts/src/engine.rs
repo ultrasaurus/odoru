@@ -61,9 +61,14 @@ impl TtsEngine {
     /// Only meaningful for the F5 backend (Kokoro is never cached).
     pub fn all_audio_cached(&self, text: &str, voice_name: &str) -> Option<bool> {
         let voice = self.voices.get(voice_name)?.clone();
-        let sentences = splitter::split(text);
-        let all_cached = sentences.iter()
+        let sentences: Vec<_> = splitter::split(text)
+            .into_iter()
             .filter(|s| !s.text.trim().is_empty())
+            .collect();
+        if sentences.is_empty() {
+            return Some(false);
+        }
+        let all_cached = sentences.iter()
             .all(|s| {
                 if let crate::backend::Voice::F5Tts { .. } = &voice {
                     let normalized = crate::f5::normalizer::normalize(&s.text);
