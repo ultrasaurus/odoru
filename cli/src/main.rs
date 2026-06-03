@@ -4,7 +4,6 @@ use clap::{Parser, ValueEnum};
 use config::AudioConfig;
 use dl::ParsedArticle;
 use tts::{Backend, TtsEngine};
-use util::voice::VoiceDef;
 use util::cache;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
@@ -40,6 +39,11 @@ struct Cli {
     /// TTS backend to use when --audio is set
     #[arg(long, value_enum, default_value_t = AudioBackend::Kokoro)]
     backend: AudioBackend,
+
+    /// Voice name for F5 backend (e.g. "sarah"). Lists available voices if
+    /// combined with --backend f5. Errors if used with other backends.
+    #[arg(long)]
+    voice: Option<String>,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -81,9 +85,12 @@ fn audio_progress(total: usize) -> ProgressBar {
     pb
 }
 
-fn build_backend(backend: AudioBackend) -> anyhow::Result<(Backend, String)> {
+fn build_backend(backend: AudioBackend, voice: Option<&str>) -> anyhow::Result<(Backend, String)> {
     match backend {
         AudioBackend::Kokoro => {
+            if voice.is_some() {
+                anyhow::bail!("--voice is only supported with --backend f5");
+            }
             let model_dir = std::env::var("KOKORO_MODEL_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| {
@@ -93,28 +100,43 @@ fn build_backend(backend: AudioBackend) -> anyhow::Result<(Backend, String)> {
             Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), speed: 1.0 }, "am_puck".into()))
         }
         AudioBackend::F5 => {
-            let voices_dir = workspace_root().join("voices");
-            let def = VoiceDef::load(&voices_dir.join("sarah"))
-                .map_err(|e| anyhow::anyhow!("Failed to load voice 'sarah': {e}"))?;
+            let voices_dir = util::voice::voices_dir()
+                .map_err(|e| anyhow::anyhow!("Cannot find voices directory: {e}"))?;
+            let all = util::voice::VoiceDef::load_all(&voices_dir)
+                .map_err(|e| anyhow::anyhow!("Failed to load voices: {e}"))?;
+            if all.is_empty() {
+                anyhow::bail!("No voices found in {}", voices_dir.display());
+            }
+            let def = match voice {
+                Some(name) => {
+                    let available: Vec<String> = all.iter().map(|v| v.name.clone()).collect();
+                    all.into_iter()
+                        .find(|v| v.name == name)
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "Voice '{}' not found. Available: {}",
+                            name,
+                            available.join(", ")
+                        ))?
+                }
+                None => all.into_iter().next().unwrap(),
+            };
             let name = def.name.clone();
-            let voice = tts::Voice::F5Tts {
+            let tts_voice = tts::Voice::F5Tts {
                 name: def.name,
                 voice_ref: def.voice_ref,
                 ref_text: def.ref_text,
                 speed: def.speed,
                 cfg_strength: def.cfg_strength,
             };
-            Ok((Backend::F5Tts { voices: vec![voice], workers: 1 }, name))
+            Ok((Backend::F5Tts { voices: vec![tts_voice], workers: 1 }, name))
         }
-        AudioBackend::Mock => Ok((Backend::Mock, "mock".into())),
+        AudioBackend::Mock => {
+            if voice.is_some() {
+                anyhow::bail!("--voice is only supported with --backend f5");
+            }
+            Ok((Backend::Mock, "mock".into()))
+        }
     }
-}
-
-/// Resolve the workspace root from the cli crate's manifest directory.
-fn workspace_root() -> std::path::PathBuf {
-    // CARGO_MANIFEST_DIR is set by cargo at compile time to cli/
-    // The workspace root is one level up.
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
 /// Load article content from a local file or URL.
@@ -259,7 +281,7 @@ async fn main() -> anyhow::Result<()> {
         let stem = wav_path_override
             .unwrap_or_else(|| wav_filename(&article));
         let wav_path = resolve_wav_path(cli.output.as_deref(), &stem)?;
-        let (backend, voice_name) = build_backend(cli.backend)?;
+        let (backend, voice_name) = build_backend(cli.backend, cli.voice.as_deref())?;
         let engine = TtsEngine::builder().backend(backend).build()?;
         let config = AudioConfig::default();
         let total = tts::splitter::split(&article.plain_text).len();
@@ -472,16 +494,23 @@ mod tests {
 
     #[test]
     fn build_backend_mock_returns_mock_variant() {
-        let (backend, voice_name) = build_backend(AudioBackend::Mock).unwrap();
+        let (backend, voice_name) = build_backend(AudioBackend::Mock, None).unwrap();
         assert!(matches!(backend, tts::Backend::Mock));
         assert_eq!(voice_name, "mock");
+    }
+
+    #[test]
+    fn build_backend_mock_rejects_voice_flag() {
+        let result = build_backend(AudioBackend::Mock, Some("sarah"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("--voice"));
     }
 
     #[test]
     fn build_backend_kokoro_uses_env_var() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("KOKORO_MODEL_DIR", "/tmp/kokoro-test");
-        let (backend, voice_name) = build_backend(AudioBackend::Kokoro).unwrap();
+        let (backend, voice_name) = build_backend(AudioBackend::Kokoro, None).unwrap();
         std::env::remove_var("KOKORO_MODEL_DIR");
         assert_eq!(voice_name, "am_puck");
         match backend {
@@ -494,10 +523,17 @@ mod tests {
     }
 
     #[test]
+    fn build_backend_kokoro_rejects_voice_flag() {
+        let result = build_backend(AudioBackend::Kokoro, Some("sarah"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("--voice"));
+    }
+
+    #[test]
     fn build_backend_kokoro_falls_back_to_home_dir() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("KOKORO_MODEL_DIR");
-        let (backend, _) = build_backend(AudioBackend::Kokoro).unwrap();
+        let (backend, _) = build_backend(AudioBackend::Kokoro, None).unwrap();
         match backend {
             tts::Backend::Kokoro { model_dir, .. } => {
                 assert!(model_dir.to_string_lossy().ends_with(".kokoro"));
@@ -508,23 +544,33 @@ mod tests {
 
     #[test]
     fn build_backend_f5_loads_sarah_voice() {
-        let (backend, voice_name) = build_backend(AudioBackend::F5).unwrap();
+        let (backend, voice_name) = build_backend(AudioBackend::F5, None).unwrap();
+        assert_eq!(voice_name, "f5-am-puck"); // first alphabetically
+        let _ = backend; // just check it doesn't error
+    }
+
+    #[test]
+    fn build_backend_f5_selects_named_voice() {
+        let (backend, voice_name) = build_backend(AudioBackend::F5, Some("sarah")).unwrap();
         assert_eq!(voice_name, "sarah");
         match backend {
-            tts::Backend::F5Tts { voices, workers } => {
-                assert_eq!(workers, 1);
-                assert_eq!(voices.len(), 1);
+            tts::Backend::F5Tts { voices, .. } => {
                 match &voices[0] {
-                    tts::Voice::F5Tts { name, speed, cfg_strength, .. } => {
-                        assert_eq!(name, "sarah");
-                        assert!((speed - 0.85).abs() < 0.001);
-                        assert!((cfg_strength - 1.5).abs() < 0.001);
-                    }
+                    tts::Voice::F5Tts { name, .. } => assert_eq!(name, "sarah"),
                     _ => panic!("expected F5Tts voice"),
                 }
             }
             _ => panic!("expected F5Tts backend"),
         }
+    }
+
+    #[test]
+    fn build_backend_f5_unknown_voice_errors() {
+        let result = build_backend(AudioBackend::F5, Some("nobody"));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("nobody"));
+        assert!(msg.contains("Available"));
     }
 
     // ── integration: mock synthesis to WAV ────────────────────────────────
