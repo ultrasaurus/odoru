@@ -94,6 +94,10 @@ Always run from the workspace root, with the frontend built at `app/frontend/dis
 cargo run -p app
 ```
 
+for now, you need to specify which backend to build
+```bash
+ODORU_BACKEND=f5 cargo run -p app
+```
 
 ## Known Issues
 
