@@ -379,6 +379,20 @@ html, body {
   cursor: not-allowed;
 }
 
+.synth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.time-estimate {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  flex: 1;
+}
+
 .download-btn {
   flex-shrink: 0;
   width: 36px;

@@ -59,8 +59,8 @@ export class Player {
     endedCbs = [];
     onReadyCb = null;
     onErrorCb = null;
+    done = false; // true once the WS sends {done: true}
     // Seconds into the full audio where the current play session started.
-    // = segments[seekIndex].startTime, updated on each seek.
     seekOffset = 0;
     constructor(container) {
         this.container = container;
@@ -87,6 +87,7 @@ export class Player {
                 return;
             }
             if (isDone(msg)) {
+                this.done = true;
                 this.ws?.close();
                 return;
             }
@@ -133,6 +134,11 @@ export class Player {
         return last ? last.endTime : 0;
     }
     get hasAudio() { return this.segments.length > 0; }
+    get synthesizedWordCount() {
+        return this.segments
+            .map(s => s.transcript.text.trim().split(/\s+/).filter(Boolean).length)
+            .reduce((a, b) => a + b, 0);
+    }
     downloadWav(filename) {
         if (!this.hasAudio)
             return;
@@ -170,6 +176,7 @@ export class Player {
         this.segmentEls = [];
         this.activeIndex = -1;
         this.seekOffset = 0;
+        this.done = false;
     }
     renderSegment(transcript, index) {
         if (index === 0)
@@ -212,9 +219,9 @@ export class Player {
             const pos = this.position;
             this.timeUpdateCbs.forEach(cb => cb(pos));
             this.highlightCurrent();
-            // Detect end of playback
+            // Detect end of playback — only after synthesis is complete
             const last = this.segments[this.segments.length - 1];
-            if (last && this.queue.currentTime >= this.queue.firstStartTime +
+            if (this.done && last && this.queue.currentTime >= this.queue.firstStartTime +
                 (last.endTime - this.seekOffset) &&
                 lastEndedIndex.value < this.segments.length - 1) {
                 lastEndedIndex.value = this.segments.length - 1;

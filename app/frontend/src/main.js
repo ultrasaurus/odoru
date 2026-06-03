@@ -1,8 +1,16 @@
 import './style.css';
 import { Player } from './player';
+// Approximate generation seconds per word for each backend.
+// Kokoro: ~0.2 sec/word (measured: 143 words in 26s)
+// F5:     ~3.0 sec/word (measured: 143 words in 410s)
+const SECS_PER_WORD = {
+    kokoro: 0.2,
+    f5: 3.0,
+};
 // ── State ─────────────────────────────────────────────────────────────────
 let voices = [];
 let selectedVoice = null;
+let activeBackend = 'kokoro';
 // ── DOM ───────────────────────────────────────────────────────────────────
 const app = document.getElementById('app');
 app.innerHTML = `
@@ -31,7 +39,10 @@ app.innerHTML = `
               placeholder="…or paste text here directly, then press Synthesize"
               rows="4"
             ></textarea>
-            <button id="synth-btn" class="synth-btn">Synthesize</button>
+            <div class="synth-row">
+              <div id="time-estimate" class="time-estimate"></div>
+              <button id="synth-btn" class="synth-btn">Synthesize</button>
+            </div>
           </div>
 
           <div id="transcript-container" class="transcript-container">
@@ -70,6 +81,7 @@ app.innerHTML = `
 `;
 const synthBtn = document.getElementById('synth-btn');
 const textInput = document.getElementById('text-input');
+const timeEstimate = document.getElementById('time-estimate');
 const urlInput = document.getElementById('url-input');
 const fetchStatus = document.getElementById('fetch-status');
 const playBtn = document.getElementById('play-btn');
@@ -107,19 +119,41 @@ async function loadVoices() {
         const res = await fetch('/voices');
         if (!res.ok)
             throw new Error(`HTTP ${res.status}`);
-        voices = await res.json();
+        const data = await res.json();
+        voices = data.voices;
+        activeBackend = data.backend;
         if (voices.length > 0 && !selectedVoice) {
             selectVoice(voices[0].name);
         }
         else {
             renderVoices();
         }
+        // Refresh estimate now that we know the backend
+        updateEstimate(textInput.value);
     }
     catch (err) {
         voiceList.innerHTML = '<div class="voice-loading error">Failed to load voices.</div>';
     }
 }
 loadVoices();
+// ── Time estimate ─────────────────────────────────────────────────────────
+function fmtDuration(secs) {
+    if (secs < 60)
+        return `~${Math.round(secs)}s`;
+    const m = Math.floor(secs / 60);
+    const s = Math.round(secs % 60);
+    return s > 0 ? `~${m}m ${s}s` : `~${m}m`;
+}
+function updateEstimate(text) {
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    if (words === 0) {
+        timeEstimate.textContent = '';
+        return;
+    }
+    const rate = SECS_PER_WORD[activeBackend] ?? 0.2;
+    const secs = words * rate;
+    timeEstimate.textContent = `${fmtDuration(secs)} to synthesize (${words} words)`;
+}
 // ── Player ─────────────────────────────────────────────────────────────────
 function downloadFilename() {
     const url = urlInput.value.trim();
@@ -161,11 +195,18 @@ player.onTimeUpdate(t => {
     progressFill.style.width = `${Math.min(pct, 100)}%`;
     timeTotal.textContent = fmt(dur);
 });
+let synthStart = 0;
 player.onEnded(() => {
     playIcon.textContent = '▶';
     progressFill.style.width = '100%';
     synthBtn.disabled = false;
     downloadBtn.disabled = false;
+    if (synthStart > 0) {
+        const elapsed = ((Date.now() - synthStart) / 1000).toFixed(0);
+        const words = player.synthesizedWordCount;
+        timeEstimate.textContent = `Synthesized ${words} words in ${elapsed}s`;
+        synthStart = 0;
+    }
 });
 synthBtn.addEventListener('click', () => {
     const text = textInput.value.trim();
@@ -178,6 +219,7 @@ synthBtn.addEventListener('click', () => {
     progressFill.style.width = '0%';
     timeCurrent.textContent = '0:00';
     timeTotal.textContent = '0:00';
+    synthStart = Date.now();
     player.synthesize(text, selectedVoice ?? undefined);
 });
 playBtn.addEventListener('click', () => {
@@ -187,6 +229,7 @@ playBtn.addEventListener('click', () => {
 downloadBtn.addEventListener('click', () => {
     player.downloadWav(downloadFilename());
 });
+textInput.addEventListener('input', () => updateEstimate(textInput.value));
 textInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         synthBtn.click();
@@ -210,6 +253,7 @@ urlInput.addEventListener('keydown', async (e) => {
             return;
         }
         textInput.value = data.plain_text;
+        updateEstimate(data.plain_text);
         const cached = data.cached ? ' (cached)' : '';
         const title = data.title ?? url;
         fetchStatus.textContent = `✔ ${title}${cached}`;

@@ -87,11 +87,19 @@ struct VoiceInfo {
     description: String,
 }
 
+#[derive(Clone, Serialize)]
+struct VoicesResponse {
+    backend: String,
+    voices: Vec<VoiceInfo>,
+}
+
 #[derive(Clone)]
 struct AppState {
     tts: Arc<TtsEngine>,
     /// Available voices, in order (first = default).
     voices: Vec<VoiceInfo>,
+    /// Active backend name ("kokoro" or "f5").
+    backend: String,
     cache: SegmentCache,
 }
 
@@ -168,7 +176,10 @@ async fn send_segment(
 // ---------------------------------------------------------------------------
 
 async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    Json(state.voices.clone())
+    Json(VoicesResponse {
+        backend: state.backend.clone(),
+        voices: state.voices.clone(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +369,7 @@ fn kokoro_voices(model_dir: &std::path::Path) -> Vec<VoiceInfo> {
 // Backend construction
 // ---------------------------------------------------------------------------
 
-fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>)> {
+fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>, String)> {
     let backend_name = std::env::var("ODORU_BACKEND").unwrap_or_else(|_| "kokoro".into());
 
     match backend_name.to_lowercase().as_str() {
@@ -391,9 +402,9 @@ fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>)> {
             eprintln!("F5 backend: {} voice(s), {} worker(s)", tts_voices.len(), workers);
             for v in &voice_infos { eprintln!("  - {}", v.name); }
 
-            Ok((Backend::F5Tts { voices: tts_voices, workers }, voice_infos))
+            Ok((Backend::F5Tts { voices: tts_voices, workers }, voice_infos, "f5".into()))
         }
-        "kokoro" | _ => {
+        _ => {
             let model_dir = std::env::var("KOKORO_MODEL_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| {
@@ -409,7 +420,7 @@ fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>)> {
             let all_voice_names: Vec<String> = voice_infos.iter().map(|v| v.name.clone()).collect();
 
             eprintln!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
-            Ok((Backend::Kokoro { model_dir, voice: default_voice, all_voices: all_voice_names, speed: 1.0 }, voice_infos))
+            Ok((Backend::Kokoro { model_dir, voice: default_voice, all_voices: all_voice_names, speed: 1.0 }, voice_infos, "kokoro".into()))
         }
     }
 }
@@ -422,7 +433,7 @@ fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>)> {
 async fn main() -> anyhow::Result<()> {
     eprintln!("Initializing TTS engine…");
 
-    let (backend, voice_infos) = build_backend()?;
+    let (backend, voice_infos, backend_name) = build_backend()?;
 
     let tts = TtsEngine::builder().backend(backend).build()?;
     eprintln!("TTS ready.");
@@ -430,6 +441,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         tts: Arc::new(tts),
         voices: voice_infos,
+        backend: backend_name,
         cache: Arc::new(DashMap::new()),
     });
 
