@@ -2,17 +2,18 @@
 //!
 //! WebSocket-based TTS server with in-memory segment cache.
 //!
-//! Usage:
-//!   cargo run --bin server
+//! ## Environment variables
 //!
-//! Protocol:
-//!   client → server: { "text": "..." }
+//!   ODORU_BACKEND     — "kokoro" (default) or "f5"
+//!   KOKORO_MODEL_DIR  — path to Kokoro model directory (default: ~/.kokoro)
+//!   VOICES_DIR        — path to voices directory (default: auto-detected)
+//!   ODORU_WORKERS     — F5 worker count (default: 1)
+//!
+//! ## Protocol
+//!
+//!   client → server: { "text": "...", "voice": "sarah" }
 //!   server → client: { "index": 0, "transcript": {...}, "audio": "<base64 f32le PCM>", "paragraph_end": bool }
 //!   server → client: { "done": true }
-//!
-//! Cache:
-//!   Key: SHA-256(text + voice)
-//!   Value: Vec<CachedSegment> — fully rendered segments ready to stream
 
 use axum::{
     extract::{
@@ -27,15 +28,15 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
-use tts::{AudioSegment, Backend, TtsEngine};
+use tts::{AudioSegment, Backend, TtsEngine, Voice};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, services::ServeDir};
-use util::cache;
+use util::{cache, voice as voice_util};
 
 // ---------------------------------------------------------------------------
-// Cache
+// Segment cache
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -65,7 +66,7 @@ impl CachedSegment {
     }
 }
 
-type Cache = Arc<DashMap<String, Vec<CachedSegment>>>;
+type SegmentCache = Arc<DashMap<String, Vec<CachedSegment>>>;
 
 fn cache_key(text: &str, voice: &str) -> String {
     let mut h = Sha256::new();
@@ -76,13 +77,28 @@ fn cache_key(text: &str, voice: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// State
+// App state
 // ---------------------------------------------------------------------------
+
+/// A voice entry for the /voices endpoint and voice picker.
+#[derive(Clone, Serialize)]
+struct VoiceInfo {
+    name: String,
+    description: String,
+}
 
 #[derive(Clone)]
 struct AppState {
     tts: Arc<TtsEngine>,
-    cache: Cache,
+    /// Available voices, in order (first = default).
+    voices: Vec<VoiceInfo>,
+    cache: SegmentCache,
+}
+
+impl AppState {
+    fn default_voice(&self) -> &str {
+        self.voices.first().map(|v| v.name.as_str()).unwrap_or("mock")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -92,11 +108,9 @@ struct AppState {
 #[derive(Deserialize)]
 struct SynthRequest {
     text: String,
-    #[serde(default = "default_voice")]
-    voice: String,
+    /// Voice name. Defaults to the first available voice.
+    voice: Option<String>,
 }
-
-fn default_voice() -> String { "am_puck".into() }
 
 #[derive(Serialize)]
 struct SegmentMsg<'a> {
@@ -150,6 +164,14 @@ async fn send_segment(
 }
 
 // ---------------------------------------------------------------------------
+// GET /voices
+// ---------------------------------------------------------------------------
+
+async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(state.voices.clone())
+}
+
+// ---------------------------------------------------------------------------
 // GET /doc?url=<url>
 // ---------------------------------------------------------------------------
 
@@ -169,10 +191,7 @@ struct DocResponse {
     cached: bool,
 }
 
-async fn get_doc(
-    Query(q): Query<DocQuery>,
-) -> impl IntoResponse {
-    // Validate it looks like a URL
+async fn get_doc(Query(q): Query<DocQuery>) -> impl IntoResponse {
     if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
         return (
             StatusCode::BAD_REQUEST,
@@ -180,7 +199,6 @@ async fn get_doc(
         ).into_response();
     }
 
-    // Check cache first
     match cache::lookup(&q.url) {
         Ok(Some(hit)) => {
             return Json(DocResponse {
@@ -194,34 +212,24 @@ async fn get_doc(
             }).into_response();
         }
         Ok(None) => {}
-        Err(e) => {
-            eprintln!("Cache lookup error: {e}");
-        }
+        Err(e) => eprintln!("Cache lookup error: {e}"),
     }
 
-    // Cache miss — fetch and extract
     let url = q.url.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        dl::fetch_and_extract(&url)
-    }).await;
+    let result = tokio::task::spawn_blocking(move || dl::fetch_and_extract(&url)).await;
 
     let article = match result {
         Ok(Ok(a)) => a,
-        Ok(Err(e)) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({ "error": format!("Fetch failed: {e}") })),
-            ).into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Task error: {e}") })),
-            ).into_response();
-        }
+        Ok(Err(e)) => return (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": format!("Fetch failed: {e}") })),
+        ).into_response(),
+        Err(e) => return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Task error: {e}") })),
+        ).into_response(),
     };
 
-    // Store in cache
     if let Err(e) = cache::store(
         &article.url,
         article.title.as_deref(),
@@ -273,33 +281,30 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         }
     };
 
-    let key = cache_key(&req.text, &req.voice);
+    let voice_name = req.voice.as_deref().unwrap_or_else(|| state.default_voice()).to_string();
+    let key = cache_key(&req.text, &voice_name);
 
-    // ── Cache hit ────────────────────────────────────────────────────────────
+    // ── Cache hit ─────────────────────────────────────────────────────────
     if let Some(segments) = state.cache.get(&key) {
         eprintln!("Cache hit for key {}", &key[..8]);
         for seg in segments.iter() {
-            if !send_segment(&mut sender, seg, true).await {
-                return;
-            }
+            if !send_segment(&mut sender, seg, true).await { return; }
         }
         let done = serde_json::to_string(&DoneMsg { done: true }).unwrap();
         let _ = sender.send(Message::Text(done.into())).await;
         return;
     }
 
-    // ── Cache miss: synthesize, cache, stream ────────────────────────────────
-    eprintln!("Cache miss — synthesizing…");
-    let mut stream = state.tts.synthesize(&req.text, &req.voice);
+    // ── Cache miss: synthesize, cache, stream ─────────────────────────────
+    eprintln!("Cache miss — synthesizing with voice '{voice_name}'…");
+    let mut stream = state.tts.synthesize(&req.text, &voice_name);
     let mut rendered: Vec<CachedSegment> = Vec::new();
 
     while let Some(result) = stream.next().await {
         match result {
             Ok(seg) => {
                 let cached_seg = CachedSegment::from_segment(&seg);
-                if !send_segment(&mut sender, &cached_seg, false).await {
-                    return;
-                }
+                if !send_segment(&mut sender, &cached_seg, false).await { return; }
                 rendered.push(cached_seg);
             }
             Err(e) => {
@@ -317,6 +322,64 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 }
 
 // ---------------------------------------------------------------------------
+// Backend construction
+// ---------------------------------------------------------------------------
+
+fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>)> {
+    let backend_name = std::env::var("ODORU_BACKEND").unwrap_or_else(|_| "kokoro".into());
+
+    match backend_name.to_lowercase().as_str() {
+        "f5" => {
+            let voices_dir = voice_util::voices_dir()
+                .map_err(|e| anyhow::anyhow!("Cannot find voices directory: {e}"))?;
+            let defs = voice_util::VoiceDef::load_all(&voices_dir)?;
+            if defs.is_empty() {
+                anyhow::bail!("No voices found in {}", voices_dir.display());
+            }
+
+            let workers: usize = std::env::var("ODORU_WORKERS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
+
+            let voice_infos: Vec<VoiceInfo> = defs.iter().map(|d| VoiceInfo {
+                name: d.name.clone(),
+                description: d.description.clone(),
+            }).collect();
+
+            let tts_voices: Vec<Voice> = defs.into_iter().map(|d| Voice::F5Tts {
+                name: d.name,
+                voice_ref: d.voice_ref,
+                ref_text: d.ref_text,
+                speed: d.speed,
+                cfg_strength: d.cfg_strength,
+            }).collect();
+
+            eprintln!("F5 backend: {} voice(s), {} worker(s)", tts_voices.len(), workers);
+            for v in &voice_infos { eprintln!("  - {}", v.name); }
+
+            Ok((Backend::F5Tts { voices: tts_voices, workers }, voice_infos))
+        }
+        "kokoro" | _ => {
+            let model_dir = std::env::var("KOKORO_MODEL_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                    std::path::PathBuf::from(home).join(".kokoro")
+                });
+
+            let voice_infos = vec![VoiceInfo {
+                name: "am_puck".into(),
+                description: "Kokoro am_puck voice.".into(),
+            }];
+
+            eprintln!("Kokoro backend: model dir = {}", model_dir.display());
+            Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), speed: 1.0 }, voice_infos))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -324,25 +387,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 async fn main() -> anyhow::Result<()> {
     eprintln!("Initializing TTS engine…");
 
-    let model_dir = std::env::var("KOKORO_MODEL_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-            std::path::PathBuf::from(home).join(".kokoro")
-        });
+    let (backend, voice_infos) = build_backend()?;
 
-    let tts = TtsEngine::builder()
-        .backend(Backend::Kokoro {
-            model_dir,
-            voice: "am_puck".into(),
-            speed: 1.0,
-        })
-        .build()?;
-
+    let tts = TtsEngine::builder().backend(backend).build()?;
     eprintln!("TTS ready.");
 
     let state = Arc::new(AppState {
         tts: Arc::new(tts),
+        voices: voice_infos,
         cache: Arc::new(DashMap::new()),
     });
 
@@ -354,6 +406,7 @@ async fn main() -> anyhow::Result<()> {
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/doc", get(get_doc))
+        .route("/voices", get(get_voices))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -364,9 +417,8 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Warning: frontend/dist not found — run `cd app/frontend && npm run build`");
     }
 
-    let addr = "0.0.0.0:3000";
     eprintln!("Listening on http://localhost:3000");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }

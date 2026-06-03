@@ -49,6 +49,89 @@ html, body {
   text-transform: uppercase;
 }
 
+/* Workspace — card + sidebar side by side */
+.workspace {
+  display: flex;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 1000px;
+  align-items: flex-start;
+}
+
+.workspace .card {
+  flex: 1;
+  min-width: 0;
+  max-width: 720px;
+}
+
+/* Sidebar */
+.sidebar {
+  flex-shrink: 0;
+  width: 180px;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sidebar-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 0.25rem;
+}
+
+.voice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.voice-loading {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 0.5rem 0.5rem;
+}
+
+.voice-row {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.voice-row:hover {
+  background: rgba(200, 169, 110, 0.07);
+  color: var(--text);
+}
+
+.voice-row.selected {
+  background: rgba(200, 169, 110, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.voice-description {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  padding: 0.25rem 0.5rem;
+  min-height: 2.5em;
+}
+
 /* Main */
 .main {
   flex: 1;
@@ -59,8 +142,6 @@ html, body {
 }
 
 .card {
-  width: 100%;
-  max-width: 720px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);

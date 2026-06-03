@@ -113,7 +113,7 @@ export class Player {
   // Public API
   // ---------------------------------------------------------------------------
 
-  synthesize(text: string): void {
+  synthesize(text: string, voice?: string): void {
     this.reset()
     this.container.innerHTML = '<div class="loading">Synthesizing…</div>'
 
@@ -121,7 +121,9 @@ export class Player {
     this.ws = new WebSocket(`${proto}://${location.host}/ws`)
 
     this.ws.onopen = () => {
-      this.ws!.send(JSON.stringify({ text }))
+      const msg: Record<string, string> = { text }
+      if (voice) msg.voice = voice
+      this.ws!.send(JSON.stringify(msg))
     }
 
     this.ws.onmessage = (ev: MessageEvent) => {

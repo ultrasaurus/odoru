@@ -1,5 +1,9 @@
 import './style.css';
 import { Player } from './player';
+// ── State ─────────────────────────────────────────────────────────────────
+let voices = [];
+let selectedVoice = null;
+// ── DOM ───────────────────────────────────────────────────────────────────
 const app = document.getElementById('app');
 app.innerHTML = `
   <div class="layout">
@@ -8,46 +12,58 @@ app.innerHTML = `
     </header>
 
     <main class="main">
-      <div class="card">
-        <div class="url-area">
-          <input
-            id="url-input"
-            class="url-input"
-            type="url"
-            placeholder="Paste a URL and press Enter…"
-          />
-          <div id="fetch-status" class="fetch-status"></div>
-        </div>
-
-        <div class="input-area">
-          <textarea
-            id="text-input"
-            class="text-input"
-            placeholder="…or paste text here directly, then press Synthesize"
-            rows="4"
-          ></textarea>
-          <button id="synth-btn" class="synth-btn">Synthesize</button>
-        </div>
-
-        <div id="transcript-container" class="transcript-container">
-          <div class="placeholder">Fetch a URL or enter text above, then press Synthesize.</div>
-        </div>
-
-        <div class="controls">
-          <button id="play-btn" class="play-btn" disabled>
-            <span class="play-icon">▶</span>
-          </button>
-          <div class="progress-wrap">
-            <div class="progress-bar">
-              <div id="progress-fill" class="progress-fill"></div>
-            </div>
-            <div class="time-row">
-              <span id="time-current" class="time">0:00</span>
-              <span id="time-total" class="time">0:00</span>
-            </div>
+      <div class="workspace">
+        <div class="card">
+          <div class="url-area">
+            <input
+              id="url-input"
+              class="url-input"
+              type="url"
+              placeholder="Paste a URL and press Enter…"
+            />
+            <div id="fetch-status" class="fetch-status"></div>
           </div>
-          <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
+
+          <div class="input-area">
+            <textarea
+              id="text-input"
+              class="text-input"
+              placeholder="…or paste text here directly, then press Synthesize"
+              rows="4"
+            ></textarea>
+            <button id="synth-btn" class="synth-btn">Synthesize</button>
+          </div>
+
+          <div id="transcript-container" class="transcript-container">
+            <div class="placeholder">Fetch a URL or enter text above, then press Synthesize.</div>
+          </div>
+
+          <div class="controls">
+            <button id="play-btn" class="play-btn" disabled>
+              <span class="play-icon">▶</span>
+            </button>
+            <div class="progress-wrap">
+              <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+              </div>
+              <div class="time-row">
+                <span id="time-current" class="time">0:00</span>
+                <span id="time-total" class="time">0:00</span>
+              </div>
+            </div>
+            <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
+          </div>
         </div>
+
+        <aside class="sidebar">
+          <div class="sidebar-section">
+            <div class="sidebar-label">Voice</div>
+            <div id="voice-list" class="voice-list">
+              <div class="voice-loading">Loading voices…</div>
+            </div>
+            <div id="voice-description" class="voice-description"></div>
+          </div>
+        </aside>
       </div>
     </main>
   </div>
@@ -63,7 +79,48 @@ const progressFill = document.getElementById('progress-fill');
 const timeCurrent = document.getElementById('time-current');
 const timeTotal = document.getElementById('time-total');
 const transcriptContainer = document.getElementById('transcript-container');
-// Derive a download filename from the current URL input or a default
+const voiceList = document.getElementById('voice-list');
+const voiceDescription = document.getElementById('voice-description');
+// ── Voice picker ───────────────────────────────────────────────────────────
+function renderVoices() {
+    if (voices.length === 0) {
+        voiceList.innerHTML = '<div class="voice-loading">No voices available.</div>';
+        return;
+    }
+    voiceList.innerHTML = '';
+    for (const v of voices) {
+        const row = document.createElement('button');
+        row.className = 'voice-row' + (v.name === selectedVoice ? ' selected' : '');
+        row.textContent = v.name;
+        row.addEventListener('click', () => selectVoice(v.name));
+        voiceList.appendChild(row);
+    }
+}
+function selectVoice(name) {
+    selectedVoice = name;
+    const v = voices.find(v => v.name === name);
+    voiceDescription.textContent = v?.description ?? '';
+    renderVoices();
+}
+async function loadVoices() {
+    try {
+        const res = await fetch('/voices');
+        if (!res.ok)
+            throw new Error(`HTTP ${res.status}`);
+        voices = await res.json();
+        if (voices.length > 0 && !selectedVoice) {
+            selectVoice(voices[0].name);
+        }
+        else {
+            renderVoices();
+        }
+    }
+    catch (err) {
+        voiceList.innerHTML = '<div class="voice-loading error">Failed to load voices.</div>';
+    }
+}
+loadVoices();
+// ── Player ─────────────────────────────────────────────────────────────────
 function downloadFilename() {
     const url = urlInput.value.trim();
     if (!url)
@@ -121,7 +178,7 @@ synthBtn.addEventListener('click', () => {
     progressFill.style.width = '0%';
     timeCurrent.textContent = '0:00';
     timeTotal.textContent = '0:00';
-    player.synthesize(text);
+    player.synthesize(text, selectedVoice ?? undefined);
 });
 playBtn.addEventListener('click', () => {
     player.toggle();
@@ -135,7 +192,6 @@ textInput.addEventListener('keydown', (e) => {
         synthBtn.click();
     }
 });
-// URL fetch on Enter
 urlInput.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter')
         return;

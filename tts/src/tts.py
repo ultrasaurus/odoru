@@ -37,12 +37,20 @@ _f5_state = None  # (model, ref_audio, ref_text)
 
 def _load_f5(voice_ref: str, ref_text: str):
     global _f5_state
-    if _f5_state is not None and _f5_state[2] == ref_text:
+    if _f5_state is not None and _f5_state[2] == voice_ref:
+        print(f"[f5] cache hit: {voice_ref}", flush=True)
         return
+    print(f"[f5] loading voice: {voice_ref}", flush=True)
 
+    # Always create a fresh model instance when the voice changes.
+    # Reusing the model object across voices causes MLX to retain
+    # internal conditioning state from the previous voice.
     import mlx.core as mx
     import soundfile as sf
     from f5_tts_mlx.cfm import F5TTS  # type: ignore
+
+    # Clear old state first so memory is released before loading new model
+    _f5_state = None
 
     model = F5TTS.from_pretrained(
         "lucasnewman/f5-tts-mlx",
@@ -61,7 +69,7 @@ def _load_f5(voice_ref: str, ref_text: str):
     if rms < TARGET_RMS:
         audio = audio * TARGET_RMS / rms
 
-    _f5_state = (model, audio, ref_text)
+    _f5_state = (model, audio, voice_ref)
 
 
 def _synthesize_f5(text: str, voice_ref: str, ref_text: str,

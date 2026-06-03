@@ -69,13 +69,16 @@ export class Player {
     // ---------------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------------
-    synthesize(text) {
+    synthesize(text, voice) {
         this.reset();
         this.container.innerHTML = '<div class="loading">Synthesizing…</div>';
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         this.ws = new WebSocket(`${proto}://${location.host}/ws`);
         this.ws.onopen = () => {
-            this.ws.send(JSON.stringify({ text }));
+            const msg = { text };
+            if (voice)
+                msg.voice = voice;
+            this.ws.send(JSON.stringify(msg));
         };
         this.ws.onmessage = (ev) => {
             const msg = JSON.parse(ev.data);

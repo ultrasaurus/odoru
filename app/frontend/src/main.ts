@@ -1,6 +1,18 @@
 import './style.css'
 import { Player } from './player'
 
+interface VoiceInfo {
+  name: string
+  description: string
+}
+
+// ── State ─────────────────────────────────────────────────────────────────
+
+let voices: VoiceInfo[] = []
+let selectedVoice: string | null = null
+
+// ── DOM ───────────────────────────────────────────────────────────────────
+
 const app = document.getElementById('app')!
 
 app.innerHTML = `
@@ -10,64 +22,121 @@ app.innerHTML = `
     </header>
 
     <main class="main">
-      <div class="card">
-        <div class="url-area">
-          <input
-            id="url-input"
-            class="url-input"
-            type="url"
-            placeholder="Paste a URL and press Enter…"
-          />
-          <div id="fetch-status" class="fetch-status"></div>
-        </div>
-
-        <div class="input-area">
-          <textarea
-            id="text-input"
-            class="text-input"
-            placeholder="…or paste text here directly, then press Synthesize"
-            rows="4"
-          ></textarea>
-          <button id="synth-btn" class="synth-btn">Synthesize</button>
-        </div>
-
-        <div id="transcript-container" class="transcript-container">
-          <div class="placeholder">Fetch a URL or enter text above, then press Synthesize.</div>
-        </div>
-
-        <div class="controls">
-          <button id="play-btn" class="play-btn" disabled>
-            <span class="play-icon">▶</span>
-          </button>
-          <div class="progress-wrap">
-            <div class="progress-bar">
-              <div id="progress-fill" class="progress-fill"></div>
-            </div>
-            <div class="time-row">
-              <span id="time-current" class="time">0:00</span>
-              <span id="time-total" class="time">0:00</span>
-            </div>
+      <div class="workspace">
+        <div class="card">
+          <div class="url-area">
+            <input
+              id="url-input"
+              class="url-input"
+              type="url"
+              placeholder="Paste a URL and press Enter…"
+            />
+            <div id="fetch-status" class="fetch-status"></div>
           </div>
-          <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
+
+          <div class="input-area">
+            <textarea
+              id="text-input"
+              class="text-input"
+              placeholder="…or paste text here directly, then press Synthesize"
+              rows="4"
+            ></textarea>
+            <button id="synth-btn" class="synth-btn">Synthesize</button>
+          </div>
+
+          <div id="transcript-container" class="transcript-container">
+            <div class="placeholder">Fetch a URL or enter text above, then press Synthesize.</div>
+          </div>
+
+          <div class="controls">
+            <button id="play-btn" class="play-btn" disabled>
+              <span class="play-icon">▶</span>
+            </button>
+            <div class="progress-wrap">
+              <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+              </div>
+              <div class="time-row">
+                <span id="time-current" class="time">0:00</span>
+                <span id="time-total" class="time">0:00</span>
+              </div>
+            </div>
+            <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
+          </div>
         </div>
+
+        <aside class="sidebar">
+          <div class="sidebar-section">
+            <div class="sidebar-label">Voice</div>
+            <div id="voice-list" class="voice-list">
+              <div class="voice-loading">Loading voices…</div>
+            </div>
+            <div id="voice-description" class="voice-description"></div>
+          </div>
+        </aside>
       </div>
     </main>
   </div>
 `
 
-const synthBtn   = document.getElementById('synth-btn')   as HTMLButtonElement
-const textInput  = document.getElementById('text-input')  as HTMLTextAreaElement
-const urlInput   = document.getElementById('url-input')   as HTMLInputElement
+const synthBtn    = document.getElementById('synth-btn')    as HTMLButtonElement
+const textInput   = document.getElementById('text-input')   as HTMLTextAreaElement
+const urlInput    = document.getElementById('url-input')    as HTMLInputElement
 const fetchStatus = document.getElementById('fetch-status') as HTMLDivElement
-const playBtn    = document.getElementById('play-btn')    as HTMLButtonElement
-const playIcon   = playBtn.querySelector('.play-icon')    as HTMLSpanElement
+const playBtn     = document.getElementById('play-btn')     as HTMLButtonElement
+const playIcon    = playBtn.querySelector('.play-icon')     as HTMLSpanElement
 const downloadBtn = document.getElementById('download-btn') as HTMLButtonElement
-const progressFill = document.getElementById('progress-fill') as HTMLDivElement
-const timeCurrent  = document.getElementById('time-current')  as HTMLSpanElement
-const timeTotal    = document.getElementById('time-total')    as HTMLSpanElement
+const progressFill     = document.getElementById('progress-fill')     as HTMLDivElement
+const timeCurrent      = document.getElementById('time-current')      as HTMLSpanElement
+const timeTotal        = document.getElementById('time-total')        as HTMLSpanElement
 const transcriptContainer = document.getElementById('transcript-container') as HTMLDivElement
+const voiceList        = document.getElementById('voice-list')        as HTMLDivElement
+const voiceDescription = document.getElementById('voice-description') as HTMLDivElement
 
-// Derive a download filename from the current URL input or a default
+// ── Voice picker ───────────────────────────────────────────────────────────
+
+function renderVoices() {
+  if (voices.length === 0) {
+    voiceList.innerHTML = '<div class="voice-loading">No voices available.</div>'
+    return
+  }
+
+  voiceList.innerHTML = ''
+  for (const v of voices) {
+    const row = document.createElement('button')
+    row.className = 'voice-row' + (v.name === selectedVoice ? ' selected' : '')
+    row.textContent = v.name
+    row.addEventListener('click', () => selectVoice(v.name))
+    voiceList.appendChild(row)
+  }
+}
+
+function selectVoice(name: string) {
+  selectedVoice = name
+  const v = voices.find(v => v.name === name)
+  voiceDescription.textContent = v?.description ?? ''
+  renderVoices()
+}
+
+async function loadVoices() {
+  try {
+    const res = await fetch('/voices')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    voices = await res.json()
+    if (voices.length > 0 && !selectedVoice) {
+      selectVoice(voices[0].name)
+    } else {
+      renderVoices()
+    }
+  } catch (err) {
+    voiceList.innerHTML = '<div class="voice-loading error">Failed to load voices.</div>'
+  }
+}
+
+loadVoices()
+
+// ── Player ─────────────────────────────────────────────────────────────────
+
 function downloadFilename(): string {
   const url = urlInput.value.trim()
   if (!url) return 'odoru.wav'
@@ -131,7 +200,7 @@ synthBtn.addEventListener('click', () => {
   timeCurrent.textContent = '0:00'
   timeTotal.textContent = '0:00'
 
-  player.synthesize(text)
+  player.synthesize(text, selectedVoice ?? undefined)
 })
 
 playBtn.addEventListener('click', () => {
@@ -149,7 +218,6 @@ textInput.addEventListener('keydown', (e: KeyboardEvent) => {
   }
 })
 
-// URL fetch on Enter
 urlInput.addEventListener('keydown', async (e: KeyboardEvent) => {
   if (e.key !== 'Enter') return
   const url = urlInput.value.trim()
