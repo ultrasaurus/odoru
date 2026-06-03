@@ -17,11 +17,12 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
+    http::StatusCode,
     response::IntoResponse,
     routing::get,
-    Router,
+    Json, Router,
 };
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use dashmap::DashMap;
@@ -31,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, services::ServeDir};
+use util::cache;
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -148,6 +150,102 @@ async fn send_segment(
 }
 
 // ---------------------------------------------------------------------------
+// GET /doc?url=<url>
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct DocQuery {
+    url: String,
+}
+
+#[derive(Serialize)]
+struct DocResponse {
+    url: String,
+    title: Option<String>,
+    authors: Vec<String>,
+    date: Option<String>,
+    plain_text: String,
+    content: String,
+    cached: bool,
+}
+
+async fn get_doc(
+    Query(q): Query<DocQuery>,
+) -> impl IntoResponse {
+    // Validate it looks like a URL
+    if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "url must start with http:// or https://" })),
+        ).into_response();
+    }
+
+    // Check cache first
+    match cache::lookup(&q.url) {
+        Ok(Some(hit)) => {
+            return Json(DocResponse {
+                url: hit.url,
+                title: hit.title,
+                authors: hit.authors,
+                date: hit.date,
+                plain_text: hit.plain_text,
+                content: hit.content,
+                cached: true,
+            }).into_response();
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("Cache lookup error: {e}");
+        }
+    }
+
+    // Cache miss — fetch and extract
+    let url = q.url.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        dl::fetch_and_extract(&url)
+    }).await;
+
+    let article = match result {
+        Ok(Ok(a)) => a,
+        Ok(Err(e)) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": format!("Fetch failed: {e}") })),
+            ).into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Task error: {e}") })),
+            ).into_response();
+        }
+    };
+
+    // Store in cache
+    if let Err(e) = cache::store(
+        &article.url,
+        article.title.as_deref(),
+        &article.authors,
+        article.date.as_deref(),
+        article.description.as_deref(),
+        &article.content,
+        &article.plain_text,
+    ) {
+        eprintln!("Cache store error: {e}");
+    }
+
+    Json(DocResponse {
+        url: article.url,
+        title: article.title,
+        authors: article.authors,
+        date: article.date,
+        plain_text: article.plain_text,
+        content: article.content,
+        cached: false,
+    }).into_response()
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket handler
 // ---------------------------------------------------------------------------
 
@@ -255,6 +353,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/doc", get(get_doc))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

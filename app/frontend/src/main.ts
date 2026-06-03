@@ -11,18 +11,28 @@ app.innerHTML = `
 
     <main class="main">
       <div class="card">
+        <div class="url-area">
+          <input
+            id="url-input"
+            class="url-input"
+            type="url"
+            placeholder="Paste a URL and press Enter…"
+          />
+          <div id="fetch-status" class="fetch-status"></div>
+        </div>
+
         <div class="input-area">
           <textarea
             id="text-input"
             class="text-input"
-            placeholder="Paste or type text to synthesize…"
+            placeholder="…or paste text here directly, then press Synthesize"
             rows="4"
           ></textarea>
           <button id="synth-btn" class="synth-btn">Synthesize</button>
         </div>
 
         <div id="transcript-container" class="transcript-container">
-          <div class="placeholder">Enter text above and press Synthesize.</div>
+          <div class="placeholder">Fetch a URL or enter text above, then press Synthesize.</div>
         </div>
 
         <div class="controls">
@@ -46,6 +56,8 @@ app.innerHTML = `
 
 const synthBtn   = document.getElementById('synth-btn')   as HTMLButtonElement
 const textInput  = document.getElementById('text-input')  as HTMLTextAreaElement
+const urlInput   = document.getElementById('url-input')   as HTMLInputElement
+const fetchStatus = document.getElementById('fetch-status') as HTMLDivElement
 const playBtn    = document.getElementById('play-btn')    as HTMLButtonElement
 const playIcon   = playBtn.querySelector('.play-icon')    as HTMLSpanElement
 const progressFill = document.getElementById('progress-fill') as HTMLDivElement
@@ -64,7 +76,6 @@ const player = new Player(transcriptContainer)
 player.onReady(() => {
   playBtn.disabled = false
   playIcon.textContent = '▶'
-  // Auto-play when first segment is ready
   player.play()
   playIcon.textContent = '⏸'
 })
@@ -108,9 +119,42 @@ playBtn.addEventListener('click', () => {
   playIcon.textContent = player.paused ? '▶' : '⏸'
 })
 
-// Allow Ctrl+Enter to trigger synthesis
 textInput.addEventListener('keydown', (e: KeyboardEvent) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     synthBtn.click()
+  }
+})
+
+// URL fetch on Enter
+urlInput.addEventListener('keydown', async (e: KeyboardEvent) => {
+  if (e.key !== 'Enter') return
+  const url = urlInput.value.trim()
+  if (!url) return
+
+  fetchStatus.textContent = 'Fetching…'
+  fetchStatus.className = 'fetch-status loading'
+  urlInput.disabled = true
+
+  try {
+    const res = await fetch(`/doc?url=${encodeURIComponent(url)}`)
+    const data = await res.json()
+
+    if (!res.ok) {
+      fetchStatus.textContent = data.error ?? 'Fetch failed'
+      fetchStatus.className = 'fetch-status error'
+      return
+    }
+
+    textInput.value = data.plain_text
+    const cached = data.cached ? ' (cached)' : ''
+    const title = data.title ?? url
+    fetchStatus.textContent = `✔ ${title}${cached}`
+    fetchStatus.className = 'fetch-status success'
+  } catch (err) {
+    fetchStatus.textContent = 'Network error'
+    fetchStatus.className = 'fetch-status error'
+  } finally {
+    urlInput.disabled = false
+    urlInput.focus()
   }
 })

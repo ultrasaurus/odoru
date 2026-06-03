@@ -194,6 +194,52 @@ html, body {
   letter-spacing: 0.03em;
 }
 
+/* URL input area */
+.url-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.5rem 2rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.url-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.65rem 1rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.url-input:focus {
+  border-color: var(--accent);
+}
+
+.url-input::placeholder {
+  color: var(--text-dim);
+}
+
+.url-input:disabled {
+  opacity: 0.5;
+}
+
+.fetch-status {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  min-height: 1.2em;
+  color: var(--text-dim);
+  padding: 0 0.25rem;
+}
+
+.fetch-status.loading { color: var(--text-dim); }
+.fetch-status.success { color: var(--accent); }
+.fetch-status.error   { color: #c0614a; }
+
 /* Input area */
 .input-area {
   display: flex;

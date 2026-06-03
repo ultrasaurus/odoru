@@ -8,6 +8,7 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
+util = { path = "../util" }
 tts = { path = "../tts" }
 dl = { path = "../dl" }
 tokio = { version = "1", features = ["full"] }
