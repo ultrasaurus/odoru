@@ -2,12 +2,13 @@ import './style.css'
 import { Player } from './player'
 
 interface VoiceInfo {
-  name: string
+  id: string          // prefixed, e.g. "f5:sarah" or "kokoro:am_puck"
+  name: string        // display name, e.g. "sarah"
+  backend: string     // "f5" or "kokoro"
   description: string
 }
 
 interface VoicesResponse {
-  backend: string
   voices: VoiceInfo[]
 }
 
@@ -20,7 +21,7 @@ const SECS_PER_WORD: Record<string, number> = {
 }
 
 const ARTICLE_URL   = 'https://www.dougengelbart.org/content/view/148'
-const ARTICLE_VOICE = 'sarah'
+const ARTICLE_VOICE = 'f5:sarah'
 
 const ARTICLES = [
   { title: 'Authorship Provisions in Augment', url: ARTICLE_URL, live: true },
@@ -173,8 +174,7 @@ function showReader() {
 
 function showNew() {
   let voices: VoiceInfo[] = []
-  let selectedVoice: string | null = null
-  let activeBackend: string = 'kokoro'
+  let selectedVoice: string | null = null  // stores prefixed id, e.g. "f5:sarah"
   let synthStart = 0
 
   app.innerHTML = `
@@ -271,18 +271,26 @@ function showNew() {
       return
     }
     voiceList.innerHTML = ''
+    let lastBackend = ''
     for (const v of voices) {
+      if (v.backend !== lastBackend) {
+        const hdr = document.createElement('div')
+        hdr.className = 'voice-group-header'
+        hdr.textContent = v.backend.toUpperCase()
+        voiceList.appendChild(hdr)
+        lastBackend = v.backend
+      }
       const row = document.createElement('button')
-      row.className = 'voice-row' + (v.name === selectedVoice ? ' selected' : '')
+      row.className = 'voice-row' + (v.id === selectedVoice ? ' selected' : '')
       row.textContent = v.name
-      row.addEventListener('click', () => selectVoice(v.name))
+      row.addEventListener('click', () => selectVoice(v.id))
       voiceList.appendChild(row)
     }
   }
 
-  function selectVoice(name: string) {
-    selectedVoice = name
-    const v = voices.find(v => v.name === name)
+  function selectVoice(id: string) {
+    selectedVoice = id
+    const v = voices.find(v => v.id === id)
     voiceDescription.textContent = v?.description ?? ''
     renderVoices()
   }
@@ -293,8 +301,7 @@ function showNew() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: VoicesResponse = await res.json()
       voices = data.voices
-      activeBackend = data.backend
-      if (voices.length > 0 && !selectedVoice) selectVoice(voices[0].name)
+      if (voices.length > 0 && !selectedVoice) selectVoice(voices[0].id)
       else renderVoices()
       updateEstimate(textInput.value)
     } catch {
@@ -315,7 +322,8 @@ function showNew() {
   function updateEstimate(text: string) {
     const words = text.trim().split(/\s+/).filter(Boolean).length
     if (words === 0) { timeEstimate.textContent = ''; return }
-    const rate = SECS_PER_WORD[activeBackend] ?? 0.2
+    const backend = selectedVoice?.split(':')[0] ?? 'kokoro'
+    const rate = SECS_PER_WORD[backend] ?? 0.2
     const secs = words * rate
     timeEstimate.textContent = `${fmtDuration(secs)} to synthesize (${words} words)`
   }
@@ -373,7 +381,7 @@ function showNew() {
       }
       textInput.value = data.plain_text
       updateEstimate(data.plain_text)
-      const cached = data.cached ? ' (cached)' : ''
+      const cached = data.cached?.content ? ' (cached)' : ''
       const title = data.title ?? url
       fetchStatus.textContent = `✔ ${title}${cached}`
       fetchStatus.className = 'fetch-status success'

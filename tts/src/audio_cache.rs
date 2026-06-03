@@ -106,6 +106,7 @@ pub fn cache_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".odoru").join("audio"))
 }
 
+#[cfg(test)]
 fn cache_dir_at(base: &PathBuf) -> PathBuf {
     base.join("audio")
 }

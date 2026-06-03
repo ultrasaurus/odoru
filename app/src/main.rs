@@ -4,16 +4,19 @@
 //!
 //! ## Environment variables
 //!
-//!   ODORU_BACKEND     — "kokoro" (default) or "f5"
+//!   ODORU_BACKEND     — "kokoro" (default), "f5", or "both"
 //!   KOKORO_MODEL_DIR  — path to Kokoro model directory (default: ~/.kokoro)
 //!   VOICES_DIR        — path to voices directory (default: auto-detected)
 //!   ODORU_WORKERS     — F5 worker count (default: 1)
 //!
 //! ## Protocol
 //!
-//!   client → server: { "text": "...", "voice": "sarah" }
+//!   client → server: { "text": "...", "voice": "f5:sarah" }
 //!   server → client: { "index": 0, "transcript": {...}, "audio": "<base64 f32le PCM>", "paragraph_end": bool }
 //!   server → client: { "done": true }
+//!
+//! Voice IDs are prefixed with the backend name, e.g. "f5:sarah" or "kokoro:am_puck".
+//! Unprefixed voice names are rejected.
 
 use axum::{
     extract::{
@@ -68,11 +71,13 @@ impl CachedSegment {
 
 type SegmentCache = Arc<DashMap<String, Vec<CachedSegment>>>;
 
-fn cache_key(text: &str, voice: &str) -> String {
+/// In-memory segment cache key. Includes the full prefixed voice ID so Kokoro
+/// and F5 segments for the same text are stored separately.
+fn cache_key(text: &str, voice_id: &str) -> String {
     let mut h = Sha256::new();
-    h.update(text.as_bytes());
+    h.update(voice_id.as_bytes());
     h.update(b"|");
-    h.update(voice.as_bytes());
+    h.update(text.as_bytes());
     format!("{:x}", h.finalize())
 }
 
@@ -83,30 +88,58 @@ fn cache_key(text: &str, voice: &str) -> String {
 /// A voice entry for the /voices endpoint and voice picker.
 #[derive(Clone, Serialize)]
 struct VoiceInfo {
+    /// Prefixed voice ID sent in API requests, e.g. "f5:sarah" or "kokoro:am_puck".
+    id: String,
+    /// Display name with backend prefix stripped, e.g. "sarah".
     name: String,
+    /// Backend name, e.g. "f5" or "kokoro".
+    backend: String,
     description: String,
 }
 
 #[derive(Clone, Serialize)]
 struct VoicesResponse {
-    backend: String,
     voices: Vec<VoiceInfo>,
 }
 
 #[derive(Clone)]
 struct AppState {
-    tts: Arc<TtsEngine>,
-    /// Available voices, in order (first = default).
+    kokoro: Option<Arc<TtsEngine>>,
+    f5: Option<Arc<TtsEngine>>,
+    /// Available voices in display order (f5 first, then kokoro).
     voices: Vec<VoiceInfo>,
-    /// Active backend name ("kokoro" or "f5").
-    backend: String,
     cache: SegmentCache,
 }
 
 impl AppState {
-    fn default_voice(&self) -> &str {
-        self.voices.first().map(|v| v.name.as_str()).unwrap_or("mock")
+    /// Prefixed ID of the first available voice, used as default.
+    fn default_voice(&self) -> Option<&str> {
+        self.voices.first().map(|v| v.id.as_str())
     }
+
+    /// Resolve a prefixed voice ID (e.g. "f5:sarah") to the correct engine
+    /// and bare voice name. Returns an error string if the prefix is missing,
+    /// the backend is unknown, or the backend is not loaded.
+    fn engine_for_voice(&self, voice_id: &str) -> Result<(Arc<TtsEngine>, String), String> {
+        let (backend, name) = parse_voice_id(voice_id)
+            .ok_or_else(|| format!(
+                "voice must include backend prefix, e.g. \"f5:sarah\" or \"kokoro:am_puck\" (got: {voice_id:?})"
+            ))?;
+        match backend {
+            "f5" => self.f5.clone()
+                .ok_or_else(|| "f5 backend not available".into())
+                .map(|e| (e, name.to_string())),
+            "kokoro" => self.kokoro.clone()
+                .ok_or_else(|| "kokoro backend not available".into())
+                .map(|e| (e, name.to_string())),
+            _ => Err(format!("unknown backend: {backend:?}")),
+        }
+    }
+}
+
+/// Split "f5:sarah" into ("f5", "sarah"). Returns None if there is no ':'.
+fn parse_voice_id(id: &str) -> Option<(&str, &str)> {
+    id.split_once(':')
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +149,8 @@ impl AppState {
 #[derive(Deserialize)]
 struct SynthRequest {
     text: String,
-    /// Voice name. Defaults to the first available voice.
+    /// Prefixed voice ID, e.g. "f5:sarah" or "kokoro:am_puck".
+    /// Unprefixed names are rejected. Defaults to the first available voice.
     voice: Option<String>,
 }
 
@@ -176,29 +210,26 @@ async fn send_segment(
 // ---------------------------------------------------------------------------
 
 async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    Json(VoicesResponse {
-        backend: state.backend.clone(),
-        voices: state.voices.clone(),
-    })
+    Json(VoicesResponse { voices: state.voices.clone() })
 }
 
 // ---------------------------------------------------------------------------
-// GET /doc?url=<url>
+// GET /doc?url=<url>[&voice=<voice_id>]
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct DocQuery {
     url: String,
-    /// Optional voice name — if provided, `cached.audio` reflects whether all
-    /// sentences are in the audio disk cache for that voice.
+    /// Optional prefixed voice ID — if provided, `cached.audio` reflects whether
+    /// all sentences are in the audio disk cache for that voice.
     voice: Option<String>,
 }
 
 #[derive(Serialize)]
 struct CachedInfo {
     content: bool,
-    /// Voice cache key string (e.g. "f5:sarah:0.85:2.0") if all audio is cached
-    /// for the requested voice; `null` otherwise or if no voice was requested.
+    /// Voice cache key (e.g. "f5:sarah:0.85:2.0") if all audio is on disk for
+    /// the requested voice; `null` otherwise or if no voice was requested.
     audio: Option<String>,
 }
 
@@ -224,17 +255,12 @@ async fn get_doc(
         ).into_response();
     }
 
-    // Helper: check audio cache for all sentences in `text` for the requested voice.
+    // Check audio cache for all sentences, routing to the correct engine via prefix.
     let audio_cached = |plain_text: &str| -> Option<String> {
-        let voice_name = q.voice.as_deref()?;
-        let all_cached = state.tts.all_audio_cached(plain_text, voice_name)?;
-        if all_cached {
-            // Return the voice cache key so the client knows exactly which voice
-            // version is cached (encodes backend + params).
-            state.tts.voice_cache_key(voice_name)
-        } else {
-            None
-        }
+        let voice_id = q.voice.as_deref()?;
+        let (engine, voice_name) = state.engine_for_voice(voice_id).ok()?;
+        let all_cached = engine.all_audio_cached(plain_text, &voice_name)?;
+        if all_cached { engine.voice_cache_key(&voice_name) } else { None }
     };
 
     match cache::lookup(&q.url) {
@@ -321,8 +347,22 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         }
     };
 
-    let voice_name = req.voice.as_deref().unwrap_or_else(|| state.default_voice()).to_string();
-    let key = cache_key(&req.text, &voice_name);
+    // Resolve voice ID — use explicit voice or fall back to first available.
+    let voice_id = match req.voice {
+        Some(v) => v,
+        None => match state.default_voice() {
+            Some(v) => v.to_string(),
+            None => { send_error(&mut sender, "no voices available").await; return; }
+        }
+    };
+
+    // Route to the correct engine, rejecting unprefixed or unknown voices.
+    let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
+        Ok(pair) => pair,
+        Err(e) => { send_error(&mut sender, &e).await; return; }
+    };
+
+    let key = cache_key(&req.text, &voice_id);
 
     // ── Cache hit ─────────────────────────────────────────────────────────
     if let Some(segments) = state.cache.get(&key) {
@@ -336,8 +376,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     }
 
     // ── Cache miss: synthesize, cache, stream ─────────────────────────────
-    eprintln!("Cache miss — synthesizing with voice '{voice_name}'…");
-    let mut stream = state.tts.synthesize(&req.text, &voice_name);
+    eprintln!("Cache miss — synthesizing with voice '{voice_id}'…");
+    let mut stream = engine.synthesize(&req.text, &voice_name);
     let mut rendered: Vec<CachedSegment> = Vec::new();
 
     while let Some(result) = stream.next().await {
@@ -361,14 +401,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let _ = sender.send(Message::Text(done.into())).await;
 }
 
-/// Scan `<model_dir>/voices/` for `.bin` files and return a sorted list
-/// of `VoiceInfo`. Falls back to a single `am_puck` entry if the directory
-/// can't be read (e.g. model not yet downloaded).
-fn kokoro_voices(model_dir: &std::path::Path) -> Vec<VoiceInfo> {
+// ---------------------------------------------------------------------------
+// Backend construction
+// ---------------------------------------------------------------------------
+
+/// Scan `<model_dir>/voices/` for `.bin` files and return sorted voice names.
+/// Falls back to ["am_puck"] if the directory can't be read.
+fn kokoro_voice_names(model_dir: &std::path::Path) -> Vec<String> {
     let voices_dir = model_dir.join("voices");
     let Ok(entries) = std::fs::read_dir(&voices_dir) else {
         eprintln!("Warning: could not read {}", voices_dir.display());
-        return vec![VoiceInfo { name: "am_puck".into(), description: String::new() }];
+        return vec!["am_puck".into()];
     };
 
     let mut names: Vec<String> = entries
@@ -384,74 +427,69 @@ fn kokoro_voices(model_dir: &std::path::Path) -> Vec<VoiceInfo> {
         .collect();
 
     names.sort();
-
-    if names.is_empty() {
-        return vec![VoiceInfo { name: "am_puck".into(), description: String::new() }];
-    }
-
-    names.into_iter()
-        .map(|name| VoiceInfo { name, description: String::new() })
-        .collect()
+    if names.is_empty() { vec!["am_puck".into()] } else { names }
 }
 
-// ---------------------------------------------------------------------------
-// Backend construction
-// ---------------------------------------------------------------------------
-
-fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>, String)> {
-    let backend_name = std::env::var("ODORU_BACKEND").unwrap_or_else(|_| "kokoro".into());
-
-    match backend_name.to_lowercase().as_str() {
-        "f5" => {
-            let voices_dir = voice_util::voices_dir()
-                .map_err(|e| anyhow::anyhow!("Cannot find voices directory: {e}"))?;
-            let defs = voice_util::VoiceDef::load_all(&voices_dir)?;
-            if defs.is_empty() {
-                anyhow::bail!("No voices found in {}", voices_dir.display());
-            }
-
-            let workers: usize = std::env::var("ODORU_WORKERS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1);
-
-            let voice_infos: Vec<VoiceInfo> = defs.iter().map(|d| VoiceInfo {
-                name: d.name.clone(),
-                description: d.description.clone(),
-            }).collect();
-
-            let tts_voices: Vec<Voice> = defs.into_iter().map(|d| Voice::F5Tts {
-                name: d.name,
-                voice_ref: d.voice_ref,
-                ref_text: d.ref_text,
-                speed: d.speed,
-                cfg_strength: d.cfg_strength,
-            }).collect();
-
-            eprintln!("F5 backend: {} voice(s), {} worker(s)", tts_voices.len(), workers);
-            for v in &voice_infos { eprintln!("  - {}", v.name); }
-
-            Ok((Backend::F5Tts { voices: tts_voices, workers }, voice_infos, "f5".into()))
-        }
-        _ => {
-            let model_dir = std::env::var("KOKORO_MODEL_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| {
-                    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-                    std::path::PathBuf::from(home).join(".kokoro")
-                });
-
-            let voice_infos = kokoro_voices(&model_dir);
-            let default_voice = voice_infos.first()
-                .map(|v| v.name.clone())
-                .unwrap_or_else(|| "am_puck".into());
-
-            let all_voice_names: Vec<String> = voice_infos.iter().map(|v| v.name.clone()).collect();
-
-            eprintln!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
-            Ok((Backend::Kokoro { model_dir, voice: default_voice, all_voices: all_voice_names, speed: 1.0 }, voice_infos, "kokoro".into()))
-        }
+fn build_f5() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
+    let voices_dir = voice_util::voices_dir()
+        .map_err(|e| anyhow::anyhow!("Cannot find voices directory: {e}"))?;
+    let defs = voice_util::VoiceDef::load_all(&voices_dir)?;
+    if defs.is_empty() {
+        anyhow::bail!("No voices found in {}", voices_dir.display());
     }
+
+    let workers: usize = std::env::var("ODORU_WORKERS")
+        .ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+
+    let voice_infos: Vec<VoiceInfo> = defs.iter().map(|d| VoiceInfo {
+        id: format!("f5:{}", d.name),
+        name: d.name.clone(),
+        backend: "f5".into(),
+        description: d.description.clone(),
+    }).collect();
+
+    let tts_voices: Vec<Voice> = defs.into_iter().map(|d| Voice::F5Tts {
+        name: d.name,
+        voice_ref: d.voice_ref,
+        ref_text: d.ref_text,
+        speed: d.speed,
+        cfg_strength: d.cfg_strength,
+    }).collect();
+
+    eprintln!("F5 backend: {} voice(s), {} worker(s)", tts_voices.len(), workers);
+    for v in &voice_infos { eprintln!("  - {}", v.id); }
+
+    let engine = TtsEngine::builder()
+        .backend(Backend::F5Tts { voices: tts_voices, workers })
+        .build()?;
+    Ok((engine, voice_infos))
+}
+
+fn build_kokoro() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
+    let model_dir = std::env::var("KOKORO_MODEL_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            std::path::PathBuf::from(home).join(".kokoro")
+        });
+
+    let names = kokoro_voice_names(&model_dir);
+    let voice_infos: Vec<VoiceInfo> = names.iter().map(|n| VoiceInfo {
+        id: format!("kokoro:{n}"),
+        name: n.clone(),
+        backend: "kokoro".into(),
+        description: String::new(),
+    }).collect();
+
+    let default_voice = names.first().cloned().unwrap_or_else(|| "am_puck".into());
+
+    eprintln!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
+    for v in &voice_infos { eprintln!("  - {}", v.id); }
+
+    let engine = TtsEngine::builder()
+        .backend(Backend::Kokoro { model_dir, voice: default_voice, all_voices: names, speed: 1.0 })
+        .build()?;
+    Ok((engine, voice_infos))
 }
 
 // ---------------------------------------------------------------------------
@@ -460,17 +498,39 @@ fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>, String)> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    eprintln!("Initializing TTS engine…");
+    let backend_env = std::env::var("ODORU_BACKEND").unwrap_or_else(|_| "kokoro".into());
+    let want_f5     = matches!(backend_env.as_str(), "f5"     | "both");
+    let want_kokoro = matches!(backend_env.as_str(), "kokoro" | "both");
 
-    let (backend, voice_infos, backend_name) = build_backend()?;
+    if !want_f5 && !want_kokoro {
+        anyhow::bail!("ODORU_BACKEND must be \"kokoro\", \"f5\", or \"both\" (got: {backend_env:?})");
+    }
 
-    let tts = TtsEngine::builder().backend(backend).build()?;
-    eprintln!("TTS ready.");
+    let mut all_voices: Vec<VoiceInfo> = Vec::new();
+    let mut f5_engine: Option<Arc<TtsEngine>> = None;
+    let mut kokoro_engine: Option<Arc<TtsEngine>> = None;
+
+    // F5 first so its voices appear first in the list.
+    if want_f5 {
+        eprintln!("Initializing F5 engine…");
+        let (engine, voices) = build_f5()?;
+        all_voices.extend(voices);
+        f5_engine = Some(Arc::new(engine));
+        eprintln!("F5 ready.");
+    }
+
+    if want_kokoro {
+        eprintln!("Initializing Kokoro engine…");
+        let (engine, voices) = build_kokoro()?;
+        all_voices.extend(voices);
+        kokoro_engine = Some(Arc::new(engine));
+        eprintln!("Kokoro ready.");
+    }
 
     let state = Arc::new(AppState {
-        tts: Arc::new(tts),
-        voices: voice_infos,
-        backend: backend_name,
+        kokoro: kokoro_engine,
+        f5: f5_engine,
+        voices: all_voices,
         cache: Arc::new(DashMap::new()),
     });
 

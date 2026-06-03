@@ -98,6 +98,15 @@ html, body {
   padding: 0.5rem 0.5rem;
 }
 
+.voice-group-header {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  padding: 0.5rem 0.6rem 0.2rem;
+  opacity: 0.6;
+}
+
 .voice-row {
   width: 100%;
   text-align: left;
