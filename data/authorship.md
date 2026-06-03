@@ -1,8 +1,8 @@
-Abstract
+# Abstract
 
 AUGMENT is a text processing system marketed by Tymshare for a multi-user, network environment. In AUGMENT's frontend is a User Interface System that facilitates flexible evolution of command languages and provides optional command recognition features. Exceptionally fast and flexible control of interactive operations is enabled by concurrent action of mouse and optional one-handed chord keyset. Files are hierarchically structured, and textual address expressions can flexibly specify any text entity in any file. The screen may be divided into arbitrary, rectangular windows, allowing cross-file editing between windows. Many options exist for controlling the "view" of a file's text in a window, e.g.: level clipping, paragraph truncation, and content filtering. Structural study and modification of on-line documents are especially facilitated. A Journal system and "Shared Screen Teleconferencing" support collaboration among authors and their colleagues. Graphic illustrations may be embedded in the same file with text.
 
-Introduction
+# Introduction
 
 AUGMENT was designed for augmenting human intellectual capabilities. It was targeted particularly toward the core work of professionals engaged in "tough knowledge work" -- e.g., planning, analyzing, and designing in complex problem domains. And special attention was paid to augmenting group collaboration among workers pursuing common goals.
 
@@ -18,15 +18,15 @@ This paper concentrates upon the development phase of this cycle. AUGMENT has we
 
 Studying another's work provides a well-recognized challenge, but one of the toughest jobs is to study one's own work during its development: to see what it really says about Issue X; to see if it does provide for Concept Y; to see if it is reasonably organized and structured -- and to do these over a body of material before it is "polished", i.e., before it is well structured, coherently worded, non-redundant and consistently termed.
 
-Some Background
+# Some Background
 
-History
+## History
 
 AUGMENT is an integrated system of knowledge-worker tools that is marketed by Tymshare's Office Automation Division. The system was developed at SRI International over an extended period under the sponsorship of NASA, DARPA, and RADC. Commercial rights were transferred to Tymshare in 1978 (where the system has since been renamed from NLS to AUGMENT) and its evolution continued. A short history of AUGMENT's development may be found in <Ref-1>, along with a summary of system characteristics and features. The general R&D philosophy and the design principles behind AUGMENT'S development are laid out in <Ref-2>.
 
 The system evolved on time-shared, mainframe computers, and in a packet-switched network environment. In 1970 our computer was the second to be attached to the ARPANET, and since 1978 we have also operated extensively in the TYMNET environment. We have benefited directly from both the time-sharing and the network environments in matters that are important to the authorship process -- especially in dealing with large documents and multi-party documentation activities. In 1976-77 we conducted some applied studies for the Air Force, as reported in <Ref-3> and <Ref-4>, which concentrated upon this latter application.
 
-Relevant Architectural Features
+## Relevant Architectural Features
 
 Perhaps AUGMENT's most unique architectural feature is its User Interface System (UIS), a special software module, which handles the human/computer interfaces to all interactive programs. It takes care of all command-language dialog and connection protocols, and provides a framework for building a coherent and integrated user environment while supporting flexible evolution on both sides: on the user's side, with evolution of command function and terminology; and on the technology side, with evolving hardware and software. (Design details are outlined in <Ref-5>; rationale and utilization in <Ref-6>.)
 
@@ -38,13 +38,13 @@ It is assumed that for any class of knowledge workers, specialized application s
 
 It provides adaptation for different terminal characteristics, enabling application programers to work as though with a virtual terminal.
 
-File Characteristics
+## File Characteristics
 
 AUGMENT employs explicitly structured files, with hierarchically organized nodes; each node can contain either or all of: up to 2,000 characters of text, a graphic structure, or other forms of useful data (e.g., digitized speech). The worker has a definite model in mind for the structuring of any file that he works with; in composing and modifying it he can organize and modify structure using the same verbs as for working with text strings (e.g. Insert, Replace, Move, Copy, Delete), with appropriate structural-entity nouns (e.g., Statement, Branch, Group, Plex). For any existing hierarchical structure, he has many flexible alternatives for addressing its entities, modifying its organization, jumping around within it, and viewing it in a most beneficial manner.
 
 (Note: AUGMENT workers generally use the term "statement" to refer to a file node, which is natural enough since the terminology became established before we added the graphic capability. Now an AUGMENT "statement" can contain either or both a text statement and a graphic diagram.)
 
-Controlling the Tools
+# Controlling the Tools
 
 Many of AUGMENT's unique author-support provisions address basic operations common to almost every task, things done over and over again. These operations, executed with speed and flexibility, provide for composing and modifying one's working material, and for studying what is there over a wide range of substantive levels -- from a single text passage to a collection of end-product draft documents and their associated set of working notes, reference material, and recorded-message dialog (assuming all to be on line).
 
@@ -62,11 +62,11 @@ Here is an example of a low-level action which reveals some basic characteristic
 
 Fast, flexible, graceful, low effort -- these are important to all high-frequency, low-level, knowledge-work actions. This same kind of speed and flexibility are achieved by skilled AUGMENT workers in executing all of the other functional features described below. Description of mouse and keyset, and their concurrent employment, may be found in <Ref-7>.
 
-Addressing the Working Materials
+# Addressing the Working Materials
 
 There is a consistent set of addressing features that a worker may use in any command to designate a particular structural node or some element of text or graphics attached to that node. It adds appreciably to the power and flexibility of the system commands to have a rich, universally applicable vocabulary for directly addressing particular entities within the working files. Below are some examples.
 
-Explicit Statement Addresses
+## Explicit Statement Addresses
 
 There are four "handles" by which a given statement may be directly addressed:
 
@@ -80,7 +80,7 @@ Worker-Assigned Statement Name (or label). For any statement or part of the file
 
 A Direct Screen Selection. When a statement to be designated is displayed in a window, usually the best way to "address" it is to use the mouse to position the cursor anywhere on the statement and depress the mouse's "Select" key (indicated below by "<Select>"). This mode is generally used for text manipulation -- selecting characters, words, numbers, visibles, invisibles, etc. (any of the text entities which have been made system recognizable).
 
-Markers
+## Markers
 
 As one "holds a place" in a book by leaving a temporary place marker in it, an author can place "markers" at arbitrary locations within an AUGMENT file. When placing a marker, he attaches it to a specific character in the text and gives it a name or label. Marker names are local to each file. Simple commands provide for displaying where one's markers are located and what their names are, for deleting or moving a marker, or for installing a new one.
 
@@ -98,13 +98,13 @@ As a comparative example of some of the foregoing addressing forms, consider a s
 
 "Move Statement #x ...".
 
-Relative-Address Extensions
+## Relative-Address Extensions
 
 A sequence of characters may be appended to the address of a given statement to specify an address of a position "relative" to that statement. A major class of these designations deals with relative structural location, such as: Up a level, Down a level, Successor at same level, Predecessor at same level, Head at this level, Tail at this level, and End statement at last and lowest position in this branch. A period (".") in the address string indicates that relative addressing is beginning, and each of these relative-location designators is indicated with a directly mnemonic, one-letter designation.
 
 For example, "Move Statement 0609 (to follow statement) 4b.dt" would move Statement 0609 to follow the tail statement of the substructure one level down from Statement 4b -- or, to conceptualize the associated address-location pathway, "go to 4b, then Down a level and to the Tail".
 
-Embedded Citation Links
+## Embedded Citation Links
 
 A special use of address expressions is within an explicit text entity that we call a "Citation Link" (or "Link" for short). Links are used as textual citations to some specific file item within the workshop domain. A link is delimited by parentheses or angle brackets and contains a valid address string whose path leads to the cited file entity. For example, "(0306)" or "(4b.dt)" are valid links. Also, the reference items at the end of this paper are statements named "Ref-1", "Ref-2", etc., and as such can be cited with links "<Ref-1>", "<Ref-2>", etc. An AUGMENT reader may travel via such a link directly to the referenced bibliographic citation.
 
@@ -112,11 +112,11 @@ A special feature in AUGMENT's link provisions is the use of "indirect link refe
 
 As an example, note that "<Ref-1>" is a link to the statement named "Ref-1", a bibliographic citation at the end of this paper. In that citation, there is a link to the original source document of the referenced publication, permanently stored in the AUGMENT Journal as Item 71279 (the Journal is described below). The point to be made here is that with the link "<Ref-1.l>", I can reference the original source document -- and a Jump Link command would "take me there."
 
-Text and Content Addressing
+## Text and Content Addressing
 
 Other addressing options include scanning for a content match, and/or stepping backward and forward a given number of characters or words (or other text entities). For instance, the foregoing link could have involved a bit more smarts in designating which link to follow: e.g., the path for '(4b "*D" .l)' would be "to 4b, scan for first occurrence of "*D", then follow the next link found in that statement."
 
-Other-File Addressing
+## Other-File Addressing
 
 By preceding an in-file address string with a file address, and separating the two strings with a comma, one obtains a composite address designating a given entity within a given file. Extending this principle lets one prefix the file name with a directory name in which the file is to be found; and further, one can prefix this with a host-computer name.
 
@@ -128,11 +128,11 @@ Or, suppose he were working in another file in a different directory on Office-5
 
 This is only a cursory treatment, but should illustrate well enough what is meant by "a rich and flexible addressing vocabulary." As with other high-performance features in AUGMENT, a beginner is not forced to become involved in the larger vocabulary in order to do useful work (with productivity on at least a par with some other, restricted-vocabulary system). But an AUGMENT worker interested in higher performance can steadily pick up more of the optional vocabulary and skills in a smooth, upward-compatible progression.
 
-Controlling the Views
+# Controlling the Views
 
 A user of a book, or of most on-line text systems, is constrained to viewing the text as though he had a window through which he sees a fixed, formatted document. But as described below, our worker can view a section of text in many ways, depending upon his need of the moment.
 
-Multiple Windows
+## Multiple Windows
 
 For whatever total screen area is available to the worker, his general performance will be improved significantly if he can flexibly allocate that area into arbitrary-sized windows whose contents can be independently controlled. AUGMENT has long provided this basic capability, along with the provision that material from any accessible file may be shown in any window, and also that screen-select copying or moving can be done across the different windows.
 
@@ -140,7 +140,7 @@ For whatever total screen area is available to the worker, his general performan
 
 User-adjustable parameters are used to control the view presented on the display. Adjusting one's view parameters is a constantly used AUGMENT feature that has solidly proved its value. To facilitate their quick and flexible use, the view-specification actions evolved into cryptic, single-character codes, called "viewspecs." The syntax of all Jump commands (used for traveling) includes the option of designating new viewspecs, and a special combination of mouse buttons enables quick, concurrent, keyset action to change the viewspecs for a given window. Here are a few of the frequently used view controls:
 
-Window Views
+## Window Views
 
 Structure Cutoff. Show only the statements that lie "below" this statement in the structure (i.e., this "branch"); or show only those following statements that are at this level or deeper; or show all of the following statements that will fit in this window.
 
@@ -158,7 +158,7 @@ Frozen Statements. A worker may select a number of statements, in random order, 
 
 User-Specified Content Filters. A simple content-analysis language may be used in a "Set Content Pattern" command, which compiles a little content-checking program. One of the view-specification options will cause the system to display only those statements which satisfy both the structure and level conditions imposed by other viewspecs, and which also pass the content-analysis test applied by this program. Where desired, very sophisticated content-analysis programs may be written, using a full-blown programming language, and placed on call for any user.
 
-User-Specified Sequence Generators
+## User-Specified Sequence Generators
 
 In the foregoing, a "view" is created by beginning at a designated location in a document (file) and selecting certain of the the "following" statements for display, according to the viewing parameters -- possibly suppressing statements that don't pass the test of a content-analysis program. This is essentially a "parameterized sequence generator," and provides very useful options for selectively viewing statements within a document; however, it works only by selectively discarding statements from a sequence provided in standard order.
 
@@ -166,13 +166,13 @@ Application programmers can provide alternate sequence-generator programs, which
 
 Perhaps the most commonly used, special sequence generator is one that provides an "Include" feature, where specially tagged links embedded in the text will cause their cited passages to be "included" in place of the Include-Link statements, as though they were part of this file. This provision enables arbitrary assemblage of text and formatting directives, from a wide collection of files, to represent a virtual, one-document, super file. For instance, the whole assemblage could be passed to the formatter, by means of a single user action, to generate a composite, photo-typeset document.
 
-Traveling Through the Working Files
+# Traveling Through the Working Files
 
 An important provision in AUGMENT enables an author to freely "travel around" in his on-line file space to reach a particular "view point" of his choice -- i.e., the position within a file from which the system develops the desired form of "view" according to the currently invoked view specifications.
 
 Traveling from one view point to another is accomplished by Jump commands, of which the simplest perhaps is a direct Jump to a statement designated by a screen selection. Then, for a worker grown used to employing address strings, a next form would be a Jump on an embedded link, or to a statement designated by a typed-in address string -- using any combination of the addressing elements and viewspecs described above. For example, the link "<4b:mi>" points to the Statement 4b, while invoking viewspecs "m" and "I" which cause the statements' SIDs to be displayed. The link "<Ref-1.l:i;LL>" points to the document referenced by the link in the statement named "Ref-1", invoking viewspec "i" for user content filtering, and sets the filter to "LL" to show only those statements beginning with a lower-case letter. The applications are effectively endless.
 
-Modifying the Document Structures
+# Modifying the Document Structures
 
 Given the array of capabilities described above, it is very simple also to provide for very flexible manipulation of the file structure. For operating on a small, basic set of structure-entity nouns, essentially the same basic verbs may be used as for text manipulation -- i.e. Insert, Delete, Move, Copy, Replace, and Transpose are quite sufficient for most cases. For instance, "Move Branch 2b (to follow) 3c" immediately moves Statement 2b and all of its substatements to follow Statement 3c -- and their statement numbers are automatically changed from 2b, 2b1, etc., to 3d, 3d1, etc.
 
@@ -188,7 +188,7 @@ The mouse hand depresses the <Select> button on the mouse while the cursor is on
 
 In our view, interactive computer support offers an author a priceless opportunity to get away from the geometric bondage inflicted by pages, margins, and lines -- things which have very little if any bearing upon the content and organization of one's text. In terms of value to the authoring process, we differ sharply from those who advocate a "What you see is what you get" working mode during the development of a document's content and organization. For this kind of work, experienced users of the foregoing kind of flexible facility for addressing, viewing, and manipulating structured documents, would consider a "What you see ..." mode as a relative handicap.
 
-Supporting Multi-Party Collaboration
+# Supporting Multi-Party Collaboration
 
 The support that advanced technology can provide for close collaboration among knowledge workers is a very important and much under-rated possibility. For multiple-author activities, collaborative support is an important aspect of system capability. Some years ago, we introduced the following provisions into AUGMENT. (A more complete, overview treatment of these is given in <Ref-8>.)
 
@@ -226,7 +226,7 @@ Whatever tool that Jones is currently using will continue responding to his cont
 
 There are provisions for passing control back and forth between workers. For instance, Jones can pass control to Smith so that Smith can show him some material or method of work. There are also provisions for the subsequent entry and departure of other conference participants.
 
-Embedding the Graphic Illustrations
+# Embedding the Graphic Illustrations
 
 For complete support of document development, it is important to provide integrated means for developing, viewing, and manipulating graphical portrayals. These portrayals should be part of the working files from the very start, to be studied, passed about in mail, shared in Conferencing mode, edited, captioned, labelled, and moved about within the document structure. Furthermore, active, relevant citation links pointing to these graphical constructs would be installed in and followed from textual passages throughout the associated set of documents (including Mail and Journal documents).
 
@@ -238,7 +238,7 @@ Our goal here was for what we call an "illustrative graphics" capability -- basi
 
 The most important next step is to adapt a bit-mapped display as an AUGMENT workstation, so the integrated text and graphics can be viewed and manipulated on the same screen. Heretofore, to do graphic work, an author has had to attach a Tektronix 4014 storage-tube display to the special printer/graphic port of her AUGMENT workstation. This has made use of AUGMENT graphics slow and expensive enough to limit the number of user groups who have developed the integrated use of mixed text and graphics.
 
-Conclusion
+# Conclusion
 
 AUGMENT's unique provisions stemmed for the most part from the conceptual framework within which AUGMENT was developed. For instance, consider the pervasive and significant changes in the environment in which humans will be doing their knowledge work. Note that the habits, methods, conventions, intuitions, etc., that comprise the "ways" in which we think, work and collaborate, are for the most part products of many centuries of cultural evolution -- in a radically different environment. With a radically different environment, this constant process of cultural evolution can be expected to take some radical turns.
 
@@ -254,7 +254,7 @@ It is a basic part of our framework that, to augment human knowledge workers, at
 
 Perhaps the best way for very brief summarization of what AUGMENT's users feel about its unique features is simply to say that those who leave its working environment really miss them.
 
-References
+# References
 
 Ref-1: Engelbart, D. C., "Toward Integrated, Evolutionary Office Automation Systems," Proceedings of the 26th Joint Engineering Management Conference, Denver, CO, Oct. 16-18, 1978, pp. 63-68. (AUGMENT,71279,)
 

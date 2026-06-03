@@ -91,14 +91,17 @@ fn strip_sibling_chrome(html: &str) -> String {
 }
 
 /// Extract body content from NLS/Augment-style outline HTML.
-/// Returns None if no outline elements were found.
-pub fn extract_content(html: &str) -> Option<String> {
+/// Returns `(markdown, plain_text)`, or `None` if no outline elements were found.
+/// - `markdown`: headings prefixed with `#`/`##` etc., paragraphs as-is.
+/// - `plain_text`: all elements as plain text, no markdown syntax.
+pub fn extract_content(html: &str) -> Option<(String, String)> {
     let html = strip_sibling_chrome(html);
     let document = Html::parse_document(&html);
 
     let block_selector = Selector::parse("h1, h2, h3, h4, p").unwrap();
 
-    let mut chunks: Vec<String> = Vec::new();
+    let mut md_chunks: Vec<String> = Vec::new();
+    let mut text_chunks: Vec<String> = Vec::new();
 
     for el in document.select(&block_selector) {
         let tag = el.value().name();
@@ -117,18 +120,19 @@ pub fn extract_content(html: &str) -> Option<String> {
             continue;
         }
 
-        let chunk = match heading_prefix(tag) {
+        let md_chunk = match heading_prefix(tag) {
             Some(prefix) => format!("{}{}", prefix, text),
-            None => text,
+            None => text.clone(),
         };
 
-        chunks.push(chunk);
+        md_chunks.push(md_chunk);
+        text_chunks.push(text);
     }
 
-    if chunks.is_empty() {
+    if md_chunks.is_empty() {
         None
     } else {
-        Some(chunks.join("\n\n"))
+        Some((md_chunks.join("\n\n"), text_chunks.join("\n\n")))
     }
 }
 
@@ -167,12 +171,17 @@ mod tests {
             </body></html>
         "##;
 
-        let result = extract_content(html).unwrap();
-        let chunks: Vec<&str> = result.split("\n\n").collect();
+        let (markdown, plain_text) = extract_content(html).unwrap();
+        let md_chunks: Vec<&str> = markdown.split("\n\n").collect();
+        let text_chunks: Vec<&str> = plain_text.split("\n\n").collect();
 
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0], "# Abstract");
-        assert_eq!(chunks[1], "Body text here.");
+        assert_eq!(md_chunks.len(), 2);
+        assert_eq!(md_chunks[0], "# Abstract");
+        assert_eq!(md_chunks[1], "Body text here.");
+
+        assert_eq!(text_chunks.len(), 2);
+        assert_eq!(text_chunks[0], "Abstract");
+        assert_eq!(text_chunks[1], "Body text here.");
     }
 
     #[test]
@@ -184,13 +193,14 @@ mod tests {
             </p>
             </body></html>
         "##;
-        let result = extract_content(html).unwrap();
-        assert_eq!(result, "See this reference for details.");
+        let (markdown, plain_text) = extract_content(html).unwrap();
+        assert_eq!(markdown, "See this reference for details.");
+        assert_eq!(plain_text, "See this reference for details.");
     }
 
     #[test]
     fn test_extract_content_empty() {
         let html = "<html><body><p>No level classes here.</p></body></html>";
-        assert!(extract_content(html).is_none());
+        assert!(extract_content(html).is_none(), "expected None for content with no level classes");
     }
 }

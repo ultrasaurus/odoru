@@ -75,7 +75,7 @@ fn extract_metadata(
 
 pub fn extract(html: &str, url: &str) -> Result<ParsedArticle, ArticleError> {
     if augment::is_augment_site(url) {
-        let content = augment::extract_content(html)
+        let (content, plain_text) = augment::extract_content(html)
             .ok_or(ArticleError::ExtractionFailed)?;
 
         return Python::attach(|py| {
@@ -89,7 +89,7 @@ pub fn extract(html: &str, url: &str) -> Result<ParsedArticle, ArticleError> {
                 authors: parse_authors(authors_raw.as_deref()),
                 date,
                 description,
-                plain_text: content.clone(),
+                plain_text,
                 content,
             })
         });
