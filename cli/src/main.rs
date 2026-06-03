@@ -449,7 +449,7 @@ mod tests {
         let path = tmp.path().to_str().unwrap().to_string();
         let stem = tmp.path().file_stem().unwrap().to_str().unwrap().to_string();
 
-        let (article, wav) = load_input(&path).unwrap();
+        let (article, wav) = load_input(&path, false).unwrap();
         assert_eq!(article.plain_text, "Hello world.");
         assert_eq!(article.content, "Hello world.");
         assert_eq!(wav, Some(stem));
@@ -460,7 +460,7 @@ mod tests {
         use tempfile::NamedTempFile;
         let tmp = NamedTempFile::with_suffix(".pdf").unwrap();
         let path = tmp.path().to_str().unwrap().to_string();
-        assert!(load_input(&path).is_err());
+        assert!(load_input(&path, false).is_err());
     }
 
     // ── build_backend ─────────────────────────────────────────────────────

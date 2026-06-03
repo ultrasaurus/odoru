@@ -48,6 +48,7 @@ app.innerHTML = `
               <span id="time-total" class="time">0:00</span>
             </div>
           </div>
+          <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
         </div>
       </div>
     </main>
@@ -60,10 +61,27 @@ const urlInput   = document.getElementById('url-input')   as HTMLInputElement
 const fetchStatus = document.getElementById('fetch-status') as HTMLDivElement
 const playBtn    = document.getElementById('play-btn')    as HTMLButtonElement
 const playIcon   = playBtn.querySelector('.play-icon')    as HTMLSpanElement
+const downloadBtn = document.getElementById('download-btn') as HTMLButtonElement
 const progressFill = document.getElementById('progress-fill') as HTMLDivElement
 const timeCurrent  = document.getElementById('time-current')  as HTMLSpanElement
 const timeTotal    = document.getElementById('time-total')    as HTMLSpanElement
 const transcriptContainer = document.getElementById('transcript-container') as HTMLDivElement
+
+// Derive a download filename from the current URL input or a default
+function downloadFilename(): string {
+  const url = urlInput.value.trim()
+  if (!url) return 'odoru.wav'
+  try {
+    const u = new URL(url)
+    const slug = (u.hostname + u.pathname)
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase()
+    return `${slug}.wav`
+  } catch {
+    return 'odoru.wav'
+  }
+}
 
 function fmt(s: number): string {
   const m = Math.floor(s / 60)
@@ -98,6 +116,7 @@ player.onEnded(() => {
   playIcon.textContent = '▶'
   progressFill.style.width = '100%'
   synthBtn.disabled = false
+  downloadBtn.disabled = false
 })
 
 synthBtn.addEventListener('click', () => {
@@ -106,6 +125,7 @@ synthBtn.addEventListener('click', () => {
 
   synthBtn.disabled = true
   playBtn.disabled = true
+  downloadBtn.disabled = true
   playIcon.textContent = '▶'
   progressFill.style.width = '0%'
   timeCurrent.textContent = '0:00'
@@ -117,6 +137,10 @@ synthBtn.addEventListener('click', () => {
 playBtn.addEventListener('click', () => {
   player.toggle()
   playIcon.textContent = player.paused ? '▶' : '⏸'
+})
+
+downloadBtn.addEventListener('click', () => {
+  player.downloadWav(downloadFilename())
 })
 
 textInput.addEventListener('keydown', (e: KeyboardEvent) => {

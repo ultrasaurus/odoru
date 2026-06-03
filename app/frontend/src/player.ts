@@ -181,6 +181,30 @@ export class Player {
     return last ? last.endTime : 0
   }
 
+  get hasAudio(): boolean { return this.segments.length > 0 }
+
+  downloadWav(filename: string): void {
+    if (!this.hasAudio) return
+
+    // Concatenate all segment samples
+    const totalSamples = this.segments.reduce((n, s) => n + s.samples.length, 0)
+    const pcm = new Float32Array(totalSamples)
+    let offset = 0
+    for (const seg of this.segments) {
+      pcm.set(seg.samples, offset)
+      offset += seg.samples.length
+    }
+
+    const wav = encodeWav(pcm, 24000)
+    const blob = new Blob([wav], { type: 'audio/wav' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // Current playback position in seconds relative to the full audio.
   // seekOffset anchors us to the right place after a seek.
   get position(): number {
@@ -307,4 +331,37 @@ function decodeF32PCM(b64: string): Float32Array<ArrayBuffer> {
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return new Float32Array(bytes.buffer) as Float32Array<ArrayBuffer>
+}
+
+/// Encode mono Float32 PCM as a WAV file (IEEE float format).
+function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const bytesPerSample = 4 // float32
+  const dataSize = samples.length * bytesPerSample
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+
+  const write = (offset: number, value: number, size: number) =>
+    size === 4 ? view.setUint32(offset, value, true) : view.setUint16(offset, value, true)
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i))
+  }
+
+  writeStr(0,  'RIFF')
+  write(4,     36 + dataSize, 4)   // chunk size
+  writeStr(8,  'WAVE')
+  writeStr(12, 'fmt ')
+  write(16,    16, 4)              // subchunk1 size
+  write(20,    3, 2)              // audio format: IEEE float
+  write(22,    1, 2)              // channels: mono
+  write(24,    sampleRate, 4)
+  write(28,    sampleRate * bytesPerSample, 4) // byte rate
+  write(32,    bytesPerSample, 2) // block align
+  write(34,    32, 2)             // bits per sample
+  writeStr(36, 'data')
+  write(40,    dataSize, 4)
+
+  const pcmView = new Float32Array(buffer, 44)
+  pcmView.set(samples)
+
+  return buffer
 }
