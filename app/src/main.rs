@@ -290,7 +290,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
     // ── Cache miss: synthesize, cache, stream ────────────────────────────────
     eprintln!("Cache miss — synthesizing…");
-    let mut stream = state.tts.synthesize(&req.text);
+    let mut stream = state.tts.synthesize(&req.text, &req.voice);
     let mut rendered: Vec<CachedSegment> = Vec::new();
 
     while let Some(result) = stream.next().await {

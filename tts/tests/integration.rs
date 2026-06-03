@@ -207,7 +207,7 @@ async fn tokenizer_preserves_espeak_phonemes() {
 async fn tts_engine_single_sentence_yields_one_segment() {
     let _lock = lock();
     let Some(engine) = try_build_engine() else { return; };
-    let mut stream = engine.synthesize("Hello world.");
+    let mut stream = engine.synthesize("Hello world.", "mock");
     let seg = stream.next().await.unwrap().expect("segment failed");
     assert!(!seg.samples.is_empty());
     assert_eq!(seg.sample_rate, 24_000);
@@ -220,7 +220,7 @@ async fn tts_engine_single_sentence_yields_one_segment() {
 async fn tts_engine_segment_timestamps_are_monotonic() {
     let _lock = lock();
     let Some(engine) = try_build_engine() else { return; };
-    let mut stream = engine.synthesize("Hello world. The cat sat on the mat. How are you?");
+    let mut stream = engine.synthesize("Hello world. The cat sat on the mat. How are you?", "mock");
     let mut segments = vec![];
     while let Some(result) = stream.next().await {
         segments.push(result.expect("segment failed"));
@@ -281,7 +281,7 @@ async fn f5_backend_synthesizes_audio() {
     let _lock = lock();
     let Some(engine) = try_build_f5_engine() else { return; };
 
-    let mut stream = engine.synthesize("Hello world.");
+    let mut stream = engine.synthesize("Hello world.", "sarah");
     let seg = stream.next().await.expect("stream ended early").expect("segment error");
 
     assert!(!seg.samples.is_empty(), "no samples returned");
@@ -297,7 +297,7 @@ async fn f5_backend_multi_sentence_timestamps_monotonic() {
     let _lock = lock();
     let Some(engine) = try_build_f5_engine() else { return; };
 
-    let mut stream = engine.synthesize("The cat sat on the mat. The dog ran in the fog.");
+    let mut stream = engine.synthesize("The cat sat on the mat. The dog ran in the fog.", "sarah");
     let mut segments = vec![];
     while let Some(result) = stream.next().await {
         segments.push(result.expect("segment error"));
@@ -320,7 +320,7 @@ async fn f5_backend_multi_sentence_timestamps_monotonic() {
 async fn single_segment_start_end_match_words() {
     let _lock = lock();
     let Some(engine) = try_build_engine() else { return; };
-    let mut stream = engine.synthesize("Hello world.");
+    let mut stream = engine.synthesize("Hello world.", "mock");
     let seg = stream.next().await.unwrap().expect("segment failed");
     assert!(stream.next().await.is_none());
     assert!(!seg.samples.is_empty());

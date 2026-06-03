@@ -23,6 +23,7 @@ pub trait TtsBackend: Send + Sync {
     fn synthesize_sentence(
         &self,
         text: &str,
+        voice: &crate::backend::Voice,
         index: usize,
     ) -> Result<(Vec<f32>, u32, f64), TtsError>;
 }
@@ -34,6 +35,7 @@ pub trait TtsBackend: Send + Sync {
 #[derive(Clone)]
 pub struct TtsEngine {
     backend: Arc<dyn TtsBackend>,
+    voices: Arc<std::collections::HashMap<String, crate::backend::Voice>>,
 }
 
 impl TtsEngine {
@@ -41,14 +43,32 @@ impl TtsEngine {
         TtsEngineBuilder::default()
     }
 
-    /// Synthesise `text`, streaming one `AudioSegment` per sentence.
-    pub fn synthesize(&self, text: &str) -> AudioStream {
+    /// List available voice names.
+    pub fn voice_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.voices.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    /// Synthesise `text` using the named voice, streaming one `AudioSegment` per sentence.
+    /// Returns an error stream if `voice_name` is not found.
+    pub fn synthesize(&self, text: &str, voice_name: &str) -> AudioStream {
+        let voice = match self.voices.get(voice_name) {
+            Some(v) => v.clone(),
+            None => {
+                let (tx, rx) = mpsc::channel(1);
+                let err = TtsError::UnknownVoice(voice_name.to_string());
+                tokio::spawn(async move { let _ = tx.send(Err(err)).await; });
+                return AudioStream { rx };
+            }
+        };
+
         let (tx, rx) = mpsc::channel(4);
         let backend = Arc::clone(&self.backend);
         let text = text.to_string();
 
         tokio::spawn(async move {
-            run_synthesis_loop(text, backend, tx).await;
+            run_synthesis_loop(text, backend, voice, tx).await;
         });
 
         AudioStream { rx }
@@ -62,6 +82,7 @@ impl TtsEngine {
 async fn run_synthesis_loop(
     text: String,
     backend: Arc<dyn TtsBackend>,
+    voice: crate::backend::Voice,
     tx: mpsc::Sender<Result<AudioSegment, TtsError>>,
 ) {
     let sentences = splitter::split(&text);
@@ -78,9 +99,10 @@ async fn run_synthesis_loop(
         let paragraph_end = sentence.paragraph_end;
         let sentence_text = sentence.text.clone();
         let backend2 = Arc::clone(&backend);
+        let voice2 = voice.clone();
 
         let result = tokio::task::spawn_blocking(move || {
-            backend2.synthesize_sentence(&sentence_text, index)
+            backend2.synthesize_sentence(&sentence_text, &voice2, index)
         })
         .await
         .expect("spawn_blocking panicked");
@@ -153,11 +175,27 @@ impl TtsEngineBuilder {
                 .map_err(|e| TtsError::PythonInit(e.to_string()))
         })?;
 
+        // Collect voices from backend config for the engine-level voice registry
+        let voices: std::collections::HashMap<String, crate::backend::Voice> =
+            match &backend_config {
+                Backend::Kokoro { voice, .. } => {
+                    let v = crate::backend::Voice::Kokoro { name: voice.clone() };
+                    std::iter::once((voice.clone(), v)).collect()
+                }
+                Backend::F5Tts { voices, .. } => {
+                    voices.iter()
+                        .map(|v| (v.name().to_string(), v.clone()))
+                        .collect()
+                }
+                Backend::Mock => {
+                    let v = crate::backend::Voice::Mock;
+                    std::iter::once(("mock".to_string(), v)).collect()
+                }
+            };
+
         // Step 2: construct backend (Python already initialized)
         let backend: Arc<dyn TtsBackend> = match backend_config {
             Backend::Kokoro { model_dir, voice, speed } => {
-                // Create G2pEngine BEFORE the ONNX session so Python is
-                // fully set up with the correct sys.path before ort touches it
                 let g2p = crate::g2p::G2pEngine::new()
                     .map_err(|e| TtsError::PythonInit(e.to_string()))?;
                 Arc::new(
@@ -165,15 +203,18 @@ impl TtsEngineBuilder {
                         .map_err(|e| TtsError::PythonInit(e.to_string()))?,
                 )
             }
-            Backend::F5Tts { voices, workers } => {
+            Backend::F5Tts { workers, .. } => {
                 Arc::new(
-                    crate::f5::F5Backend::init(voices, workers)
+                    crate::f5::F5Backend::init(workers)
                         .map_err(|e| TtsError::PythonInit(e.to_string()))?,
                 )
             }
             Backend::Mock => Arc::new(crate::mock::MockBackend),
         };
 
-        Ok(TtsEngine { backend })
+        Ok(TtsEngine {
+            backend,
+            voices: Arc::new(voices),
+        })
     }
 }

@@ -10,6 +10,7 @@ pub async fn synthesize_to_wav(
     engine: &TtsEngine,
     config: &AudioConfig,
     sp: &ProgressBar,
+    voice: &str,
 ) -> anyhow::Result<()> {
     let spec = WavSpec {
         channels: 1,
@@ -19,7 +20,7 @@ pub async fn synthesize_to_wav(
     };
 
     let mut writer = WavWriter::create(path, spec)?;
-    let mut stream = engine.synthesize(text);
+    let mut stream = engine.synthesize(text, voice);
     let mut segments_written = 0usize;
 
     while let Some(result) = stream.next().await {

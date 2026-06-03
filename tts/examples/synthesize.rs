@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     println!("Synthesizing…");
-    let mut stream = engine.synthesize(&text);
+    let mut stream = engine.synthesize(&text, "am_puck");
     let mut segments = Vec::new();
 
     while let Some(result) = stream.next().await {

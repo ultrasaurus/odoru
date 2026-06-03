@@ -17,7 +17,7 @@
 //!         .backend(Backend::Mock)
 //!         .build()?;
 //!
-//!     let mut stream = engine.synthesize("Hello world.");
+//!     let mut stream = engine.synthesize("Hello world.", "mock");
 //!     while let Some(result) = stream.next().await {
 //!         let seg = result?;
 //!         println!("[{:.3}–{:.3}] {}", seg.transcript.start, seg.transcript.end, seg.transcript.text);

@@ -9,6 +9,7 @@ impl TtsBackend for MockBackend {
     fn synthesize_sentence(
         &self,
         text: &str,
+        _voice: &crate::backend::Voice,
         _index: usize,
     ) -> Result<(Vec<f32>, u32, f64), TtsError> {
         let sample_rate = 24_000u32;

@@ -34,6 +34,7 @@ impl TtsBackend for KokoroBackend {
     fn synthesize_sentence(
         &self,
         text: &str,
+        _voice: &crate::backend::Voice,
         index: usize,
     ) -> Result<(Vec<f32>, u32, f64), TtsError> {
         let mut inference = self.inference.lock().map_err(|e| TtsError::SynthesisFailed {

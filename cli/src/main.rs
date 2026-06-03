@@ -81,7 +81,7 @@ fn audio_progress(total: usize) -> ProgressBar {
     pb
 }
 
-fn build_backend(backend: AudioBackend) -> anyhow::Result<Backend> {
+fn build_backend(backend: AudioBackend) -> anyhow::Result<(Backend, String)> {
     match backend {
         AudioBackend::Kokoro => {
             let model_dir = std::env::var("KOKORO_MODEL_DIR")
@@ -90,12 +90,13 @@ fn build_backend(backend: AudioBackend) -> anyhow::Result<Backend> {
                     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                     std::path::PathBuf::from(home).join(".kokoro")
                 });
-            Ok(Backend::Kokoro { model_dir, voice: "am_puck".into(), speed: 1.0 })
+            Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), speed: 1.0 }, "am_puck".into()))
         }
         AudioBackend::F5 => {
             let voices_dir = workspace_root().join("voices");
             let def = VoiceDef::load(&voices_dir.join("sarah"))
                 .map_err(|e| anyhow::anyhow!("Failed to load voice 'sarah': {e}"))?;
+            let name = def.name.clone();
             let voice = tts::Voice::F5Tts {
                 name: def.name,
                 voice_ref: def.voice_ref,
@@ -103,9 +104,9 @@ fn build_backend(backend: AudioBackend) -> anyhow::Result<Backend> {
                 speed: def.speed,
                 cfg_strength: def.cfg_strength,
             };
-            Ok(Backend::F5Tts { voices: vec![voice], workers: 1 })
+            Ok((Backend::F5Tts { voices: vec![voice], workers: 1 }, name))
         }
-        AudioBackend::Mock => Ok(Backend::Mock),
+        AudioBackend::Mock => Ok((Backend::Mock, "mock".into())),
     }
 }
 
@@ -258,12 +259,12 @@ async fn main() -> anyhow::Result<()> {
         let stem = wav_path_override
             .unwrap_or_else(|| wav_filename(&article));
         let wav_path = resolve_wav_path(cli.output.as_deref(), &stem)?;
-        let backend = build_backend(cli.backend)?;
+        let (backend, voice_name) = build_backend(cli.backend)?;
         let engine = TtsEngine::builder().backend(backend).build()?;
         let config = AudioConfig::default();
         let total = tts::splitter::split(&article.plain_text).len();
         let pb = audio_progress(total);
-        audio::synthesize_to_wav(&article.plain_text, wav_path.to_str().unwrap(), &engine, &config, &pb).await?;
+        audio::synthesize_to_wav(&article.plain_text, wav_path.to_str().unwrap(), &engine, &config, &pb, &voice_name).await?;
         pb.finish_with_message(format!("✔ Audio saved to {}", wav_path.display()));
     }
 
@@ -471,16 +472,18 @@ mod tests {
 
     #[test]
     fn build_backend_mock_returns_mock_variant() {
-        let backend = build_backend(AudioBackend::Mock).unwrap();
+        let (backend, voice_name) = build_backend(AudioBackend::Mock).unwrap();
         assert!(matches!(backend, tts::Backend::Mock));
+        assert_eq!(voice_name, "mock");
     }
 
     #[test]
     fn build_backend_kokoro_uses_env_var() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("KOKORO_MODEL_DIR", "/tmp/kokoro-test");
-        let backend = build_backend(AudioBackend::Kokoro).unwrap();
+        let (backend, voice_name) = build_backend(AudioBackend::Kokoro).unwrap();
         std::env::remove_var("KOKORO_MODEL_DIR");
+        assert_eq!(voice_name, "am_puck");
         match backend {
             tts::Backend::Kokoro { model_dir, voice, .. } => {
                 assert_eq!(model_dir, std::path::PathBuf::from("/tmp/kokoro-test"));
@@ -494,7 +497,7 @@ mod tests {
     fn build_backend_kokoro_falls_back_to_home_dir() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("KOKORO_MODEL_DIR");
-        let backend = build_backend(AudioBackend::Kokoro).unwrap();
+        let (backend, _) = build_backend(AudioBackend::Kokoro).unwrap();
         match backend {
             tts::Backend::Kokoro { model_dir, .. } => {
                 assert!(model_dir.to_string_lossy().ends_with(".kokoro"));
@@ -505,7 +508,8 @@ mod tests {
 
     #[test]
     fn build_backend_f5_loads_sarah_voice() {
-        let backend = build_backend(AudioBackend::F5).unwrap();
+        let (backend, voice_name) = build_backend(AudioBackend::F5).unwrap();
+        assert_eq!(voice_name, "sarah");
         match backend {
             tts::Backend::F5Tts { voices, workers } => {
                 assert_eq!(workers, 1);
@@ -546,7 +550,7 @@ mod tests {
             sample_format: SampleFormat::Float,
         };
         let mut writer = WavWriter::create(&path, spec).unwrap();
-        let mut stream = engine.synthesize("Hello world. How are you?");
+        let mut stream = engine.synthesize("Hello world. How are you?", "mock");
         while let Some(result) = stream.next().await {
             let seg = result.expect("segment failed");
             for sample in &seg.samples {
