@@ -62,6 +62,8 @@ export class Player {
     done = false; // true once the WS sends {done: true}
     // Seconds into the full audio where the current play session started.
     seekOffset = 0;
+    // Pre-rendered gray spans supplied by caller; activated in place as audio arrives.
+    pendingSpans = [];
     constructor(container) {
         this.container = container;
         this.queue = new AudioQueue();
@@ -69,9 +71,12 @@ export class Player {
     // ---------------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------------
-    synthesize(text, voice) {
+    synthesize(text, voice, pendingSpans) {
         this.reset();
-        this.container.innerHTML = '<div class="loading">Synthesizing…</div>';
+        this.pendingSpans = pendingSpans ?? [];
+        if (this.pendingSpans.length === 0) {
+            this.container.innerHTML = '<div class="loading">Synthesizing…</div>';
+        }
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         this.ws = new WebSocket(`${proto}://${location.host}/ws`);
         this.ws.onopen = () => {
@@ -174,24 +179,18 @@ export class Player {
         this.queue.reset();
         this.segments = [];
         this.segmentEls = [];
+        this.pendingSpans = [];
         this.activeIndex = -1;
         this.seekOffset = 0;
         this.done = false;
     }
     renderSegment(transcript, index) {
-        if (index === 0)
-            this.container.innerHTML = '';
-        const span = document.createElement('span');
-        span.className = 'segment';
-        span.textContent = transcript.text;
-        span.dataset.index = String(index);
-        span.addEventListener('click', () => {
+        const clickHandler = () => {
             this.stopTracking();
             if (this.activeIndex >= 0) {
                 this.segmentEls[this.activeIndex]?.classList.remove('active');
             }
             this.activeIndex = -1;
-            // seekOffset is just the audio-relative startTime of the clicked segment
             this.seekOffset = this.segments[index].startTime;
             this.queue.reset();
             for (let i = index; i < this.segments.length; i++) {
@@ -199,11 +198,26 @@ export class Player {
             }
             this.highlightSegment(index);
             this.startTracking();
-        });
+        };
+        const pending = this.pendingSpans[index];
+        if (pending) {
+            // Activate the pre-rendered gray span in place.
+            pending.classList.remove('pending');
+            pending.addEventListener('click', clickHandler);
+            this.segmentEls.push(pending);
+            return;
+        }
+        // No pre-rendered span — build and append normally.
+        if (index === 0 && this.pendingSpans.length === 0)
+            this.container.innerHTML = '';
+        const span = document.createElement('span');
+        span.className = 'segment';
+        span.textContent = transcript.text;
+        span.dataset.index = String(index);
+        span.addEventListener('click', clickHandler);
         this.container.appendChild(span);
         const seg = this.segments[index];
         if (seg?.paragraphEnd) {
-            // Paragraph break — add a block-level spacer
             const br = document.createElement('div');
             br.className = 'paragraph-break';
             this.container.appendChild(br);

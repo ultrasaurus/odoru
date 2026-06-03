@@ -19,6 +19,35 @@ const ARTICLES = [
     { title: 'Hypertext: An Introduction and Survey' },
 ];
 const app = document.getElementById('app');
+function splitSentences(text) {
+    const result = [];
+    const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+    for (const para of paragraphs) {
+        const sentences = [];
+        for (const line of para.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed)
+                continue;
+            if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+                const seg = new Intl.Segmenter('en', { granularity: 'sentence' });
+                for (const { segment } of seg.segment(trimmed)) {
+                    const s = segment.trim();
+                    if (s)
+                        sentences.push(s);
+                }
+            }
+            else {
+                // Fallback for older browsers
+                trimmed.split(/(?<=[.!?])\s+/).forEach(s => { if (s.trim())
+                    sentences.push(s.trim()); });
+            }
+        }
+        for (let i = 0; i < sentences.length; i++) {
+            result.push({ text: sentences[i], paragraphEnd: i === sentences.length - 1 });
+        }
+    }
+    return result;
+}
 // ── Shared helpers ────────────────────────────────────────────────────────────
 function fmt(s) {
     const m = Math.floor(s / 60);
@@ -116,11 +145,27 @@ function showReader() {
     fetch(`/doc?url=${encodeURIComponent(ARTICLE_URL)}&voice=${encodeURIComponent(ARTICLE_VOICE)}`)
         .then(res => res.json())
         .then(data => {
-        const audioReady = !!data.cached?.audio;
-        transcriptContainer.innerHTML = audioReady
-            ? '<div class="loading">Ready — press play</div>'
-            : '<div class="loading">Synthesizing…</div>';
-        player.synthesize(data.plain_text, ARTICLE_VOICE);
+        // Pre-render all sentences as gray pending spans so the article is
+        // visible immediately; player activates each span as audio arrives.
+        const sentences = splitSentences(data.plain_text);
+        transcriptContainer.innerHTML = '';
+        const pendingSpans = [];
+        for (const { text, paragraphEnd } of sentences) {
+            const span = document.createElement('span');
+            span.className = 'segment pending';
+            span.textContent = text;
+            pendingSpans.push(span);
+            transcriptContainer.appendChild(span);
+            if (paragraphEnd) {
+                const br = document.createElement('div');
+                br.className = 'paragraph-break';
+                transcriptContainer.appendChild(br);
+            }
+            else {
+                transcriptContainer.appendChild(document.createTextNode(' '));
+            }
+        }
+        player.synthesize(data.plain_text, ARTICLE_VOICE, pendingSpans);
     })
         .catch(() => {
         transcriptContainer.innerHTML = '<div class="error">Failed to load article.</div>';
@@ -133,10 +178,15 @@ function showNew() {
     let synthStart = 0;
     app.innerHTML = `
     <div class="layout">
+      <div id="error-bar" class="error-bar" style="display:none">
+        <span id="error-bar-msg" class="error-bar-msg"></span>
+        <button id="error-bar-retry" class="error-bar-retry">Retry</button>
+      </div>
       <header class="header">
         <a class="back-link" id="back-link">← Articles</a>
         <div class="logo">▶ odoru</div>
       </header>
+      <!-- TODO: generalize error-bar into shared layout wrapper -->
 
       <main class="main">
         <div class="workspace">
@@ -185,6 +235,18 @@ function showNew() {
     </div>
   `;
     document.getElementById('back-link').addEventListener('click', showReader);
+    // Error bar helpers
+    const errorBar = document.getElementById('error-bar');
+    const errorBarMsg = document.getElementById('error-bar-msg');
+    const errorBarRetry = document.getElementById('error-bar-retry');
+    function showErrorBar(msg) {
+        errorBarMsg.textContent = msg;
+        errorBar.style.display = 'flex';
+    }
+    function hideErrorBar() {
+        errorBar.style.display = 'none';
+    }
+    errorBarRetry.addEventListener('click', () => loadVoices());
     const synthBtn = document.getElementById('synth-btn');
     const textInput = document.getElementById('text-input');
     const timeEstimate = document.getElementById('time-estimate');
@@ -246,6 +308,7 @@ function showNew() {
                 throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             voices = data.voices;
+            hideErrorBar();
             if (voices.length > 0 && !selectedVoice)
                 selectVoice(voices[0].id);
             else
@@ -253,7 +316,8 @@ function showNew() {
             updateEstimate(textInput.value);
         }
         catch {
-            voiceList.innerHTML = '<div class="voice-loading error">Failed to load voices.</div>';
+            voiceList.innerHTML = '<div class="voice-loading">—</div>';
+            showErrorBar('Could not reach server. Is it running?');
         }
     }
     loadVoices();

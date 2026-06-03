@@ -32,6 +32,38 @@ html, body {
   flex-direction: column;
 }
 
+/* Error bar */
+.error-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1.5rem;
+  background: rgba(180, 60, 60, 0.15);
+  border-bottom: 1px solid rgba(180, 60, 60, 0.4);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.error-bar-msg {
+  flex: 1;
+  color: #e07070;
+}
+
+.error-bar-retry {
+  background: transparent;
+  border: 1px solid rgba(180, 60, 60, 0.5);
+  border-radius: 4px;
+  color: #e07070;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 0.2rem 0.7rem;
+}
+
+.error-bar-retry:hover {
+  background: rgba(180, 60, 60, 0.2);
+}
+
 /* Header */
 .header {
   padding: 1.5rem 2rem;
@@ -446,6 +478,12 @@ html, body {
   background: var(--active-bg);
   color: var(--highlight);
   font-style: italic;
+}
+
+.segment.pending {
+  color: var(--text-dim);
+  cursor: default;
+  pointer-events: none;
 }
 
 .placeholder {
