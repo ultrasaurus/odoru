@@ -11,6 +11,7 @@ use crate::backend::Backend;
 use crate::chunk::{AudioSegment, Segment};
 use crate::error::TtsError;
 use crate::splitter;
+use crate::audio_cache;
 
 // ---------------------------------------------------------------------------
 // TtsBackend trait
@@ -101,6 +102,34 @@ async fn run_synthesis_loop(
         let backend2 = Arc::clone(&backend);
         let voice2 = voice.clone();
 
+        // Check disk cache for F5 (slow backend only).
+        // Kokoro is fast enough that caching adds more complexity than it saves.
+        let cache_key = match &voice {
+            crate::backend::Voice::F5Tts { .. } => {
+                let normalized = crate::f5::normalizer::normalize(&sentence_text);
+                Some(audio_cache::cache_key(&normalized, &voice.cache_key()))
+            }
+            _ => None,
+        };
+
+        if let Some(ref key) = cache_key {
+            if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
+                eprintln!("[audio cache] hit sentence {index}, skipping synthesis");
+                let segment = Segment {
+                    start: time_offset,
+                    end: time_offset + duration,
+                    text: sentence.text.clone(),
+                };
+                time_offset += duration;
+                if index + 1 < sentence_count {
+                    time_offset += if paragraph_end { paragraph_silence_secs } else { sentence_silence_secs };
+                }
+                let seg = AudioSegment { index, samples, sample_rate, transcript: segment, paragraph_end };
+                if tx.send(Ok(seg)).await.is_err() { return; }
+                continue;
+            }
+        }
+
         let result = tokio::task::spawn_blocking(move || {
             backend2.synthesize_sentence(&sentence_text, &voice2, index)
         })
@@ -109,6 +138,12 @@ async fn run_synthesis_loop(
 
         match result {
             Ok((samples, sample_rate, duration)) => {
+                // Write to disk cache if applicable
+                if let Some(ref key) = cache_key {
+                    let normalized = crate::f5::normalizer::normalize(&sentence.text);
+                    audio_cache::store(key, &normalized, &samples, sample_rate, duration);
+                }
+
                 let segment = Segment {
                     start: time_offset,
                     end: time_offset + duration,

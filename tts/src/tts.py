@@ -38,9 +38,8 @@ _f5_state = None  # (model, ref_audio, ref_text)
 def _load_f5(voice_ref: str, ref_text: str):
     global _f5_state
     if _f5_state is not None and _f5_state[2] == voice_ref:
-        print(f"[f5] cache hit: {voice_ref}", flush=True)
         return
-    print(f"[f5] loading voice: {voice_ref}", flush=True)
+    print(f"[f5] loading voice ref: {voice_ref}", flush=True)
 
     # Always create a fresh model instance when the voice changes.
     # Reusing the model object across voices causes MLX to retain

@@ -31,6 +31,7 @@ pub mod splitter;
 pub mod chunk;
 pub mod backend;
 pub mod transcript;
+pub mod audio_cache;
 
 // Python integration (internal)
 pub(crate) mod python;
