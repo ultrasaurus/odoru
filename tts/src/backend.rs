@@ -75,8 +75,11 @@ pub enum Backend {
     Kokoro {
         /// Directory containing model.onnx, tokenizer.json, voices/.
         model_dir: PathBuf,
-        /// Voice name (e.g. "am_puck").
+        /// Default voice name (e.g. "am_puck"). Used to initialize the backend.
         voice: String,
+        /// All available voices. If empty, only `voice` is registered.
+        #[allow(dead_code)]
+        all_voices: Vec<String>,
         /// Speed multiplier (1.0 = normal).
         speed: f32,
     },

@@ -97,7 +97,7 @@ fn build_backend(backend: AudioBackend, voice: Option<&str>) -> anyhow::Result<(
                     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                     std::path::PathBuf::from(home).join(".kokoro")
                 });
-            Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), speed: 1.0 }, "am_puck".into()))
+            Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), all_voices: vec![], speed: 1.0 }, "am_puck".into()))
         }
         AudioBackend::F5 => {
             let voices_dir = util::voice::voices_dir()

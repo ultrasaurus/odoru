@@ -34,15 +34,19 @@ impl TtsBackend for KokoroBackend {
     fn synthesize_sentence(
         &self,
         text: &str,
-        _voice: &crate::backend::Voice,
+        voice: &crate::backend::Voice,
         index: usize,
     ) -> Result<(Vec<f32>, u32, f64), TtsError> {
+        let voice_name = match voice {
+            crate::backend::Voice::Kokoro { name } => name.as_str(),
+            _ => "am_puck",
+        };
         let mut inference = self.inference.lock().map_err(|e| TtsError::SynthesisFailed {
             index,
             sentence: text.to_string(),
             cause: format!("lock poisoned: {e}"),
         })?;
-        inference.synthesize(text, index).map_err(|e| TtsError::SynthesisFailed {
+        inference.synthesize_with_voice(text, voice_name, index).map_err(|e| TtsError::SynthesisFailed {
             index,
             sentence: text.to_string(),
             cause: e.to_string(),
@@ -57,14 +61,13 @@ impl TtsBackend for KokoroBackend {
 struct KokoroInference {
     session: Session,
     model_dir: PathBuf,
-    voice: String,
     speed: f32,
     vocab: std::collections::HashMap<char, usize>,
     g2p: G2pEngine,
 }
 
 impl KokoroInference {
-    fn new(model_dir: PathBuf, voice: &str, speed: f32, g2p: G2pEngine) -> Result<Self> {
+    fn new(model_dir: PathBuf, _voice: &str, speed: f32, g2p: G2pEngine) -> Result<Self> {
         let model_path = model_dir.join("model.onnx");
         if !model_path.exists() {
             bail!("model.onnx not found in {}.\nRun setup.sh to download it.", model_dir.display());
@@ -89,10 +92,10 @@ impl KokoroInference {
 
         let vocab = build_vocab(&model_dir)?;
 
-        Ok(Self { session, model_dir, voice: voice.to_string(), speed, vocab, g2p })
+        Ok(Self { session, model_dir, speed, vocab, g2p })
     }
 
-    fn synthesize(&mut self, text: &str, _index: usize) -> Result<(Vec<f32>, u32, f64)> {
+    fn synthesize_with_voice(&mut self, text: &str, voice: &str, _index: usize) -> Result<(Vec<f32>, u32, f64)> {
         let rt = tokio::runtime::Runtime::new()?;
         let phonemes = rt.block_on(async {
             let mut stream = self.g2p.phonemize(text);
@@ -115,15 +118,15 @@ impl KokoroInference {
             bail!("No token IDs for phonemes: {phonemes:?}");
         }
 
-        let (samples, durations) = self.run_onnx(&token_ids)?;
+        let (samples, durations) = self.run_onnx(&token_ids, voice)?;
         let duration = audio_duration_from_durations(&durations);
 
         Ok((samples, 24_000, duration))
     }
 
-    fn run_onnx(&mut self, token_ids: &[i64]) -> Result<(Vec<f32>, Vec<f32>)> {
+    fn run_onnx(&mut self, token_ids: &[i64], voice: &str) -> Result<(Vec<f32>, Vec<f32>)> {
         let n_tokens = token_ids.len();
-        let style = load_voice_style(&self.model_dir, &self.voice, n_tokens)?;
+        let style = load_voice_style(&self.model_dir, voice, n_tokens)?;
 
         let mut ids = Vec::with_capacity(n_tokens + 2);
         ids.push(0i64);

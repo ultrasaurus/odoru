@@ -178,9 +178,14 @@ impl TtsEngineBuilder {
         // Collect voices from backend config for the engine-level voice registry
         let voices: std::collections::HashMap<String, crate::backend::Voice> =
             match &backend_config {
-                Backend::Kokoro { voice, .. } => {
-                    let v = crate::backend::Voice::Kokoro { name: voice.clone() };
-                    std::iter::once((voice.clone(), v)).collect()
+                Backend::Kokoro { voice, all_voices, .. } => {
+                    let mut voices_to_register = all_voices.clone();
+                    if voices_to_register.is_empty() {
+                        voices_to_register.push(voice.clone());
+                    }
+                    voices_to_register.iter()
+                        .map(|n| (n.clone(), crate::backend::Voice::Kokoro { name: n.clone() }))
+                        .collect()
                 }
                 Backend::F5Tts { voices, .. } => {
                     voices.iter()
@@ -195,7 +200,7 @@ impl TtsEngineBuilder {
 
         // Step 2: construct backend (Python already initialized)
         let backend: Arc<dyn TtsBackend> = match backend_config {
-            Backend::Kokoro { model_dir, voice, speed } => {
+            Backend::Kokoro { model_dir, voice, speed, .. } => {
                 let g2p = crate::g2p::G2pEngine::new()
                     .map_err(|e| TtsError::PythonInit(e.to_string()))?;
                 Arc::new(

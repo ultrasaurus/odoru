@@ -321,6 +321,39 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let _ = sender.send(Message::Text(done.into())).await;
 }
 
+/// Scan `<model_dir>/voices/` for `.bin` files and return a sorted list
+/// of `VoiceInfo`. Falls back to a single `am_puck` entry if the directory
+/// can't be read (e.g. model not yet downloaded).
+fn kokoro_voices(model_dir: &std::path::Path) -> Vec<VoiceInfo> {
+    let voices_dir = model_dir.join("voices");
+    let Ok(entries) = std::fs::read_dir(&voices_dir) else {
+        eprintln!("Warning: could not read {}", voices_dir.display());
+        return vec![VoiceInfo { name: "am_puck".into(), description: String::new() }];
+    };
+
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension()?.to_str()? == "bin" {
+                Some(path.file_stem()?.to_str()?.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    names.sort();
+
+    if names.is_empty() {
+        return vec![VoiceInfo { name: "am_puck".into(), description: String::new() }];
+    }
+
+    names.into_iter()
+        .map(|name| VoiceInfo { name, description: String::new() })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Backend construction
 // ---------------------------------------------------------------------------
@@ -368,13 +401,15 @@ fn build_backend() -> anyhow::Result<(Backend, Vec<VoiceInfo>)> {
                     std::path::PathBuf::from(home).join(".kokoro")
                 });
 
-            let voice_infos = vec![VoiceInfo {
-                name: "am_puck".into(),
-                description: "Kokoro am_puck voice.".into(),
-            }];
+            let voice_infos = kokoro_voices(&model_dir);
+            let default_voice = voice_infos.first()
+                .map(|v| v.name.clone())
+                .unwrap_or_else(|| "am_puck".into());
 
-            eprintln!("Kokoro backend: model dir = {}", model_dir.display());
-            Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), speed: 1.0 }, voice_infos))
+            let all_voice_names: Vec<String> = voice_infos.iter().map(|v| v.name.clone()).collect();
+
+            eprintln!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
+            Ok((Backend::Kokoro { model_dir, voice: default_voice, all_voices: all_voice_names, speed: 1.0 }, voice_infos))
         }
     }
 }

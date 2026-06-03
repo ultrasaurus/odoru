@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
         .backend(Backend::Kokoro {
             model_dir,
             voice: "am_puck".into(),
+            all_voices: vec![],
             speed: 1.0,
         })
         .build()?;
