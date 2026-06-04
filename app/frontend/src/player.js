@@ -197,6 +197,7 @@ export class Player {
     }
     renderSegment(transcript, index) {
         const clickHandler = () => {
+            const wasPlaying = this.queue.state === 'running';
             this.stopTracking();
             if (this.activeIndex >= 0) {
                 this.segmentEls[this.activeIndex]?.classList.remove('active');
@@ -208,7 +209,12 @@ export class Player {
                 this.queue.enqueue(this.segments[i].samples);
             }
             this.highlightSegment(index);
-            this.startTracking();
+            if (wasPlaying) {
+                this.play();
+            }
+            else {
+                this.startTracking();
+            }
         };
         const pending = this.pendingSpans[index];
         if (pending) {
@@ -239,6 +245,7 @@ export class Player {
         this.segmentEls.push(span);
     }
     startTracking() {
+        this.stopTracking();
         const lastEndedIndex = { value: -1 };
         const tick = () => {
             const pos = this.position;

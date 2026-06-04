@@ -55,6 +55,21 @@ function splitSentences(text) {
     return result;
 }
 // ── Shared helpers ────────────────────────────────────────────────────────────
+// Safe alternative to innerHTML interpolation for single-element status messages.
+function makeEl(tag, className, text) {
+    const el = document.createElement(tag);
+    el.className = className;
+    el.textContent = text;
+    return el;
+}
+function setError(container, msg) {
+    container.innerHTML = '';
+    container.appendChild(makeEl('div', 'error', msg));
+}
+function setStatus(container, className, msg) {
+    container.innerHTML = '';
+    container.appendChild(makeEl('span', className, msg));
+}
 function fmt(s) {
     const m = Math.floor(s / 60);
     const sec = Math.floor(s % 60);
@@ -151,7 +166,7 @@ function showReader() {
     const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls();
     const player = new Player(transcriptContainer);
     player.onError(msg => {
-        transcriptContainer.innerHTML = `<div class="error">Error: ${msg}</div>`;
+        setError(transcriptContainer, `Error: ${msg}`);
         playBtn.disabled = true;
     });
     wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal, () => 'authorship-provisions-in-augment.wav');
@@ -170,20 +185,20 @@ function showReader() {
             try {
                 const res = await fetch(`/jobs/${jobId}`);
                 if (!res.ok) {
-                    jobArea.innerHTML = `<span class="job-status error">Job not found — server may have restarted</span>`;
+                    setStatus(jobArea, 'job-status error', 'Job not found — server may have restarted');
                     return;
                 }
                 const job = await res.json();
                 if (job.status === 'done') {
-                    jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>';
+                    setStatus(jobArea, 'job-status done', '✓ Audio ready');
                     return;
                 }
                 if (job.status === 'error') {
-                    jobArea.innerHTML = `<span class="job-status error">Synthesis error: ${job.error ?? ''}</span>`;
+                    setStatus(jobArea, 'job-status error', `Synthesis error: ${job.error ?? ''}`);
                     return;
                 }
                 const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;
-                jobArea.innerHTML = `<span class="job-status running">Synthesizing… ${job.completed_sentences}/${total} (${pct}%)</span>`;
+                setStatus(jobArea, 'job-status running', `Synthesizing… ${job.completed_sentences}/${total} (${pct}%)`);
                 pollJob(jobId, total);
             }
             catch {
@@ -192,7 +207,7 @@ function showReader() {
         }, 4000);
     }
     async function startJob(text) {
-        jobArea.innerHTML = '<span class="job-status running">Queuing…</span>';
+        setStatus(jobArea, 'job-status running', 'Queuing…');
         try {
             const res = await fetch('/jobs', {
                 method: 'POST',
@@ -201,11 +216,11 @@ function showReader() {
             });
             const job = await res.json();
             if (!res.ok) {
-                jobArea.innerHTML = `<span class="job-status error">${job.error ?? 'Failed to queue'}</span>`;
+                setStatus(jobArea, 'job-status error', job.error ?? 'Failed to queue');
                 return;
             }
             if (job.status === 'done') {
-                jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>';
+                setStatus(jobArea, 'job-status done', '✓ Audio ready');
                 return;
             }
             pollJob(job.id, job.total_sentences);
@@ -220,7 +235,7 @@ function showReader() {
         .then(data => {
         const audioReady = !!data.cached?.audio;
         if (audioReady) {
-            jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>';
+            setStatus(jobArea, 'job-status done', '✓ Audio ready');
         }
         else {
             // Show background synthesis button for any backend — slow synthesis
@@ -462,7 +477,7 @@ function showNew() {
     const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls();
     const player = new Player(transcriptContainer);
     player.onError(msg => {
-        transcriptContainer.innerHTML = `<div class="error">Error: ${msg}</div>`;
+        setError(transcriptContainer, `Error: ${msg}`);
         synthBtn.disabled = false;
         playBtn.disabled = true;
     });
@@ -611,7 +626,7 @@ function showNew() {
             try {
                 const res = await fetch(`/jobs/${jobId}`);
                 if (!res.ok) {
-                    transcriptContainer.innerHTML = `<div class="error">Job not found (${res.status}) — server may have restarted</div>`;
+                    setError(transcriptContainer, `Job not found (${res.status}) — server may have restarted`);
                     synthBtn.disabled = false;
                     return;
                 }
@@ -622,7 +637,7 @@ function showNew() {
                     return;
                 }
                 if (job.status === 'error') {
-                    transcriptContainer.innerHTML = `<div class="error">Synthesis error: ${job.error ?? ''}</div>`;
+                    setError(transcriptContainer, `Synthesis error: ${job.error ?? ''}`);
                     synthBtn.disabled = false;
                     return;
                 }
@@ -653,7 +668,7 @@ function showNew() {
             });
             const job = await res.json();
             if (!res.ok) {
-                transcriptContainer.innerHTML = `<div class="error">${job.error ?? 'Failed to queue job'}</div>`;
+                setError(transcriptContainer, job.error ?? 'Failed to queue job');
                 synthBtn.disabled = false;
                 return;
             }
