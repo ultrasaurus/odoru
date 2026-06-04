@@ -17,7 +17,7 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - Player activates each span in place as audio arrives (removes `pending` class, wires click)
 - Markdown rendered via `marked` — headings, paragraphs, bold/italic, blockquotes
 - Sentence spans woven into markdown block elements; indices match server synthesis order
-- Left sidebar: Articles tab + Outline tab (auto-selected on load)
+- Left sidebar: Documents tab + Outline tab (auto-selected on load); Documents list is currently hardcoded (will be driven by `GET /articles` after A1-2)
 - Outline tracks active heading from playback position; click → instant jump, no audio change
 - "Synthesize in background" button shown when audio not fully cached (all backends)
 - Job progress shown in header; polls `GET /jobs/:id` every 4s while running
@@ -28,8 +28,9 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - URL fetch + text area + voice picker + "Synthesize in background" checkbox
 - Checkbox unchecked: live streaming WS synthesis
 - Checkbox checked: `POST /jobs`, progress shown in transcript area, polls every 4s
-- Background Queue section below card: lists all jobs, cancel button on active jobs,
-  polls `GET /jobs` every 10s
+- Documents panel below card: always visible; lists all jobs from `GET /jobs`, polls every 10s;
+  shows title/text_preview, human-readable voice name, status badge, progress bar for active jobs,
+  sentence count for ready jobs, cancel button for active jobs; sorted active → ready → cancelled/error
 - `viewCleanup` stops all timers when navigating to Reader view
 - Download enabled on `onSynthDone` (synthesis stream complete), not on playback end
 - `downloadFilename()` evaluated at click time (lazy), not at view init

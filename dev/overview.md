@@ -68,11 +68,28 @@ See [protocol.md](protocol.md).
 
 ## Next planned improvements
 
+A. Documents panel: shows all documents (aka articles) with full metadata where known
+
+   Server-side (do first):
+   1. *Jobs*: store article URL + title in job record; auto-restart pending jobs on server startup
+      by looking up text from article store (currently requires manual re-submit)
+   2. Article store: expose `synthesized_voices` list in `GET /doc` response for UI use;
+      add `GET /articles` endpoint returning all cached articles
+
+   Frontend (after A1-2):
+   3. Documents panel in New view: show title/URL per job instead of text_preview;
+      wire Open button to navigate to reader view for that article
+
+B. *Results from URL fetch are editable*
+   so text can be adjusted if scraping is imperfect
+
+   1. After fetching URL, metadata can be edited
+   2. Figure out where to put author, date, etc. in reader
+   3. Markdown editor for content with preview option
+   4. Outline view
+   
+
 ### Not yet implemented (discussed)
-- Background Queue: show article title + URL per job instead of text_preview
-- Jobs: store article URL in job record; auto-restart pending jobs on server startup
-  by looking up text from article store (currently requires manual re-submit)
-- Article store: expose `synthesized_voices` list in `GET /doc` response for UI use
 - Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
 - Error bar: currently only in New view; should be in a shared layout wrapper
 - Mispronounced words: no UI for `tts_overrides.txt` edits

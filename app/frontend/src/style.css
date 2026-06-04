@@ -230,19 +230,22 @@ html, body {
 
 .queue-row:last-child { border-bottom: none; }
 
-.queue-row-main {
+.queue-empty {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.75rem 1.25rem;
+}
+
+.queue-row-top {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.5rem;
   align-items: baseline;
 }
 
-.queue-voice {
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.queue-preview {
-  color: var(--text-dim);
+.queue-title {
+  color: var(--text);
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -255,14 +258,52 @@ html, body {
   font-size: 0.72rem;
 }
 
-.queue-status { color: var(--text-dim); }
+.queue-voice {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.queue-status { color: var(--text-dim); flex-shrink: 0; }
 .queue-status.in_progress { color: var(--text); }
 .queue-status.done        { color: var(--accent); }
 .queue-status.error       { color: #e07070; }
 .queue-status.cancelled   { color: var(--text-dim); opacity: 0.6; }
 
 .queue-progress { color: var(--text-dim); }
-.queue-date     { color: var(--text-dim); opacity: 0.5; margin-left: auto; }
+
+.queue-progress-bar {
+  flex: 1;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  min-width: 3rem;
+  max-width: 6rem;
+}
+
+.queue-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.queue-open-btn {
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 0.1rem 0.5rem;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.queue-open-btn:hover {
+  background: rgba(var(--accent-rgb, 180, 160, 100), 0.15);
+}
 
 .queue-cancel-btn {
   background: transparent;
@@ -273,6 +314,7 @@ html, body {
   font-size: 0.68rem;
   padding: 0.1rem 0.4rem;
   line-height: 1.4;
+  flex-shrink: 0;
 }
 
 .queue-cancel-btn:hover {

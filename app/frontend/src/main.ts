@@ -445,7 +445,7 @@ function showNew() {
             ${controlsHtml()}
           </div>
 
-          <div id="queue-section" class="queue-section" style="display:none">
+          <div id="queue-section" class="queue-section">
             <div class="queue-header">Documents</div>
             <div id="queue-list" class="queue-list"></div>
           </div>
@@ -467,8 +467,7 @@ function showNew() {
 
   document.getElementById('back-link')!.addEventListener('click', showReader)
 
-  const queueSection = document.getElementById('queue-section')!
-  const queueList    = document.getElementById('queue-list')!
+  const queueList = document.getElementById('queue-list')!
 
   // ── Background Queue ───────────────────────────────────────────────────────
   let queuePollTimer: ReturnType<typeof setTimeout> | null = null
@@ -494,57 +493,69 @@ function showNew() {
   }
 
   function renderQueue(jobs: JobInfo[]) {
+    queueList.innerHTML = ''
     if (jobs.length === 0) {
-      queueSection.style.display = 'none'
+      const empty = document.createElement('div')
+      empty.className = 'queue-empty'
+      empty.textContent = 'No documents yet.'
+      queueList.appendChild(empty)
       return
     }
-    queueSection.style.display = ''
-    // Sort: running/pending first, then newest first.
+    // Sort: running/pending first, then ready, then cancelled/error; newest first within group.
     jobs.sort((a, b) => {
-      const activeA = a.status === 'in_progress' || a.status === 'pending'
-      const activeB = b.status === 'in_progress' || b.status === 'pending'
-      if (activeA !== activeB) return activeA ? -1 : 1
+      const rank = (s: string) => s === 'in_progress' ? 0 : s === 'pending' ? 1 : s === 'done' ? 2 : 3
+      const dr = rank(a.status) - rank(b.status)
+      if (dr !== 0) return dr
       return b.created_at.localeCompare(a.created_at)
     })
-    queueList.innerHTML = ''
     for (const job of jobs) {
       const active = job.status === 'pending' || job.status === 'in_progress'
-      const pct = job.total_sentences > 0
+      const ready  = job.status === 'done'
+      const pct    = job.total_sentences > 0
         ? Math.round((job.completed_sentences / job.total_sentences) * 100) : 0
-      const progress = active
-        ? `${job.completed_sentences}/${job.total_sentences} (${pct}%)`
-        : job.status === 'done' ? `${job.total_sentences} sentences` : ''
+      const voiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice
 
       const row = document.createElement('div')
       row.className = 'queue-row'
 
-      const main = document.createElement('div')
-      main.className = 'queue-row-main'
-      const voiceEl = document.createElement('span')
-      voiceEl.className = 'queue-voice'
-      voiceEl.textContent = job.voice
-      const previewEl = document.createElement('span')
-      previewEl.className = 'queue-preview'
-      previewEl.textContent = job.text_preview
-      main.append(voiceEl, previewEl)
+      // Top line: title/preview + status badge + Open button
+      const top = document.createElement('div')
+      top.className = 'queue-row-top'
 
-      const meta = document.createElement('div')
-      meta.className = 'queue-row-meta'
+      const titleEl = document.createElement('span')
+      titleEl.className = 'queue-title'
+      titleEl.textContent = job.text_preview
+      top.appendChild(titleEl)
+
       const statusEl = document.createElement('span')
       statusEl.className = `queue-status ${job.status}`
       statusEl.textContent = statusLabel(job.status)
-      meta.appendChild(statusEl)
-      if (progress) {
-        const progressEl = document.createElement('span')
-        progressEl.className = 'queue-progress'
-        progressEl.textContent = progress
-        meta.appendChild(progressEl)
-      }
-      const dateEl = document.createElement('span')
-      dateEl.className = 'queue-date'
-      dateEl.textContent = job.created_at
-      meta.appendChild(dateEl)
+      top.appendChild(statusEl)
+
+
+      // Bottom line: voice, progress/sentence count, cancel
+      const meta = document.createElement('div')
+      meta.className = 'queue-row-meta'
+
+      const voiceEl = document.createElement('span')
+      voiceEl.className = 'queue-voice'
+      voiceEl.textContent = voiceName
+      meta.appendChild(voiceEl)
+
       if (active) {
+        const bar = document.createElement('div')
+        bar.className = 'queue-progress-bar'
+        const fill = document.createElement('div')
+        fill.className = 'queue-progress-fill'
+        fill.style.width = `${pct}%`
+        bar.appendChild(fill)
+        meta.appendChild(bar)
+
+        const pctEl = document.createElement('span')
+        pctEl.className = 'queue-progress'
+        pctEl.textContent = `${pct}%`
+        meta.appendChild(pctEl)
+
         const cancelBtn = document.createElement('button')
         cancelBtn.className = 'queue-cancel-btn'
         cancelBtn.textContent = '✕'
@@ -553,9 +564,14 @@ function showNew() {
           pollQueue()
         })
         meta.appendChild(cancelBtn)
+      } else if (ready) {
+        const countEl = document.createElement('span')
+        countEl.className = 'queue-progress'
+        countEl.textContent = `${job.total_sentences} sentences`
+        meta.appendChild(countEl)
       }
 
-      row.append(main, meta)
+      row.append(top, meta)
       queueList.appendChild(row)
     }
   }
