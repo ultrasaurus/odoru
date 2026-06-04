@@ -60,6 +60,7 @@ export class Player {
     onReadyCb = null;
     onSynthDoneCb = null;
     onErrorCb = null;
+    autoScroll = false; // set by caller; scrolls active segment into view when true
     done = false; // true once the WS sends {done: true}
     // Seconds into the full audio where the current play session started.
     seekOffset = 0;
@@ -150,6 +151,10 @@ export class Player {
         return last ? last.endTime : 0;
     }
     get hasAudio() { return this.segments.length > 0; }
+    /** Start time (seconds) of the segment at `index`, or null if not yet received. */
+    segmentStartTime(index) {
+        return this.segments[index]?.startTime ?? null;
+    }
     get synthesizedWordCount() {
         return this.segments
             .map(s => s.transcript.text.trim().split(/\s+/).filter(Boolean).length)
@@ -291,7 +296,8 @@ export class Player {
         if (index >= 0) {
             const el = this.segmentEls[index];
             el?.classList.add('active');
-            el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            if (this.autoScroll)
+                el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
     }
 }

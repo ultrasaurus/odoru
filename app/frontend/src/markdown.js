@@ -70,19 +70,6 @@ function splitLines(text) {
     }
     return sentences;
 }
-// ---------------------------------------------------------------------------
-// renderMarkdown
-//
-// Parses `content` (trafilatura markdown) and appends rendered HTML into
-// `container`. Sentence spans are woven into each block element so the
-// Player can activate them in place as audio arrives.
-//
-// `plainText` is the server's plain-text version of the article — used as
-// the source of truth for sentence splitting so client indices match server
-// synthesis indices exactly.
-//
-// Returns `pendingSpans` in synthesis order.
-// ---------------------------------------------------------------------------
 export function renderMarkdown(content, plainText, container) {
     // Split plain_text into sentences — ground truth that matches the server.
     // Server splits on \n\n for paragraphs, then single \n + unicode_sentences
@@ -92,24 +79,27 @@ export function renderMarkdown(content, plainText, container) {
         allSentences.push(...splitLines(para));
     }
     const pendingSpans = [];
+    const headings = [];
     let globalIdx = 0;
     const tokens = marked.lexer(content);
     for (const token of tokens) {
-        globalIdx = renderToken(token, container, allSentences, globalIdx, pendingSpans);
+        globalIdx = renderToken(token, container, allSentences, globalIdx, pendingSpans, headings);
     }
-    return pendingSpans;
+    return { pendingSpans, headings };
 }
 // ---------------------------------------------------------------------------
 // Block rendering
 // ---------------------------------------------------------------------------
 // Returns the updated globalIdx after consuming sentences for this token.
-function renderToken(token, container, allSentences, globalIdx, pendingSpans) {
+function renderToken(token, container, allSentences, globalIdx, pendingSpans, headings) {
     switch (token.type) {
         case 'heading': {
             const el = document.createElement(`h${token.depth}`);
             el.className = 'md-heading';
+            const sentenceIndex = globalIdx;
             globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans);
             container.appendChild(el);
+            headings.push({ depth: token.depth, text: stripInline(token.text), element: el, sentenceIndex });
             break;
         }
         case 'paragraph': {
@@ -123,7 +113,7 @@ function renderToken(token, container, allSentences, globalIdx, pendingSpans) {
             const el = document.createElement('blockquote');
             el.className = 'md-blockquote';
             for (const child of token.tokens ?? []) {
-                globalIdx = renderToken(child, el, allSentences, globalIdx, pendingSpans);
+                globalIdx = renderToken(child, el, allSentences, globalIdx, pendingSpans, headings);
             }
             container.appendChild(el);
             break;

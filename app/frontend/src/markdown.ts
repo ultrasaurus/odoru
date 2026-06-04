@@ -87,14 +87,26 @@ function splitLines(text: string): string[] {
 // the source of truth for sentence splitting so client indices match server
 // synthesis indices exactly.
 //
-// Returns `pendingSpans` in synthesis order.
+// Returns `pendingSpans` in synthesis order, and `headings` for the outline.
 // ---------------------------------------------------------------------------
+
+export interface HeadingEntry {
+  depth: number
+  text: string          // plain text, for display in the outline
+  element: HTMLElement  // the hN element in the DOM — scroll target
+  sentenceIndex: number // global sentence index of the heading's first sentence
+}
+
+export interface RenderResult {
+  pendingSpans: HTMLElement[]
+  headings: HeadingEntry[]
+}
 
 export function renderMarkdown(
   content: string,
   plainText: string,
   container: HTMLElement,
-): HTMLElement[] {
+): RenderResult {
   // Split plain_text into sentences — ground truth that matches the server.
   // Server splits on \n\n for paragraphs, then single \n + unicode_sentences
   // within each paragraph. Mirror that here.
@@ -104,12 +116,13 @@ export function renderMarkdown(
   }
 
   const pendingSpans: HTMLElement[] = []
+  const headings: HeadingEntry[] = []
   let globalIdx = 0
   const tokens = marked.lexer(content)
   for (const token of tokens) {
-    globalIdx = renderToken(token, container, allSentences, globalIdx, pendingSpans)
+    globalIdx = renderToken(token, container, allSentences, globalIdx, pendingSpans, headings)
   }
-  return pendingSpans
+  return { pendingSpans, headings }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,13 +136,16 @@ function renderToken(
   allSentences: string[],
   globalIdx: number,
   pendingSpans: HTMLElement[],
+  headings: HeadingEntry[],
 ): number {
   switch (token.type) {
     case 'heading': {
       const el = document.createElement(`h${token.depth}`)
       el.className = 'md-heading'
+      const sentenceIndex = globalIdx
       globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
       container.appendChild(el)
+      headings.push({ depth: token.depth, text: stripInline(token.text), element: el, sentenceIndex })
       break
     }
     case 'paragraph': {
@@ -143,7 +159,7 @@ function renderToken(
       const el = document.createElement('blockquote')
       el.className = 'md-blockquote'
       for (const child of (token as any).tokens ?? []) {
-        globalIdx = renderToken(child, el, allSentences, globalIdx, pendingSpans)
+        globalIdx = renderToken(child, el, allSentences, globalIdx, pendingSpans, headings)
       }
       container.appendChild(el)
       break

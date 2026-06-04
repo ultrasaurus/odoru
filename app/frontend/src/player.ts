@@ -101,6 +101,7 @@ export class Player {
   private onSynthDoneCb: (() => void) | null = null
   private onErrorCb: ((msg: string) => void) | null = null
 
+  autoScroll = false    // set by caller; scrolls active segment into view when true
   private done = false  // true once the WS sends {done: true}
   // Seconds into the full audio where the current play session started.
   private seekOffset = 0
@@ -205,6 +206,11 @@ export class Player {
   }
 
   get hasAudio(): boolean { return this.segments.length > 0 }
+
+  /** Start time (seconds) of the segment at `index`, or null if not yet received. */
+  segmentStartTime(index: number): number | null {
+    return this.segments[index]?.startTime ?? null
+  }
 
   get synthesizedWordCount(): number {
     return this.segments
@@ -360,7 +366,7 @@ export class Player {
     if (index >= 0) {
       const el = this.segmentEls[index]
       el?.classList.add('active')
-      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if (this.autoScroll) el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
   }
 }

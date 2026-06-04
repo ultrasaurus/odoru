@@ -114,13 +114,26 @@ function showReader() {
       <nav class="article-sidebar">
         <div class="sidebar-top">
           <button class="new-btn" id="new-btn">New</button>
+          <div class="sidebar-tabs">
+            <button class="sidebar-tab" id="tab-articles">Articles</button>
+            <button class="sidebar-tab active" id="tab-outline">Outline</button>
+          </div>
         </div>
-        <div class="article-list">${listHtml}</div>
+        <div class="article-list" id="article-list" style="display:none">${listHtml}</div>
+        <div class="outline-list" id="outline-list">
+          <div class="outline-loading">Loading…</div>
+        </div>
       </nav>
       <div class="reader-main">
         <div class="reader-header">
           <h1 class="article-title">Authorship Provisions in Augment</h1>
-          <div id="job-area" class="job-area"></div>
+          <div class="reader-header-row">
+            <div id="job-area" class="job-area"></div>
+            <label class="autoscroll-label">
+              <input type="checkbox" id="autoscroll-cb" class="autoscroll-cb">
+              Auto-scroll
+            </label>
+          </div>
         </div>
         <div id="transcript-container" class="transcript-container">
           <div class="loading">Loading…</div>
@@ -130,15 +143,74 @@ function showReader() {
     </div>
   `;
     document.getElementById('new-btn').addEventListener('click', showNew);
+    // ── Sidebar tabs ───────────────────────────────────────────────────────────
+    const tabArticles = document.getElementById('tab-articles');
+    const tabOutline = document.getElementById('tab-outline');
+    const articleList = document.getElementById('article-list');
+    const outlineList = document.getElementById('outline-list');
+    function showTab(tab) {
+        const isArticles = tab === 'articles';
+        tabArticles.classList.toggle('active', isArticles);
+        tabOutline.classList.toggle('active', !isArticles);
+        articleList.style.display = isArticles ? '' : 'none';
+        outlineList.style.display = isArticles ? 'none' : '';
+    }
+    tabArticles.addEventListener('click', () => showTab('articles'));
+    tabOutline.addEventListener('click', () => showTab('outline'));
     const transcriptContainer = document.getElementById('transcript-container');
     const jobArea = document.getElementById('job-area');
+    const autoscrollCb = document.getElementById('autoscroll-cb');
     const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls();
     const player = new Player(transcriptContainer);
+    autoscrollCb.addEventListener('change', () => { player.autoScroll = autoscrollCb.checked; });
     player.onError(msg => {
         setError(transcriptContainer, `Error: ${msg}`);
         playBtn.disabled = true;
     });
     wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal, () => 'authorship-provisions-in-augment.wav');
+    // ── Outline ────────────────────────────────────────────────────────────────
+    let headings = [];
+    let outlineEls = [];
+    let activeOutlineIdx = -1;
+    function renderOutline(hs) {
+        headings = hs;
+        outlineEls = [];
+        activeOutlineIdx = -1;
+        outlineList.innerHTML = '';
+        if (hs.length === 0) {
+            outlineList.innerHTML = '<div class="outline-loading">No headings</div>';
+            return;
+        }
+        const minDepth = Math.min(...hs.map(h => h.depth));
+        for (const h of hs) {
+            const el = document.createElement('div');
+            el.className = 'outline-item';
+            el.dataset.depth = String(h.depth - minDepth);
+            el.textContent = h.text;
+            el.addEventListener('click', () => {
+                h.element.scrollIntoView({ behavior: 'instant', block: 'start' });
+            });
+            outlineList.appendChild(el);
+            outlineEls.push(el);
+        }
+    }
+    function updateOutlineActive(position) {
+        let found = -1;
+        for (let i = 0; i < headings.length; i++) {
+            const t = player.segmentStartTime(headings[i].sentenceIndex);
+            if (t !== null && t <= position)
+                found = i;
+            else if (t !== null)
+                break;
+        }
+        if (found === activeOutlineIdx)
+            return;
+        if (activeOutlineIdx >= 0)
+            outlineEls[activeOutlineIdx]?.classList.remove('active');
+        activeOutlineIdx = found;
+        if (found >= 0)
+            outlineEls[found]?.classList.add('active');
+    }
     // ── Job polling ────────────────────────────────────────────────────────────
     let pollTimer = null;
     function stopPolling() {
@@ -195,7 +267,7 @@ function showReader() {
             pollJob(job.id, job.total_sentences);
         }
         catch {
-            jobArea.innerHTML = '<span class="job-status error">Could not reach server</span>';
+            setStatus(jobArea, 'job-status error', 'Could not reach server');
         }
     }
     // ── Doc fetch + pre-render ─────────────────────────────────────────────────
@@ -207,8 +279,6 @@ function showReader() {
             setStatus(jobArea, 'job-status done', '✓ Audio ready');
         }
         else {
-            // Show background synthesis button for any backend — slow synthesis
-            // benefits from being queued regardless of Kokoro or F5.
             const btn = document.createElement('button');
             btn.className = 'job-btn';
             btn.textContent = 'Synthesize in background';
@@ -218,14 +288,15 @@ function showReader() {
             });
             jobArea.appendChild(btn);
         }
-        // Pre-render all sentences as gray pending spans inside the proper
-        // markdown structure; player activates each span as audio arrives.
         transcriptContainer.innerHTML = '';
-        const pendingSpans = renderMarkdown(data.content, data.plain_text, transcriptContainer);
+        const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer);
+        renderOutline(hs);
         player.synthesize(data.plain_text, ARTICLE_VOICE, pendingSpans);
+        // Drive active outline heading from playback position.
+        player.onTimeUpdate(t => updateOutlineActive(t));
     })
         .catch(() => {
-        transcriptContainer.innerHTML = '<div class="error">Failed to load article.</div>';
+        setError(transcriptContainer, 'Failed to load article.');
         stopPolling();
     });
 }
