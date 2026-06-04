@@ -12,6 +12,17 @@ interface VoicesResponse {
   voices: VoiceInfo[]
 }
 
+interface JobInfo {
+  id: string
+  voice: string
+  text_preview: string
+  status: string
+  total_sentences: number
+  completed_sentences: number
+  created_at: string
+  error?: string
+}
+
 // Approximate generation seconds per word for each backend.
 // Kokoro: ~0.2 sec/word (measured: 143 words in 26s)
 // F5:     ~3.0 sec/word (measured: 143 words in 410s)
@@ -35,6 +46,10 @@ const ARTICLES = [
 
 const app = document.getElementById('app')!
 
+// Module-level cleanup — stops any timers belonging to the current view
+// before the next view replaces the DOM.
+let viewCleanup: (() => void) | null = null
+
 // ── Sentence splitting (mirrors server-side splitter.rs logic) ───────────────
 
 interface SplitSentence {
@@ -46,14 +61,18 @@ function splitSentences(text: string): SplitSentence[] {
   const result: SplitSentence[] = []
   const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
 
+  // Create once — Intl.Segmenter construction is not free
+  const segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new (Intl as any).Segmenter('en', { granularity: 'sentence' })
+    : null
+
   for (const para of paragraphs) {
     const sentences: string[] = []
     for (const line of para.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed) continue
-      if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-        const seg = new (Intl as any).Segmenter('en', { granularity: 'sentence' })
-        for (const { segment } of seg.segment(trimmed)) {
+      if (segmenter) {
+        for (const { segment } of segmenter.segment(trimmed)) {
           const s = (segment as string).trim()
           if (s) sentences.push(s)
         }
@@ -84,12 +103,18 @@ function wireControls(
   progressFill: HTMLDivElement,
   timeCurrent: HTMLSpanElement,
   timeTotal: HTMLSpanElement,
-  filename: string,
+  getFilename: () => string,   // evaluated at click time, not at init
 ) {
   const playIcon = playBtn.querySelector('.play-icon') as HTMLSpanElement
 
   player.onReady(() => {
     playBtn.disabled = false
+  })
+
+  // Enable download as soon as all audio is received — no need to wait
+  // until the end of playback.
+  player.onSynthDone(() => {
+    downloadBtn.disabled = false
   })
 
   player.onTimeUpdate(t => {
@@ -103,7 +128,6 @@ function wireControls(
   player.onEnded(() => {
     playIcon.textContent = '▶'
     progressFill.style.width = '100%'
-    downloadBtn.disabled = false
   })
 
   playBtn.addEventListener('click', () => {
@@ -112,7 +136,7 @@ function wireControls(
   })
 
   downloadBtn.addEventListener('click', () => {
-    player.downloadWav(filename)
+    player.downloadWav(getFilename())
   })
 }
 
@@ -149,6 +173,8 @@ function grabControlEls() {
 // ── Reader view ───────────────────────────────────────────────────────────────
 
 function showReader() {
+  viewCleanup?.()
+
   const listHtml = ARTICLES.map((a, i) => `
     <div class="article-item${i === 0 ? ' selected' : ''}${a.live ? '' : ' disabled'}" data-index="${i}">
       ${a.title}
@@ -190,7 +216,7 @@ function showReader() {
   })
 
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
-    'authorship-provisions-in-augment.wav')
+    () => 'authorship-provisions-in-augment.wav')
 
   // ── Job polling ────────────────────────────────────────────────────────────
   let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -198,6 +224,8 @@ function showReader() {
   function stopPolling() {
     if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null }
   }
+
+  viewCleanup = stopPolling
 
   function pollJob(jobId: string, total: number) {
     stopPolling()
@@ -208,7 +236,7 @@ function showReader() {
           jobArea.innerHTML = `<span class="job-status error">Job not found — server may have restarted</span>`
           return
         }
-        const job = await res.json()
+        const job: JobInfo = await res.json()
         if (job.status === 'done') {
           jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>'
           return
@@ -234,7 +262,7 @@ function showReader() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: ARTICLE_VOICE }),
       })
-      const job = await res.json()
+      const job: JobInfo = await res.json()
       if (!res.ok) {
         jobArea.innerHTML = `<span class="job-status error">${job.error ?? 'Failed to queue'}</span>`
         return
@@ -254,11 +282,12 @@ function showReader() {
     .then(res => res.json())
     .then(data => {
       const audioReady = !!data.cached?.audio
-      const isF5 = ARTICLE_VOICE.startsWith('f5:')
 
       if (audioReady) {
         jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>'
-      } else if (isF5) {
+      } else {
+        // Show background synthesis button for any backend — slow synthesis
+        // benefits from being queued regardless of Kokoro or F5.
         const btn = document.createElement('button')
         btn.className = 'job-btn'
         btn.textContent = 'Synthesize in background'
@@ -299,6 +328,8 @@ function showReader() {
 // ── New view ──────────────────────────────────────────────────────────────────
 
 function showNew() {
+  viewCleanup?.()
+
   let voices: VoiceInfo[] = []
   let selectedVoice: string | null = null  // stores prefixed id, e.g. "f5:sarah"
   let synthStart = 0
@@ -380,28 +411,34 @@ function showNew() {
 
   // ── Background Queue ───────────────────────────────────────────────────────
   let queuePollTimer: ReturnType<typeof setTimeout> | null = null
+  let bgPollTimer:    ReturnType<typeof setTimeout> | null = null
 
   function stopQueuePoll() {
     if (queuePollTimer !== null) { clearTimeout(queuePollTimer); queuePollTimer = null }
   }
+  function stopBgPoll() {
+    if (bgPollTimer !== null) { clearTimeout(bgPollTimer); bgPollTimer = null }
+  }
+
+  viewCleanup = () => { stopQueuePoll(); stopBgPoll() }
 
   function statusLabel(status: string): string {
-    return {
+    return ({
       pending:     '⏳ Pending',
       in_progress: '⚙ Running',
       done:        '✓ Done',
       error:       '✕ Error',
       cancelled:   '— Cancelled',
-    }[status] ?? status
+    } as Record<string, string>)[status] ?? status
   }
 
-  function renderQueue(jobs: any[]) {
+  function renderQueue(jobs: JobInfo[]) {
     if (jobs.length === 0) {
       queueSection.style.display = 'none'
       return
     }
     queueSection.style.display = ''
-    // Sort: running/pending first, then by created_at descending.
+    // Sort: running/pending first, then newest first.
     jobs.sort((a, b) => {
       const activeA = a.status === 'in_progress' || a.status === 'pending'
       const activeB = b.status === 'in_progress' || b.status === 'pending'
@@ -419,38 +456,54 @@ function showNew() {
 
       const row = document.createElement('div')
       row.className = 'queue-row'
-      row.innerHTML = `
-        <div class="queue-row-main">
-          <span class="queue-voice">${job.voice}</span>
-          <span class="queue-preview">${job.text_preview}</span>
-        </div>
-        <div class="queue-row-meta">
-          <span class="queue-status ${job.status}">${statusLabel(job.status)}</span>
-          ${progress ? `<span class="queue-progress">${progress}</span>` : ''}
-          <span class="queue-date">${job.created_at}</span>
-          ${active ? `<button class="queue-cancel-btn" data-id="${job.id}">✕</button>` : ''}
-        </div>
-      `
+
+      const main = document.createElement('div')
+      main.className = 'queue-row-main'
+      const voiceEl = document.createElement('span')
+      voiceEl.className = 'queue-voice'
+      voiceEl.textContent = job.voice
+      const previewEl = document.createElement('span')
+      previewEl.className = 'queue-preview'
+      previewEl.textContent = job.text_preview
+      main.append(voiceEl, previewEl)
+
+      const meta = document.createElement('div')
+      meta.className = 'queue-row-meta'
+      const statusEl = document.createElement('span')
+      statusEl.className = `queue-status ${job.status}`
+      statusEl.textContent = statusLabel(job.status)
+      meta.appendChild(statusEl)
+      if (progress) {
+        const progressEl = document.createElement('span')
+        progressEl.className = 'queue-progress'
+        progressEl.textContent = progress
+        meta.appendChild(progressEl)
+      }
+      const dateEl = document.createElement('span')
+      dateEl.className = 'queue-date'
+      dateEl.textContent = job.created_at
+      meta.appendChild(dateEl)
+      if (active) {
+        const cancelBtn = document.createElement('button')
+        cancelBtn.className = 'queue-cancel-btn'
+        cancelBtn.textContent = '✕'
+        cancelBtn.addEventListener('click', async () => {
+          await fetch(`/jobs/${job.id}`, { method: 'DELETE' })
+          pollQueue()
+        })
+        meta.appendChild(cancelBtn)
+      }
+
+      row.append(main, meta)
       queueList.appendChild(row)
     }
-    // Wire cancel buttons.
-    queueList.querySelectorAll('.queue-cancel-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = (btn as HTMLElement).dataset.id!
-        await fetch(`/jobs/${id}`, { method: 'DELETE' })
-        pollQueue()
-      })
-    })
   }
 
   async function pollQueue() {
     stopQueuePoll()
     try {
       const res = await fetch('/jobs')
-      if (res.ok) {
-        const jobs = await res.json()
-        renderQueue(jobs)
-      }
+      if (res.ok) renderQueue(await res.json())
     } catch { /* silent */ }
     queuePollTimer = setTimeout(pollQueue, 10_000)
   }
@@ -490,8 +543,10 @@ function showNew() {
     playBtn.disabled = true
   })
 
+  // downloadFilename is passed as a function so it's evaluated at click time,
+  // after the user has had a chance to enter a URL.
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
-    downloadFilename())
+    downloadFilename)
 
   player.onEnded(() => {
     synthBtn.disabled = false
@@ -627,11 +682,6 @@ function showNew() {
   }
 
   // ── Background job (polls until done, shows progress in transcript area) ──
-  let bgPollTimer: ReturnType<typeof setTimeout> | null = null
-
-  function stopBgPoll() {
-    if (bgPollTimer !== null) { clearTimeout(bgPollTimer); bgPollTimer = null }
-  }
 
   function pollBgJob(jobId: string, total: number) {
     stopBgPoll()
@@ -643,7 +693,7 @@ function showNew() {
           synthBtn.disabled = false
           return
         }
-        const job = await res.json()
+        const job: JobInfo = await res.json()
         if (job.status === 'done') {
           transcriptContainer.innerHTML = '<div class="loading">✓ Background synthesis complete — press Synthesize to play</div>'
           synthBtn.disabled = false
@@ -651,6 +701,11 @@ function showNew() {
         }
         if (job.status === 'error') {
           transcriptContainer.innerHTML = `<div class="error">Synthesis error: ${job.error ?? ''}</div>`
+          synthBtn.disabled = false
+          return
+        }
+        if (job.status === 'cancelled') {
+          transcriptContainer.innerHTML = '<div class="loading">Job cancelled.</div>'
           synthBtn.disabled = false
           return
         }
@@ -674,7 +729,7 @@ function showNew() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: selectedVoice }),
       })
-      const job = await res.json()
+      const job: JobInfo = await res.json()
       if (!res.ok) {
         transcriptContainer.innerHTML = `<div class="error">${job.error ?? 'Failed to queue job'}</div>`
         synthBtn.disabled = false

@@ -260,17 +260,10 @@ async fn get_doc(
         ).into_response();
     }
 
-    // Check audio cache for all sentences, routing to the correct engine via prefix.
-    let audio_cached = |plain_text: &str| -> Option<String> {
-        let voice_id = q.voice.as_deref()?;
-        let (engine, voice_name) = state.engine_for_voice(voice_id).ok()?;
-        let all_cached = engine.all_audio_cached(plain_text, &voice_name)?;
-        if all_cached { engine.voice_cache_key(&voice_name) } else { None }
-    };
-
     match cache::lookup(&q.url) {
         Ok(Some(hit)) => {
-            let audio = audio_cached(&hit.plain_text);
+            let audio = check_audio(&state, &q.url, q.voice.as_deref(),
+                &hit.plain_text, &hit.synthesized_voices).await;
             return Json(DocResponse {
                 url: hit.url,
                 title: hit.title,
@@ -300,8 +293,11 @@ async fn get_doc(
         ).into_response(),
     };
 
+    // Use q.url (the request URL) as the cache key — trafilatura's reported
+    // article.url is unreliable (often returns the site root rather than the
+    // article URL), which breaks cache lookup on subsequent requests.
     if let Err(e) = cache::store(
-        &article.url,
+        &q.url,
         article.title.as_deref(),
         &article.authors,
         article.date.as_deref(),
@@ -312,9 +308,11 @@ async fn get_doc(
         eprintln!("Cache store error: {e}");
     }
 
-    let audio = audio_cached(&article.plain_text);
+    // A freshly fetched article can't have any synthesized voices yet.
+    let audio = check_audio(&state, &q.url, q.voice.as_deref(),
+        &article.plain_text, &[]).await;
     Json(DocResponse {
-        url: article.url,
+        url: q.url,
         title: article.title,
         authors: article.authors,
         date: article.date,
@@ -322,6 +320,56 @@ async fn get_doc(
         content: article.content,
         cached: CachedInfo { content: false, audio },
     }).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Audio synthesis check
+// ---------------------------------------------------------------------------
+
+/// Check whether all sentences of `plain_text` are synthesized for `voice_id`.
+///
+/// Fast path: voice_id is in `synthesized_voices` from the article record —
+/// returns the voice cache key with no I/O or Python calls.
+///
+/// Slow path: runs `all_audio_cached` (Python + stat calls) in spawn_blocking.
+/// On success, writes the result back to the article record so future calls
+/// take the fast path.
+async fn check_audio(
+    state: &Arc<AppState>,
+    url: &str,
+    voice_id: Option<&str>,
+    plain_text: &str,
+    synthesized_voices: &[String],
+) -> Option<String> {
+    let voice_id = voice_id?;
+    let (engine, voice_name) = state.engine_for_voice(voice_id).ok()?;
+
+    // Fast path — already recorded in the article store.
+    if synthesized_voices.iter().any(|v| v == voice_id) {
+        return engine.voice_cache_key(&voice_name);
+    }
+
+    // Slow path — check the audio store (involves PyO3 normalizer per sentence).
+    let text = plain_text.to_string();
+    let vname = voice_name.clone();
+    let engine2 = Arc::clone(&engine);
+
+    let all_cached = tokio::task::spawn_blocking(move || {
+        engine2.all_audio_cached(&text, &vname)
+    }).await.ok()??;
+
+    if !all_cached {
+        return None;
+    }
+
+    // Persist so the next GET /doc is instant.
+    let url = url.to_string();
+    let vid = voice_id.to_string();
+    if let Err(e) = tokio::task::spawn_blocking(move || cache::mark_synthesized(&url, &vid)).await {
+        eprintln!("mark_synthesized error: {e}");
+    }
+
+    engine.voice_cache_key(&voice_name)
 }
 
 // ---------------------------------------------------------------------------

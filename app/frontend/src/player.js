@@ -58,6 +58,7 @@ export class Player {
     timeUpdateCbs = [];
     endedCbs = [];
     onReadyCb = null;
+    onSynthDoneCb = null;
     onErrorCb = null;
     done = false; // true once the WS sends {done: true}
     // Seconds into the full audio where the current play session started.
@@ -93,6 +94,7 @@ export class Player {
             }
             if (isDone(msg)) {
                 this.done = true;
+                this.onSynthDoneCb?.();
                 this.ws?.close();
                 return;
             }
@@ -111,8 +113,17 @@ export class Player {
             }
         };
         this.ws.onerror = () => { this.onErrorCb?.('WebSocket error'); };
+        this.ws.onclose = (ev) => {
+            // If the server closed the connection before sending {done:true},
+            // report an error so the UI isn't left in limbo.
+            if (!this.done && ev.code !== 1000) {
+                this.onErrorCb?.('Connection lost — server may have restarted');
+            }
+        };
     }
     onReady(cb) { this.onReadyCb = cb; }
+    /** Fires when all audio has been received (safe to download). */
+    onSynthDone(cb) { this.onSynthDoneCb = cb; }
     onError(cb) { this.onErrorCb = cb; }
     onEnded(cb) { this.endedCbs.push(cb); }
     onTimeUpdate(cb) { this.timeUpdateCbs.push(cb); }

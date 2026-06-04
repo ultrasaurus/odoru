@@ -32,6 +32,10 @@ struct ArticleFrontmatter {
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
     cached_at: String,
+    /// Voice IDs (e.g. "f5:sarah") for which all sentences are synthesized.
+    /// Populated lazily on GET /doc so subsequent calls skip the audio check.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    synthesized_voices: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +54,8 @@ pub struct CachedArticle {
     pub content: String,
     /// Plain text content (for TTS).
     pub plain_text: String,
+    /// Voice IDs for which synthesis is complete (e.g. "f5:sarah").
+    pub synthesized_voices: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +145,7 @@ fn lookup_in(base: &PathBuf, url: &str) -> Result<Option<CachedArticle>> {
         description: fm.description,
         content: body.to_string(),
         plain_text,
+        synthesized_voices: fm.synthesized_voices,
     }))
 }
 
@@ -180,6 +187,7 @@ fn store_in(
         date: date.map(str::to_string),
         description: description.map(str::to_string),
         cached_at: Utc::now().to_rfc3339(),
+        synthesized_voices: Vec::new(),
     };
     let yaml = serde_yaml::to_string(&fm)
         .context("failed to serialize frontmatter")?;
@@ -192,6 +200,40 @@ fn store_in(
         .with_context(|| format!("failed to write {}", txt_path.display()))?;
 
     Ok(dir)
+}
+
+// ---------------------------------------------------------------------------
+// Mark synthesized
+// ---------------------------------------------------------------------------
+
+/// Record that `voice_id` (e.g. "f5:sarah") is fully synthesized for `url`.
+///
+/// Reads the existing `article.md`, adds the voice to `synthesized_voices`
+/// if not already present, and rewrites the file. No-ops if not cached or
+/// already marked. Intended to be called from `spawn_blocking`.
+pub fn mark_synthesized(url: &str, voice_id: &str) -> Result<()> {
+    let dir = cache_dir()?.join(url_to_slug(url));
+    let md_path = dir.join("article.md");
+    if !md_path.exists() { return Ok(()); }
+
+    let src = std::fs::read_to_string(&md_path)
+        .with_context(|| format!("failed to read {}", md_path.display()))?;
+
+    let (mut fm, body) = frontmatter::parse::<ArticleFrontmatter>(&src)
+        .with_context(|| format!("failed to parse {}", md_path.display()))?;
+
+    if fm.synthesized_voices.iter().any(|v| v == voice_id) {
+        return Ok(()); // already marked, nothing to do
+    }
+
+    fm.synthesized_voices.push(voice_id.to_string());
+
+    let yaml = serde_yaml::to_string(&fm)
+        .context("failed to serialize frontmatter")?;
+    std::fs::write(&md_path, format!("---\n{}---\n{}", yaml, body))
+        .with_context(|| format!("failed to write {}", md_path.display()))?;
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

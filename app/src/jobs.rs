@@ -57,6 +57,8 @@ pub struct Job {
     /// Full prefixed voice ID, e.g. "f5:sarah".
     pub voice: String,
     /// Short preview of the text for display in the queue.
+    /// Optional on disk so old entries without this field still load.
+    #[serde(default)]
     pub text_preview: String,
     pub created_at: DateTime<Utc>,
     pub status: JobStatus,

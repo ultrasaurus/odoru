@@ -98,6 +98,7 @@ export class Player {
   private timeUpdateCbs: Array<(t: number) => void> = []
   private endedCbs: Array<() => void> = []
   private onReadyCb: (() => void) | null = null
+  private onSynthDoneCb: (() => void) | null = null
   private onErrorCb: ((msg: string) => void) | null = null
 
   private done = false  // true once the WS sends {done: true}
@@ -135,7 +136,12 @@ export class Player {
       const msg: ServerMsg = JSON.parse(ev.data)
 
       if (isError(msg)) { this.onErrorCb?.(msg.error); return }
-      if (isDone(msg))  { this.done = true; this.ws?.close(); return }
+      if (isDone(msg))  {
+        this.done = true
+        this.onSynthDoneCb?.()
+        this.ws?.close()
+        return
+      }
 
       if (isSegment(msg)) {
         const samples = decodeF32PCM(msg.audio)
@@ -155,9 +161,19 @@ export class Player {
     }
 
     this.ws.onerror = () => { this.onErrorCb?.('WebSocket error') }
+
+    this.ws.onclose = (ev) => {
+      // If the server closed the connection before sending {done:true},
+      // report an error so the UI isn't left in limbo.
+      if (!this.done && ev.code !== 1000) {
+        this.onErrorCb?.('Connection lost — server may have restarted')
+      }
+    }
   }
 
   onReady(cb: () => void): void                    { this.onReadyCb = cb }
+  /** Fires when all audio has been received (safe to download). */
+  onSynthDone(cb: () => void): void                { this.onSynthDoneCb = cb }
   onError(cb: (msg: string) => void): void         { this.onErrorCb = cb }
   onEnded(cb: () => void): void                    { this.endedCbs.push(cb) }
   onTimeUpdate(cb: (t: number) => void): void      { this.timeUpdateCbs.push(cb) }
