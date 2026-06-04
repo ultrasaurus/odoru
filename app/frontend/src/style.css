@@ -311,7 +311,6 @@ html, body {
 .word.active {
   background: var(--active-bg);
   color: var(--highlight);
-  font-style: italic;
 }
 
 .loading,
@@ -590,7 +589,6 @@ html, body {
 .segment.active {
   background: var(--active-bg);
   color: var(--highlight);
-  font-style: italic;
 }
 
 .segment.pending {
