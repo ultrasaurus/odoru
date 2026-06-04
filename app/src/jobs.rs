@@ -36,6 +36,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 use tts::TtsEngine;
+use util;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -216,6 +217,8 @@ pub fn spawn_job(
     cancel_flag: Arc<AtomicBool>,
     text: String,
     voice_name: String,
+    voice_id: String,
+    article_url: Option<String>,
     engine: Arc<TtsEngine>,
     store: Arc<JobStore>,
 ) {
@@ -234,6 +237,7 @@ pub fn spawn_job(
 
         let mut stream = engine.synthesize(&text, &voice_name);
         let mut completed = 0usize;
+        let mut last_end = 0.0f64;
 
         while let Some(result) = stream.next().await {
             // Check cancel flag between sentences.
@@ -245,7 +249,8 @@ pub fn spawn_job(
                 return;
             }
             match result {
-                Ok(_seg) => {
+                Ok(seg) => {
+                    last_end = seg.transcript.end;
                     completed += 1;
                     let mut job = shared.write().await;
                     job.completed_sentences = completed;
@@ -261,6 +266,14 @@ pub fn spawn_job(
                     let _ = store.persist(&job);
                     return;
                 }
+            }
+        }
+
+        if let Some(url) = article_url {
+            if let Err(e) = tokio::task::spawn_blocking(move || {
+                util::cache::mark_synthesized(&url, &voice_id, last_end)
+            }).await {
+                eprintln!("[jobs] mark_synthesized error: {e}");
             }
         }
 

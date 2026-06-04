@@ -247,6 +247,9 @@ struct DocResponse {
     plain_text: String,
     content: String,
     cached: CachedInfo,
+    /// Total audio duration in seconds for the requested voice, if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_duration_secs: Option<f64>,
 }
 
 async fn get_doc(
@@ -264,6 +267,9 @@ async fn get_doc(
         Ok(Some(hit)) => {
             let audio = check_audio(&state, &q.url, q.voice.as_deref(),
                 &hit.plain_text, &hit.synthesized_voices).await;
+            let audio_duration_secs = q.voice.as_deref()
+                .and_then(|v| hit.voice_durations.get(v).copied())
+                .filter(|&d| d > 0.0);
             return Json(DocResponse {
                 url: hit.url,
                 title: hit.title,
@@ -272,6 +278,7 @@ async fn get_doc(
                 plain_text: hit.plain_text,
                 content: hit.content,
                 cached: CachedInfo { content: true, audio },
+                audio_duration_secs,
             }).into_response();
         }
         Ok(None) => {}
@@ -319,6 +326,7 @@ async fn get_doc(
         plain_text: article.plain_text,
         content: article.content,
         cached: CachedInfo { content: false, audio },
+        audio_duration_secs: None,
     }).into_response()
 }
 
@@ -363,9 +371,10 @@ async fn check_audio(
     }
 
     // Persist so the next GET /doc is instant.
+    // Duration unknown here (slow path only checks existence); job path writes it.
     let url = url.to_string();
     let vid = voice_id.to_string();
-    if let Err(e) = tokio::task::spawn_blocking(move || cache::mark_synthesized(&url, &vid)).await {
+    if let Err(e) = tokio::task::spawn_blocking(move || cache::mark_synthesized(&url, &vid, 0.0)).await {
         eprintln!("mark_synthesized error: {e}");
     }
 
@@ -383,6 +392,9 @@ struct CreateJobRequest {
     text: String,
     /// Prefixed voice ID, e.g. "f5:sarah".
     voice: String,
+    /// Article URL — used to write audio duration to the article store on completion.
+    #[serde(default)]
+    url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -449,7 +461,7 @@ async fn create_job(
                 let _ = state.jobs.persist(&job);
             }
             jobs::spawn_job(existing.clone(), cancel_flag, body.text,
-                voice_name, engine, state.jobs.clone());
+                voice_name, body.voice, body.url, engine, state.jobs.clone());
         }
         let job = existing.read().await;
         return Json(JobResponse::from_job(&job)).into_response();
@@ -464,7 +476,7 @@ async fn create_job(
             Json(serde_json::json!({ "error": format!("Failed to create job: {e}") }))).into_response(),
     };
 
-    jobs::spawn_job(shared.clone(), cancel_flag, body.text, voice_name, engine, state.jobs.clone());
+    jobs::spawn_job(shared.clone(), cancel_flag, body.text, voice_name, body.voice, body.url, engine, state.jobs.clone());
 
     let job = shared.read().await;
     Json(JobResponse::from_job(&job)).into_response()

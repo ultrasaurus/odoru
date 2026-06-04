@@ -8,6 +8,7 @@
 //! Lookup is by URL: scan directories, match the `url` frontmatter field.
 //! This is fast enough for a personal collection.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -36,6 +37,10 @@ struct ArticleFrontmatter {
     /// Populated lazily on GET /doc so subsequent calls skip the audio check.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     synthesized_voices: Vec<String>,
+    /// Total audio duration in seconds, keyed by voice ID.
+    /// Written when a background job completes synthesis.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    voice_durations: HashMap<String, f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -56,6 +61,8 @@ pub struct CachedArticle {
     pub plain_text: String,
     /// Voice IDs for which synthesis is complete (e.g. "f5:sarah").
     pub synthesized_voices: Vec<String>,
+    /// Total audio duration in seconds, keyed by voice ID.
+    pub voice_durations: HashMap<String, f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +153,7 @@ fn lookup_in(base: &PathBuf, url: &str) -> Result<Option<CachedArticle>> {
         content: body.to_string(),
         plain_text,
         synthesized_voices: fm.synthesized_voices,
+        voice_durations: fm.voice_durations,
     }))
 }
 
@@ -188,6 +196,7 @@ fn store_in(
         description: description.map(str::to_string),
         cached_at: Utc::now().to_rfc3339(),
         synthesized_voices: Vec::new(),
+        voice_durations: HashMap::new(),
     };
     let yaml = serde_yaml::to_string(&fm)
         .context("failed to serialize frontmatter")?;
@@ -206,12 +215,13 @@ fn store_in(
 // Mark synthesized
 // ---------------------------------------------------------------------------
 
-/// Record that `voice_id` (e.g. "f5:sarah") is fully synthesized for `url`.
+/// Record that `voice_id` (e.g. "f5:sarah") is fully synthesized for `url`,
+/// storing the total audio `duration_secs`.
 ///
 /// Reads the existing `article.md`, adds the voice to `synthesized_voices`
-/// if not already present, and rewrites the file. No-ops if not cached or
-/// already marked. Intended to be called from `spawn_blocking`.
-pub fn mark_synthesized(url: &str, voice_id: &str) -> Result<()> {
+/// and its duration to `voice_durations`, then rewrites the file. No-ops if
+/// not cached. Intended to be called from `spawn_blocking`.
+pub fn mark_synthesized(url: &str, voice_id: &str, duration_secs: f64) -> Result<()> {
     let dir = cache_dir()?.join(url_to_slug(url));
     let md_path = dir.join("article.md");
     if !md_path.exists() { return Ok(()); }
@@ -222,11 +232,10 @@ pub fn mark_synthesized(url: &str, voice_id: &str) -> Result<()> {
     let (mut fm, body) = frontmatter::parse::<ArticleFrontmatter>(&src)
         .with_context(|| format!("failed to parse {}", md_path.display()))?;
 
-    if fm.synthesized_voices.iter().any(|v| v == voice_id) {
-        return Ok(()); // already marked, nothing to do
+    if !fm.synthesized_voices.iter().any(|v| v == voice_id) {
+        fm.synthesized_voices.push(voice_id.to_string());
     }
-
-    fm.synthesized_voices.push(voice_id.to_string());
+    fm.voice_durations.insert(voice_id.to_string(), duration_secs);
 
     let yaml = serde_yaml::to_string(&fm)
         .context("failed to serialize frontmatter")?;

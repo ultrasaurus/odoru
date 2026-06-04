@@ -266,7 +266,7 @@ function showReader() {
             const res = await fetch('/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, voice: ARTICLE_VOICE }),
+                body: JSON.stringify({ text, voice: ARTICLE_VOICE, url: ARTICLE_URL }),
             });
             const job = await res.json();
             if (!res.ok) {
@@ -300,6 +300,9 @@ function showReader() {
                 startJob(data.plain_text);
             });
             jobArea.appendChild(btn);
+        }
+        if (data.audio_duration_secs) {
+            timeTotal.textContent = fmt(data.audio_duration_secs);
         }
         transcriptContainer.innerHTML = '';
         const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer);
