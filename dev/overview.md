@@ -1,7 +1,7 @@
 # odoru — Architecture & Development Notes
 
-## What it is
-A hypertext audio reading app. Fetches web articles, synthesizes them to speech,
+## What it is (& will be)
+A hypertext audio reading (and authoring) app. Fetches web articles, synthesizes them to speech,
 plays back with synchronized transcript highlighting. Name means "dance/leap/journey" in Japanese.
 
 ## Workspace layout
@@ -30,70 +30,10 @@ cargo test --test integration -- --ignored  # needs venv active
 ```
 
 ## TTS backends
+See [tts-backend/overview.md](tts-backend/overview.md). Python environment setup in [tts-backend/python-setup.md](tts-backend/python-setup.md).
 
-### Kokoro (default)
-- Pure Rust ONNX inference via `ort` crate
-- G2P via misaki (Python/PyO3) on a dedicated worker thread
-- ~0.2 sec/word generation speed on M1
-- Voices: `~/.kokoro/voices/*.bin` — 28 English voices (af_, am_, bf_, bm_ prefixes)
-- Config: `KOKORO_MODEL_DIR` env var (default: `~/.kokoro`)
-
-### F5-TTS
-- MLX inference via Python (`f5_tts_mlx`)
-- **Threading**: each worker is a dedicated `std::thread` (NOT spawn_blocking) because
-  MLX creates a GPU stream per OS thread and it cannot be shared
-- ~2.5 sec/word generation speed on M1 (varies hugely by sentence complexity)
-- Voice switching reloads the entire model (MLX retains internal state otherwise)
-- Voices loaded from `voices/` directory (or `$VOICES_DIR`)
-- Each voice dir: `voice.md` (YAML frontmatter: transcript, speed, cfg_strength) + `ref.wav`
-- `tts_overrides.txt`: word→pronunciation map, applied before synthesis
-
-### Mock
-- Sine wave, instant, no model weights needed, for testing
-
-## Voice IDs
-Voices are identified by prefixed strings: `"f5:sarah"`, `"kokoro:am_puck"`.
-The prefix is required in all API calls — unprefixed names are rejected.
-`GET /voices` returns a flat list ordered F5 first, then Kokoro.
-
-## TtsEngine API
-```rust
-let engine = TtsEngine::builder()
-    .backend(Backend::F5Tts { voices: vec![voice], workers: 1 })
-    .build()?;
-
-let mut stream = engine.synthesize("Hello world.", "sarah");  // bare name, no prefix
-while let Some(result) = stream.next().await {
-    let seg = result?;
-    // seg.index, seg.samples, seg.sample_rate, seg.transcript.{start,end,text}, seg.paragraph_end
-}
-
-engine.voice_names()         // Vec<String> — bare names
-engine.voice_cache_key(name) // Option<String> — e.g. "f5:sarah:0.85:1.5"
-engine.all_audio_cached(text, name) // Option<bool> — checks disk cache via exists() (no reads)
-```
-
-### Per-sentence synthesis lock
-`TtsEngine` holds a `DashMap<SentenceCacheKey, Arc<Mutex<()>>>`. Before synthesizing any
-sentence, the lock is acquired so two concurrent callers (WS session + background job) cannot
-synthesize the same sentence simultaneously — the second waits and gets a disk cache hit.
-
-### TtsBackend trait
-```rust
-pub trait TtsBackend: Send + Sync {
-    fn synthesize_sentence(&self, text: &str, voice: &Voice, index: usize)
-        -> Result<(Vec<f32>, u32, f64), TtsError>;
-}
-```
-
-## Audio disk cache (`tts/src/audio_cache.rs`)
-- Location: `~/.odoru/audio/`
-- Files: `<hash>.f32` (raw f32le samples) + `<hash>.json` (metadata)
-- Key: SHA-256(normalized_text + "|" + voice_cache_key)
-- Only used for F5 (Kokoro is fast enough to skip)
-- `exists(key)` checks file presence only (no reads) — used by `all_audio_cached`
-- `lookup(key)` reads full samples — used during synthesis
-- Enables resumable synthesis: Ctrl+C and restart, completed sentences load instantly
+## Frontend
+See [frontend.md](frontend.md).
 
 ## Article store (`util/src/cache.rs`)
 - Location: `~/.odoru/articles/<request-url-slug>/`
@@ -150,44 +90,7 @@ Server → client (when done):
 - Cancel flag (`Arc<AtomicBool>`) is in-memory only; task stops at next sentence boundary
 - `text_preview`: first 80 chars, for display. `#[serde(default)]` so old entries load.
 
-## Frontend (`app/frontend/src/`)
-- `main.ts` — two views: reader (hardcoded Engelbart article) and New (arbitrary URL/text)
-- `player.ts` — WebSocket client, AudioContext queue, transcript highlighting
-- `style.css` — dark theme, CSS variables
-- Built with Vite + TypeScript, output to `app/frontend/dist/`
-
-### Reader view
-- Pre-renders all sentences as gray `segment pending` spans immediately after doc fetch
-- Player activates each span in place as audio arrives (removes `pending` class, wires click)
-- "Synthesize in background" button shown when audio not fully cached (all backends)
-- Job progress shown in header; polls `GET /jobs/:id` every 4s while running
-- `viewCleanup` stops poll timers when navigating to New view
-
-### New view
-- URL fetch + text area + voice picker + "Synthesize in background" checkbox
-- Checkbox unchecked: live streaming WS synthesis
-- Checkbox checked: `POST /jobs`, progress shown in transcript area, polls every 4s
-- Background Queue section below card: lists all jobs, cancel button on active jobs,
-  polls `GET /jobs` every 10s
-- `viewCleanup` stops all timers when navigating to Reader view
-- Download enabled on `onSynthDone` (synthesis stream complete), not on playback end
-- `downloadFilename()` evaluated at click time (lazy), not at view init
-
-### Player timing model
-- `AudioContext` plays segments as they arrive (streaming)
-- `startTracking()` polls `AudioContext.currentTime` to update progress + highlighting
-- `onSynthDone` fires when WS sends `{done: true}` — enables download
-- `onEnded` fires when `done === true` AND playback position >= last segment end
-- Seek: click transcript sentence → jump to that segment's start time
-- `ws.onclose` handler: non-clean close fires `onError` so UI surfaces server crash
-
 ## Next planned improvements
-
-### Markdown rendering
-The `content` field is trafilatura-extracted markdown. It has headings (`#`, `##`),
-paragraphs, and some bold/italic. A lightweight client-side renderer (marked.js or
-similar) would work. The `plain_text` is what gets synthesized and the reader
-currently shows plain text sentences aligned to the rendered text.
 
 ### Not yet implemented (discussed)
 - Background Queue: show article title + URL per job instead of text_preview
@@ -197,16 +100,9 @@ currently shows plain text sentences aligned to the rendered text.
 - Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
 - Error bar: currently only in New view; should be in a shared layout wrapper
 - Mispronounced words: no UI for `tts_overrides.txt` edits
+- Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
 
 ## Known issues
 - Segfault on CLI exit when `--audio` is used (PyO3/tokio shutdown ordering)
   — all output written successfully before crash
 - F5 voice switching reloads the full model (~30s penalty)
-
-## Python environment setup
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install "misaki[en]" click trafilatura f5-tts-mlx soundfile
-python -m spacy download en_core_web_sm
-```
