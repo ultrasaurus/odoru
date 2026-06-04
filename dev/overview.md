@@ -77,6 +77,7 @@ See [protocol.md](protocol.md).
 - Error bar: currently only in New view; should be in a shared layout wrapper
 - Mispronounced words: no UI for `tts_overrides.txt` edits
 - Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
+- Audio cache: encode to MP3 at synthesis time instead of WAV (raw samples → MP3 encoder directly); ~10:1 size reduction, important for static export
 
 ## Known issues
 - Segfault on CLI exit when `--audio` is used (PyO3/tokio shutdown ordering)
