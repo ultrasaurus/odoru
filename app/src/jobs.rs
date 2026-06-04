@@ -97,7 +97,8 @@ impl JobStore {
                 Some(mut job) => {
                     if job.status == JobStatus::InProgress {
                         job.status = JobStatus::Pending;
-                        job.completed_sentences = 0;
+                        // Keep completed_sentences — the disk cache has those
+                        // sentences and the task will hit them instantly on restart.
                     }
                     eprintln!("[jobs] loaded job {} ({:?})", &job.id[..8], job.status);
                     jobs.insert(job.id.clone(), Arc::new(RwLock::new(job)));
@@ -223,7 +224,6 @@ pub fn spawn_job(
             let mut job = shared.write().await;
             if job.status == JobStatus::Cancelled { return; }
             job.status = JobStatus::InProgress;
-            job.completed_sentences = 0;
             if let Err(e) = store.persist(&job) {
                 eprintln!("[jobs] persist error: {e}");
             }
