@@ -1,5 +1,6 @@
 import './style.css'
 import { Player } from './player'
+import { renderMarkdown } from './markdown'
 
 interface VoiceInfo {
   id: string          // prefixed, e.g. "f5:sarah" or "kokoro:am_puck"
@@ -49,44 +50,6 @@ const app = document.getElementById('app')!
 // Module-level cleanup — stops any timers belonging to the current view
 // before the next view replaces the DOM.
 let viewCleanup: (() => void) | null = null
-
-// ── Sentence splitting (mirrors server-side splitter.rs logic) ───────────────
-
-interface SplitSentence {
-  text: string
-  paragraphEnd: boolean
-}
-
-function splitSentences(text: string): SplitSentence[] {
-  const result: SplitSentence[] = []
-  const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
-
-  // Create once — Intl.Segmenter construction is not free
-  const segmenter = typeof Intl !== 'undefined' && 'Segmenter' in Intl
-    ? new (Intl as any).Segmenter('en', { granularity: 'sentence' })
-    : null
-
-  for (const para of paragraphs) {
-    const sentences: string[] = []
-    for (const line of para.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      if (segmenter) {
-        for (const { segment } of segmenter.segment(trimmed)) {
-          const s = (segment as string).trim()
-          if (s) sentences.push(s)
-        }
-      } else {
-        // Fallback for older browsers
-        trimmed.split(/(?<=[.!?])\s+/).forEach(s => { if (s.trim()) sentences.push(s.trim()) })
-      }
-    }
-    for (let i = 0; i < sentences.length; i++) {
-      result.push({ text: sentences[i], paragraphEnd: i === sentences.length - 1 })
-    }
-  }
-  return result
-}
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -316,25 +279,10 @@ function showReader() {
         jobArea.appendChild(btn)
       }
 
-      // Pre-render all sentences as gray pending spans so the article is
-      // visible immediately; player activates each span as audio arrives.
-      const sentences = splitSentences(data.plain_text)
+      // Pre-render all sentences as gray pending spans inside the proper
+      // markdown structure; player activates each span as audio arrives.
       transcriptContainer.innerHTML = ''
-      const pendingSpans: HTMLElement[] = []
-      for (const { text, paragraphEnd } of sentences) {
-        const span = document.createElement('span')
-        span.className = 'segment pending'
-        span.textContent = text
-        pendingSpans.push(span)
-        transcriptContainer.appendChild(span)
-        if (paragraphEnd) {
-          const br = document.createElement('div')
-          br.className = 'paragraph-break'
-          transcriptContainer.appendChild(br)
-        } else {
-          transcriptContainer.appendChild(document.createTextNode(' '))
-        }
-      }
+      const pendingSpans = renderMarkdown(data.content, data.plain_text, transcriptContainer)
       player.synthesize(data.plain_text, ARTICLE_VOICE, pendingSpans)
     })
     .catch(() => {

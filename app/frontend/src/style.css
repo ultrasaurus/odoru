@@ -767,3 +767,84 @@ html, body {
   align-items: center;
   gap: 1.5rem;
 }
+
+/* ── Markdown rendering ────────────────────────────────────────────────────── */
+
+.transcript-container .md-heading,
+.transcript-container .md-paragraph,
+.transcript-container .md-blockquote,
+.transcript-container .md-list,
+.transcript-container .md-code {
+  margin-bottom: 1.25em;
+}
+
+.transcript-container .md-heading:last-child,
+.transcript-container .md-paragraph:last-child,
+.transcript-container .md-blockquote:last-child,
+.transcript-container .md-list:last-child,
+.transcript-container .md-code:last-child {
+  margin-bottom: 0;
+}
+
+/* Headings */
+.transcript-container h1.md-heading { font-size: 1.6rem; font-weight: 600; margin-top: 1.5em; color: var(--text); line-height: 1.25; }
+.transcript-container h2.md-heading { font-size: 1.3rem; font-weight: 500; margin-top: 1.25em; color: var(--text); line-height: 1.3; }
+.transcript-container h3.md-heading { font-size: 1.1rem; font-weight: 500; margin-top: 1.1em; color: var(--text); line-height: 1.35; }
+.transcript-container h4.md-heading,
+.transcript-container h5.md-heading,
+.transcript-container h6.md-heading { font-size: 1rem; font-weight: 500; margin-top: 1em; color: var(--text-dim); line-height: 1.4; }
+
+.transcript-container h1.md-heading:first-child,
+.transcript-container h2.md-heading:first-child,
+.transcript-container h3.md-heading:first-child { margin-top: 0; }
+
+/* Paragraphs */
+.transcript-container .md-paragraph {
+  font-size: 1.1rem;
+  line-height: 1.85;
+  color: var(--text);
+}
+
+/* Inline formatting within spans */
+.transcript-container .segment strong { font-weight: 600; }
+.transcript-container .segment em     { font-style: italic; }
+.transcript-container .segment code   {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+/* Blockquotes */
+.transcript-container .md-blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1.25rem;
+  margin-left: 0;
+  opacity: 0.85;
+}
+
+/* Lists */
+.transcript-container .md-list {
+  padding-left: 1.5rem;
+  font-size: 1.05rem;
+  line-height: 1.8;
+  color: var(--text);
+}
+
+.transcript-container .md-list-item {
+  margin-bottom: 0.25em;
+}
+
+/* Code blocks */
+.transcript-container .md-code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
