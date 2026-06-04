@@ -116,7 +116,7 @@ function showReader() {
         <div class="sidebar-top">
           <button class="new-btn" id="new-btn">New</button>
           <div class="sidebar-tabs">
-            <button class="sidebar-tab" id="tab-articles">Articles</button>
+            <button class="sidebar-tab" id="tab-articles">Documents</button>
             <button class="sidebar-tab active" id="tab-outline">Outline</button>
           </div>
         </div>
@@ -329,7 +329,7 @@ function showNew() {
         <button id="error-bar-retry" class="error-bar-retry">Retry</button>
       </div>
       <header class="header">
-        <a class="back-link" id="back-link">← Articles</a>
+        <a class="back-link" id="back-link">← Documents</a>
         <div class="logo">▶ odoru</div>
       </header>
       <!-- TODO: generalize error-bar into shared layout wrapper -->
@@ -373,7 +373,7 @@ function showNew() {
           </div>
 
           <div id="queue-section" class="queue-section" style="display:none">
-            <div class="queue-header">Background Queue</div>
+            <div class="queue-header">Documents</div>
             <div id="queue-list" class="queue-list"></div>
           </div>
           </div><!-- end card-column -->
@@ -414,7 +414,7 @@ function showNew() {
         return {
             pending: '⏳ Pending',
             in_progress: '⚙ Running',
-            done: '✓ Done',
+            done: '✓ Ready',
             error: '✕ Error',
             cancelled: '— Cancelled',
         }[status] ?? status;
