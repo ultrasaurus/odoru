@@ -44,32 +44,8 @@ See [frontend.md](frontend.md).
   synthesized. Populated lazily by `GET /doc` after `all_audio_cached` returns true.
   Makes subsequent `GET /doc` calls instant (no Python, no stat calls).
 
-## REST API (`app/src/main.rs`)
-```
-GET  /voices          → { voices: [{id, name, backend, description}] }
-GET  /doc?url=&voice= → { url, title, authors, date, plain_text, content,
-                           cached: { content: bool, audio: voice_cache_key|null } }
-GET  /ws              → WebSocket upgrade
-POST /jobs            → { text, voice } → job (deduplicates by text+voice)
-GET  /jobs            → [job, ...]
-GET  /jobs/:id        → job
-DELETE /jobs/:id      → cancel job
-```
-
-### WebSocket protocol
-Client → server (voice must be prefixed):
-```json
-{ "text": "...", "voice": "f5:sarah" }
-```
-Server → client (one per sentence):
-```json
-{ "index": 0, "transcript": {"start": 0.41, "end": 1.65, "text": "..."},
-  "audio": "<base64 f32le PCM>", "cached": bool, "paragraph_end": bool }
-```
-Server → client (when done):
-```json
-{ "done": true }
-```
+## API
+See [protocol.md](protocol.md).
 
 ### App state
 - `ODORU_BACKEND` env var: "kokoro" (default), "f5", or "both"
