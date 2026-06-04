@@ -18,6 +18,8 @@
 //! Voice IDs are prefixed with the backend name, e.g. "f5:sarah" or "kokoro:am_puck".
 //! Unprefixed voice names are rejected.
 
+mod jobs;
+
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -37,6 +39,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use util::{cache, voice as voice_util};
+
+use jobs::{JobStore, JobStatus};
 
 // ---------------------------------------------------------------------------
 // Segment cache
@@ -109,6 +113,7 @@ struct AppState {
     /// Available voices in display order (f5 first, then kokoro).
     voices: Vec<VoiceInfo>,
     cache: SegmentCache,
+    jobs: Arc<JobStore>,
 }
 
 impl AppState {
@@ -320,6 +325,142 @@ async fn get_doc(
 }
 
 // ---------------------------------------------------------------------------
+// POST /jobs  — enqueue background synthesis
+// GET  /jobs  — list all jobs
+// GET  /jobs/:id — single job status
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct CreateJobRequest {
+    text: String,
+    /// Prefixed voice ID, e.g. "f5:sarah".
+    voice: String,
+}
+
+#[derive(Serialize)]
+struct JobResponse {
+    id: String,
+    voice: String,
+    text_preview: String,
+    status: JobStatus,
+    total_sentences: usize,
+    completed_sentences: usize,
+    created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+impl JobResponse {
+    fn from_job(job: &jobs::Job) -> Self {
+        Self {
+            id: job.id.clone(),
+            voice: job.voice.clone(),
+            text_preview: job.text_preview.clone(),
+            status: job.status.clone(),
+            total_sentences: job.total_sentences,
+            completed_sentences: job.completed_sentences,
+            created_at: job.created_at.format("%Y-%m-%d %H:%M").to_string(),
+            error: job.error.clone(),
+        }
+    }
+}
+
+async fn create_job(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateJobRequest>,
+) -> impl IntoResponse {
+    if body.text.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "text must not be empty" }))).into_response();
+    }
+
+    let (engine, voice_name) = match state.engine_for_voice(&body.voice) {
+        Ok(p) => p,
+        Err(e) => return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e }))).into_response(),
+    };
+
+    // Dedup: return existing non-terminal job for same text + voice.
+    // If it's pending with no live task (e.g. after server restart), restart it.
+    let text_hash = jobs::text_hash(&body.text);
+    if let Some(existing) = state.jobs.find_active(&text_hash, &body.voice).await {
+        let needs_task = {
+            let job = existing.read().await;
+            matches!(job.status, JobStatus::Pending | JobStatus::InProgress)
+                && !state.jobs.has_cancel_flag(&existing.read().await.id)
+        };
+        if needs_task {
+            let cancel_flag = state.jobs.register_cancel_flag(
+                &existing.read().await.id
+            );
+            // Reset to pending so the task starts cleanly.
+            {
+                let mut job = existing.write().await;
+                job.status = JobStatus::Pending;
+                job.completed_sentences = 0;
+                let _ = state.jobs.persist(&job);
+            }
+            jobs::spawn_job(existing.clone(), cancel_flag, body.text,
+                voice_name, engine, state.jobs.clone());
+        }
+        let job = existing.read().await;
+        return Json(JobResponse::from_job(&job)).into_response();
+    }
+
+    // Count sentences so the client can show progress.
+    let total = tts::splitter_sentence_count(&body.text);
+
+    let (shared, cancel_flag) = match state.jobs.create(&body.text, &body.voice, total).await {
+        Ok(pair) => pair,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to create job: {e}") }))).into_response(),
+    };
+
+    jobs::spawn_job(shared.clone(), cancel_flag, body.text, voice_name, engine, state.jobs.clone());
+
+    let job = shared.read().await;
+    Json(JobResponse::from_job(&job)).into_response()
+}
+
+async fn list_jobs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut results = Vec::new();
+    for shared in state.jobs.all() {
+        let job = shared.read().await;
+        results.push(JobResponse::from_job(&job));
+    }
+    results.sort_by(|a, b| a.id.cmp(&b.id));
+    Json(results)
+}
+
+async fn get_job(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    match state.jobs.get(&id) {
+        Some(shared) => {
+            let job = shared.read().await;
+            Json(JobResponse::from_job(&job)).into_response()
+        }
+        None => (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "job not found" }))).into_response(),
+    }
+}
+
+async fn cancel_job(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if state.jobs.cancel(&id).await {
+        let shared = state.jobs.get(&id).unwrap();
+        let job = shared.read().await;
+        Json(JobResponse::from_job(&job)).into_response()
+    } else {
+        (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "job not found or already finished" }))).into_response()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket handler
 // ---------------------------------------------------------------------------
 
@@ -527,11 +668,15 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Kokoro ready.");
     }
 
+    let job_store = Arc::new(JobStore::load()?);
+    eprintln!("Jobs store loaded ({} job(s)).", job_store.all().len());
+
     let state = Arc::new(AppState {
         kokoro: kokoro_engine,
         f5: f5_engine,
         voices: all_voices,
         cache: Arc::new(DashMap::new()),
+        jobs: job_store,
     });
 
     let frontend_dir = ["app/frontend/dist", "frontend/dist", "../frontend/dist"]
@@ -543,6 +688,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws", get(ws_handler))
         .route("/doc", get(get_doc))
         .route("/voices", get(get_voices))
+        .route("/jobs", get(list_jobs).post(create_job))
+        .route("/jobs/:id", get(get_job).delete(cancel_job))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

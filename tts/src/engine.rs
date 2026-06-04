@@ -4,14 +4,21 @@ use std::sync::Arc;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use dashmap::DashMap;
 use futures::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::backend::Backend;
 use crate::chunk::{AudioSegment, Segment};
 use crate::error::TtsError;
 use crate::splitter;
 use crate::audio_cache;
+
+/// Per-sentence synthesis lock. Keyed by audio cache key (SHA-256 of
+/// normalised text + voice cache key). Prevents two concurrent callers
+/// (e.g. a WS session and a background job) from synthesising the same
+/// sentence simultaneously — the second waits, then gets a disk cache hit.
+type SynthLocks = Arc<DashMap<String, Arc<Mutex<()>>>>;
 
 // ---------------------------------------------------------------------------
 // TtsBackend trait
@@ -37,6 +44,7 @@ pub trait TtsBackend: Send + Sync {
 pub struct TtsEngine {
     backend: Arc<dyn TtsBackend>,
     voices: Arc<std::collections::HashMap<String, crate::backend::Voice>>,
+    synth_locks: SynthLocks,
 }
 
 impl TtsEngine {
@@ -73,7 +81,7 @@ impl TtsEngine {
                 if let crate::backend::Voice::F5Tts { .. } = &voice {
                     let normalized = crate::f5::normalizer::normalize(&s.text);
                     let key = audio_cache::cache_key(&normalized, &voice.cache_key());
-                    audio_cache::lookup(&key).is_some()
+                    audio_cache::exists(&key)
                 } else {
                     false // Kokoro not cached
                 }
@@ -96,10 +104,11 @@ impl TtsEngine {
 
         let (tx, rx) = mpsc::channel(4);
         let backend = Arc::clone(&self.backend);
+        let synth_locks = Arc::clone(&self.synth_locks);
         let text = text.to_string();
 
         tokio::spawn(async move {
-            run_synthesis_loop(text, backend, voice, tx).await;
+            run_synthesis_loop(text, backend, voice, synth_locks, tx).await;
         });
 
         AudioStream { rx }
@@ -114,6 +123,7 @@ async fn run_synthesis_loop(
     text: String,
     backend: Arc<dyn TtsBackend>,
     voice: crate::backend::Voice,
+    synth_locks: SynthLocks,
     tx: mpsc::Sender<Result<AudioSegment, TtsError>>,
 ) {
     let sentences = splitter::split(&text);
@@ -132,8 +142,10 @@ async fn run_synthesis_loop(
         let backend2 = Arc::clone(&backend);
         let voice2 = voice.clone();
 
-        // Check disk cache for F5 (slow backend only).
-        // Kokoro is fast enough that caching adds more complexity than it saves.
+        // For F5: use a per-sentence lock to prevent duplicate synthesis when
+        // a WS session and a background job race to the same sentence.
+        // Pattern: acquire lock → re-check disk cache → synthesize if still a
+        // miss → write → release. Second caller waits, then gets a cache hit.
         let cache_key = match &voice {
             crate::backend::Voice::F5Tts { .. } => {
                 let normalized = crate::f5::normalizer::normalize(&sentence_text);
@@ -143,8 +155,33 @@ async fn run_synthesis_loop(
         };
 
         if let Some(ref key) = cache_key {
+            // Fast path: check before acquiring the lock.
             if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
-                eprintln!("[audio cache] hit sentence {index}, skipping synthesis");
+                eprintln!("[audio cache] hit sentence {index} (pre-lock), skipping synthesis");
+                let segment = Segment {
+                    start: time_offset,
+                    end: time_offset + duration,
+                    text: sentence.text.clone(),
+                };
+                time_offset += duration;
+                if index + 1 < sentence_count {
+                    time_offset += if paragraph_end { paragraph_silence_secs } else { sentence_silence_secs };
+                }
+                let seg = AudioSegment { index, samples, sample_rate, transcript: segment, paragraph_end };
+                if tx.send(Ok(seg)).await.is_err() { return; }
+                continue;
+            }
+
+            // Acquire per-sentence lock, then re-check (another synthesiser may
+            // have finished while we waited).
+            let lock = synth_locks
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone();
+            let _guard = lock.lock().await;
+
+            if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
+                eprintln!("[audio cache] hit sentence {index} (post-lock), skipping synthesis");
                 let segment = Segment {
                     start: time_offset,
                     end: time_offset + duration,
@@ -172,6 +209,7 @@ async fn run_synthesis_loop(
                 if let Some(ref key) = cache_key {
                     let normalized = crate::f5::normalizer::normalize(&sentence.text);
                     audio_cache::store(key, &normalized, &samples, sample_rate, duration);
+                    // Lock is still held here — released when _guard drops at end of match arm.
                 }
 
                 let segment = Segment {
@@ -285,6 +323,7 @@ impl TtsEngineBuilder {
         Ok(TtsEngine {
             backend,
             voices: Arc::new(voices),
+            synth_locks: Arc::new(DashMap::new()),
         })
     }
 }

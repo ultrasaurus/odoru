@@ -56,3 +56,12 @@ pub use g2p::{G2pEngine, PhonemeChunk, G2pError};
 pub use chunk::{AudioSegment, Segment};
 pub use backend::{Backend, Voice};
 pub use kokoro::save_wav_all;
+
+/// Count non-empty sentences in `text` using the same logic as the synthesis
+/// loop. Used by the jobs API to report total_sentences upfront.
+pub fn splitter_sentence_count(text: &str) -> usize {
+    splitter::split(text)
+        .into_iter()
+        .filter(|s| !s.text.trim().is_empty())
+        .count()
+}

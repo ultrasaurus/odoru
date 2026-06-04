@@ -70,6 +70,14 @@ fn lookup_in(dir: &PathBuf, key: &str) -> Option<(Vec<f32>, u32, f64)> {
     Some((samples, meta.sample_rate, meta.duration))
 }
 
+/// Check whether a cache entry exists without reading the audio data.
+/// Much cheaper than `lookup` — use this when you only need to know if a
+/// sentence is cached, not to actually play it back.
+pub fn exists(key: &str) -> bool {
+    let Some(dir) = cache_dir() else { return false; };
+    dir.join(format!("{key}.f32")).exists() && dir.join(format!("{key}.json")).exists()
+}
+
 /// Write a synthesized segment to the cache.
 pub fn store(key: &str, text: &str, samples: &[f32], sample_rate: u32, duration: f64) {
     let Some(dir) = cache_dir() else { return; };

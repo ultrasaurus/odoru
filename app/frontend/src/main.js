@@ -125,6 +125,7 @@ function showReader() {
       <div class="reader-main">
         <div class="reader-header">
           <h1 class="article-title">Authorship Provisions in Augment</h1>
+          <div id="job-area" class="job-area"></div>
         </div>
         <div id="transcript-container" class="transcript-container">
           <div class="loading">Loading…</div>
@@ -135,6 +136,7 @@ function showReader() {
   `;
     document.getElementById('new-btn').addEventListener('click', showNew);
     const transcriptContainer = document.getElementById('transcript-container');
+    const jobArea = document.getElementById('job-area');
     const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls();
     const player = new Player(transcriptContainer);
     player.onError(msg => {
@@ -142,9 +144,83 @@ function showReader() {
         playBtn.disabled = true;
     });
     wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal, 'authorship-provisions-in-augment.wav');
+    // ── Job polling ────────────────────────────────────────────────────────────
+    let pollTimer = null;
+    function stopPolling() {
+        if (pollTimer !== null) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+    }
+    function pollJob(jobId, total) {
+        stopPolling();
+        pollTimer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/jobs/${jobId}`);
+                if (!res.ok) {
+                    jobArea.innerHTML = `<span class="job-status error">Job not found — server may have restarted</span>`;
+                    return;
+                }
+                const job = await res.json();
+                if (job.status === 'done') {
+                    jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>';
+                    return;
+                }
+                if (job.status === 'error') {
+                    jobArea.innerHTML = `<span class="job-status error">Synthesis error: ${job.error ?? ''}</span>`;
+                    return;
+                }
+                const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;
+                jobArea.innerHTML = `<span class="job-status running">Synthesizing… ${job.completed_sentences}/${total} (${pct}%)</span>`;
+                pollJob(jobId, total);
+            }
+            catch {
+                pollJob(jobId, total); // retry silently on network blip
+            }
+        }, 4000);
+    }
+    async function startJob(text) {
+        jobArea.innerHTML = '<span class="job-status running">Queuing…</span>';
+        try {
+            const res = await fetch('/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, voice: ARTICLE_VOICE }),
+            });
+            const job = await res.json();
+            if (!res.ok) {
+                jobArea.innerHTML = `<span class="job-status error">${job.error ?? 'Failed to queue'}</span>`;
+                return;
+            }
+            if (job.status === 'done') {
+                jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>';
+                return;
+            }
+            pollJob(job.id, job.total_sentences);
+        }
+        catch {
+            jobArea.innerHTML = '<span class="job-status error">Could not reach server</span>';
+        }
+    }
+    // ── Doc fetch + pre-render ─────────────────────────────────────────────────
     fetch(`/doc?url=${encodeURIComponent(ARTICLE_URL)}&voice=${encodeURIComponent(ARTICLE_VOICE)}`)
         .then(res => res.json())
         .then(data => {
+        const audioReady = !!data.cached?.audio;
+        const isF5 = ARTICLE_VOICE.startsWith('f5:');
+        if (audioReady) {
+            jobArea.innerHTML = '<span class="job-status done">✓ Audio ready</span>';
+        }
+        else if (isF5) {
+            const btn = document.createElement('button');
+            btn.className = 'job-btn';
+            btn.textContent = 'Synthesize in background';
+            btn.addEventListener('click', () => {
+                btn.remove();
+                startJob(data.plain_text);
+            });
+            jobArea.appendChild(btn);
+        }
         // Pre-render all sentences as gray pending spans so the article is
         // visible immediately; player activates each span as audio arrives.
         const sentences = splitSentences(data.plain_text);
@@ -169,6 +245,7 @@ function showReader() {
     })
         .catch(() => {
         transcriptContainer.innerHTML = '<div class="error">Failed to load article.</div>';
+        stopPolling();
     });
 }
 // ── New view ──────────────────────────────────────────────────────────────────
@@ -190,6 +267,7 @@ function showNew() {
 
       <main class="main">
         <div class="workspace">
+          <div class="card-column">
           <div class="card">
             <div class="url-area">
               <input
@@ -210,6 +288,10 @@ function showNew() {
               ></textarea>
               <div class="synth-row">
                 <div id="time-estimate" class="time-estimate"></div>
+                <label class="bg-synth-label">
+                  <input type="checkbox" id="bg-synth-cb" class="bg-synth-cb">
+                  Synthesize in background
+                </label>
                 <button id="synth-btn" class="synth-btn">Synthesize</button>
               </div>
             </div>
@@ -220,6 +302,12 @@ function showNew() {
 
             ${controlsHtml()}
           </div>
+
+          <div id="queue-section" class="queue-section" style="display:none">
+            <div class="queue-header">Background Queue</div>
+            <div id="queue-list" class="queue-list"></div>
+          </div>
+          </div><!-- end card-column -->
 
           <aside class="sidebar">
             <div class="sidebar-section">
@@ -235,6 +323,85 @@ function showNew() {
     </div>
   `;
     document.getElementById('back-link').addEventListener('click', showReader);
+    const queueSection = document.getElementById('queue-section');
+    const queueList = document.getElementById('queue-list');
+    // ── Background Queue ───────────────────────────────────────────────────────
+    let queuePollTimer = null;
+    function stopQueuePoll() {
+        if (queuePollTimer !== null) {
+            clearTimeout(queuePollTimer);
+            queuePollTimer = null;
+        }
+    }
+    function statusLabel(status) {
+        return {
+            pending: '⏳ Pending',
+            in_progress: '⚙ Running',
+            done: '✓ Done',
+            error: '✕ Error',
+            cancelled: '— Cancelled',
+        }[status] ?? status;
+    }
+    function renderQueue(jobs) {
+        if (jobs.length === 0) {
+            queueSection.style.display = 'none';
+            return;
+        }
+        queueSection.style.display = '';
+        // Sort: running/pending first, then by created_at descending.
+        jobs.sort((a, b) => {
+            const activeA = a.status === 'in_progress' || a.status === 'pending';
+            const activeB = b.status === 'in_progress' || b.status === 'pending';
+            if (activeA !== activeB)
+                return activeA ? -1 : 1;
+            return b.created_at.localeCompare(a.created_at);
+        });
+        queueList.innerHTML = '';
+        for (const job of jobs) {
+            const active = job.status === 'pending' || job.status === 'in_progress';
+            const pct = job.total_sentences > 0
+                ? Math.round((job.completed_sentences / job.total_sentences) * 100) : 0;
+            const progress = active
+                ? `${job.completed_sentences}/${job.total_sentences} (${pct}%)`
+                : job.status === 'done' ? `${job.total_sentences} sentences` : '';
+            const row = document.createElement('div');
+            row.className = 'queue-row';
+            row.innerHTML = `
+        <div class="queue-row-main">
+          <span class="queue-voice">${job.voice}</span>
+          <span class="queue-preview">${job.text_preview}</span>
+        </div>
+        <div class="queue-row-meta">
+          <span class="queue-status ${job.status}">${statusLabel(job.status)}</span>
+          ${progress ? `<span class="queue-progress">${progress}</span>` : ''}
+          <span class="queue-date">${job.created_at}</span>
+          ${active ? `<button class="queue-cancel-btn" data-id="${job.id}">✕</button>` : ''}
+        </div>
+      `;
+            queueList.appendChild(row);
+        }
+        // Wire cancel buttons.
+        queueList.querySelectorAll('.queue-cancel-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.dataset.id;
+                await fetch(`/jobs/${id}`, { method: 'DELETE' });
+                pollQueue();
+            });
+        });
+    }
+    async function pollQueue() {
+        stopQueuePoll();
+        try {
+            const res = await fetch('/jobs');
+            if (res.ok) {
+                const jobs = await res.json();
+                renderQueue(jobs);
+            }
+        }
+        catch { /* silent */ }
+        queuePollTimer = setTimeout(pollQueue, 10_000);
+    }
+    pollQueue();
     // Error bar helpers
     const errorBar = document.getElementById('error-bar');
     const errorBarMsg = document.getElementById('error-bar-msg');
@@ -248,6 +415,7 @@ function showNew() {
     }
     errorBarRetry.addEventListener('click', () => loadVoices());
     const synthBtn = document.getElementById('synth-btn');
+    const bgSynthCb = document.getElementById('bg-synth-cb');
     const textInput = document.getElementById('text-input');
     const timeEstimate = document.getElementById('time-estimate');
     const urlInput = document.getElementById('url-input');
@@ -356,10 +524,39 @@ function showNew() {
             return 'odoru.wav';
         }
     }
-    synthBtn.addEventListener('click', () => {
-        const text = textInput.value.trim();
-        if (!text)
-            return;
+    // Fetch a URL into the textarea. Returns true on success.
+    async function fetchUrl(url) {
+        fetchStatus.textContent = 'Fetching…';
+        fetchStatus.className = 'fetch-status loading';
+        urlInput.disabled = true;
+        synthBtn.disabled = true;
+        try {
+            const res = await fetch(`/doc?url=${encodeURIComponent(url)}`);
+            const data = await res.json();
+            if (!res.ok) {
+                fetchStatus.textContent = data.error ?? 'Fetch failed';
+                fetchStatus.className = 'fetch-status error';
+                return false;
+            }
+            textInput.value = data.plain_text;
+            updateEstimate(data.plain_text);
+            const cached = data.cached?.content ? ' (cached)' : '';
+            const title = data.title ?? url;
+            fetchStatus.textContent = `✔ ${title}${cached}`;
+            fetchStatus.className = 'fetch-status success';
+            return true;
+        }
+        catch {
+            fetchStatus.textContent = 'Network error';
+            fetchStatus.className = 'fetch-status error';
+            return false;
+        }
+        finally {
+            urlInput.disabled = false;
+            synthBtn.disabled = false;
+        }
+    }
+    function startSynth(text) {
         synthBtn.disabled = true;
         playBtn.disabled = true;
         downloadBtn.disabled = true;
@@ -368,6 +565,94 @@ function showNew() {
         timeTotal.textContent = '0:00';
         synthStart = Date.now();
         player.synthesize(text, selectedVoice ?? undefined);
+    }
+    // ── Background job (polls until done, shows progress in transcript area) ──
+    let bgPollTimer = null;
+    function stopBgPoll() {
+        if (bgPollTimer !== null) {
+            clearTimeout(bgPollTimer);
+            bgPollTimer = null;
+        }
+    }
+    function pollBgJob(jobId, total) {
+        stopBgPoll();
+        bgPollTimer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/jobs/${jobId}`);
+                if (!res.ok) {
+                    transcriptContainer.innerHTML = `<div class="error">Job not found (${res.status}) — server may have restarted</div>`;
+                    synthBtn.disabled = false;
+                    return;
+                }
+                const job = await res.json();
+                if (job.status === 'done') {
+                    transcriptContainer.innerHTML = '<div class="loading">✓ Background synthesis complete — press Synthesize to play</div>';
+                    synthBtn.disabled = false;
+                    return;
+                }
+                if (job.status === 'error') {
+                    transcriptContainer.innerHTML = `<div class="error">Synthesis error: ${job.error ?? ''}</div>`;
+                    synthBtn.disabled = false;
+                    return;
+                }
+                const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;
+                transcriptContainer.innerHTML =
+                    `<div class="loading">Background synthesis: ${job.completed_sentences}/${total} sentences (${pct}%)</div>`;
+                pollBgJob(jobId, total);
+            }
+            catch {
+                pollBgJob(jobId, total); // retry silently on network blip
+            }
+        }, 4000);
+    }
+    async function startBgJob(text) {
+        stopBgPoll();
+        synthBtn.disabled = true;
+        transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>';
+        try {
+            const res = await fetch('/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, voice: selectedVoice }),
+            });
+            const job = await res.json();
+            if (!res.ok) {
+                transcriptContainer.innerHTML = `<div class="error">${job.error ?? 'Failed to queue job'}</div>`;
+                synthBtn.disabled = false;
+                return;
+            }
+            if (job.status === 'done') {
+                transcriptContainer.innerHTML = '<div class="loading">✓ Already synthesized — press Synthesize to play</div>';
+                synthBtn.disabled = false;
+                return;
+            }
+            transcriptContainer.innerHTML =
+                `<div class="loading">Background synthesis: 0/${job.total_sentences} sentences (0%)</div>`;
+            pollBgJob(job.id, job.total_sentences);
+            pollQueue();
+        }
+        catch {
+            transcriptContainer.innerHTML = '<div class="error">Could not reach server</div>';
+            synthBtn.disabled = false;
+        }
+    }
+    synthBtn.addEventListener('click', async () => {
+        const text = textInput.value.trim();
+        const url = urlInput.value.trim();
+        if (!text && !url) {
+            fetchStatus.textContent = 'Paste a URL or enter text first.';
+            fetchStatus.className = 'fetch-status error';
+            return;
+        }
+        const resolvedText = text || (await fetchUrl(url) ? textInput.value.trim() : '');
+        if (!resolvedText)
+            return;
+        if (bgSynthCb.checked) {
+            await startBgJob(resolvedText);
+        }
+        else {
+            startSynth(resolvedText);
+        }
     });
     textInput.addEventListener('input', () => updateEstimate(textInput.value));
     textInput.addEventListener('keydown', (e) => {
@@ -378,34 +663,8 @@ function showNew() {
         if (e.key !== 'Enter')
             return;
         const url = urlInput.value.trim();
-        if (!url)
-            return;
-        fetchStatus.textContent = 'Fetching…';
-        fetchStatus.className = 'fetch-status loading';
-        urlInput.disabled = true;
-        try {
-            const res = await fetch(`/doc?url=${encodeURIComponent(url)}`);
-            const data = await res.json();
-            if (!res.ok) {
-                fetchStatus.textContent = data.error ?? 'Fetch failed';
-                fetchStatus.className = 'fetch-status error';
-                return;
-            }
-            textInput.value = data.plain_text;
-            updateEstimate(data.plain_text);
-            const cached = data.cached?.content ? ' (cached)' : '';
-            const title = data.title ?? url;
-            fetchStatus.textContent = `✔ ${title}${cached}`;
-            fetchStatus.className = 'fetch-status success';
-        }
-        catch {
-            fetchStatus.textContent = 'Network error';
-            fetchStatus.className = 'fetch-status error';
-        }
-        finally {
-            urlInput.disabled = false;
-            urlInput.focus();
-        }
+        if (url)
+            await fetchUrl(url);
     });
 }
 // ── Boot ──────────────────────────────────────────────────────────────────────
