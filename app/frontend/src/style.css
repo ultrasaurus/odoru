@@ -406,6 +406,13 @@ html, body {
   letter-spacing: 0.03em;
 }
 
+.seek-status {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-align: center;
+  padding-top: 0.25rem;
+}
+
 /* URL input area */
 .url-area {
   display: flex;

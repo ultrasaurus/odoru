@@ -135,6 +135,7 @@ function controlsHtml(): string {
           <span id="time-current" class="time">0:00</span>
           <span id="time-total" class="time">0:00</span>
         </div>
+        <div id="seek-status" class="seek-status" style="display:none">Waiting for audio to arrive…</div>
       </div>
       <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
     </div>
@@ -219,14 +220,27 @@ function showReader() {
   const jobArea             = document.getElementById('job-area')!
   const autoscrollCb        = document.getElementById('autoscroll-cb') as HTMLInputElement
   const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls()
+  const seekStatus = document.getElementById('seek-status') as HTMLDivElement
 
   const player = new Player(transcriptContainer)
 
+  autoscrollCb.checked = true
+  player.autoScroll = true
   autoscrollCb.addEventListener('change', () => { player.autoScroll = autoscrollCb.checked })
 
   player.onError(msg => {
     setError(transcriptContainer, `Error: ${msg}`)
     playBtn.disabled = true
+  })
+
+  player.onWaiting(() => {
+    playBtn.disabled = true
+    seekStatus.style.display = ''
+  })
+
+  player.onSeekReady(() => {
+    playBtn.disabled = false
+    seekStatus.style.display = 'none'
   })
 
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
@@ -256,6 +270,7 @@ function showReader() {
       el.textContent = h.text
       el.addEventListener('click', () => {
         h.element.scrollIntoView({ behavior: 'instant', block: 'start' })
+        player.seekTo(h.sentenceIndex)
       })
       outlineList.appendChild(el)
       outlineEls.push(el)

@@ -100,6 +100,8 @@ export class Player {
   private onReadyCb: (() => void) | null = null
   private onSynthDoneCb: (() => void) | null = null
   private onErrorCb: ((msg: string) => void) | null = null
+  private onWaitingCb: (() => void) | null = null
+  private onSeekReadyCb: (() => void) | null = null
 
   autoScroll = false    // set by caller; scrolls active segment into view when true
   private done = false  // true once the WS sends {done: true}
@@ -107,6 +109,9 @@ export class Player {
   private seekOffset = 0
   // Pre-rendered gray spans supplied by caller; activated in place as audio arrives.
   private pendingSpans: HTMLElement[] = []
+  // Index to seek to once that segment arrives, or -1 if no pending seek.
+  private pendingSeekIndex = -1
+  private pendingSeekWasPlaying = false
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -154,10 +159,18 @@ export class Player {
         const endTime = startTime + duration
 
         this.queue.enqueue(samples)
+        const newIndex = this.segments.length
         this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end })
-        this.renderSegment(msg.transcript, this.segments.length - 1)
+        this.renderSegment(msg.transcript, newIndex)
 
-        if (this.segments.length === 1) this.onReadyCb?.()
+        if (newIndex === 0) this.onReadyCb?.()
+
+        if (this.pendingSeekIndex >= 0 && newIndex >= this.pendingSeekIndex) {
+          this._doSeek(this.pendingSeekIndex, this.pendingSeekWasPlaying)
+          this.pendingSeekIndex = -1
+          this.pendingSeekWasPlaying = false
+          this.onSeekReadyCb?.()
+        }
       }
     }
 
@@ -178,6 +191,42 @@ export class Player {
   onError(cb: (msg: string) => void): void         { this.onErrorCb = cb }
   onEnded(cb: () => void): void                    { this.endedCbs.push(cb) }
   onTimeUpdate(cb: (t: number) => void): void      { this.timeUpdateCbs.push(cb) }
+  /** Fires when seekTo targets a segment not yet received. */
+  onWaiting(cb: () => void): void                  { this.onWaitingCb = cb }
+  /** Fires when a pending seek completes as the target segment arrives. */
+  onSeekReady(cb: () => void): void                { this.onSeekReadyCb = cb }
+
+  seekTo(index: number): void {
+    const wasPlaying = this.queue.state === 'running'
+    if (index < this.segments.length) {
+      this._doSeek(index, wasPlaying)
+      this.pendingSeekIndex = -1
+    } else {
+      // Segment not yet received — park and wait.
+      this.pendingSeekIndex = index
+      this.pendingSeekWasPlaying = wasPlaying
+      this.onWaitingCb?.()
+    }
+  }
+
+  private _doSeek(index: number, wasPlaying: boolean): void {
+    this.stopTracking()
+    if (this.activeIndex >= 0) {
+      this.segmentEls[this.activeIndex]?.classList.remove('active')
+    }
+    this.activeIndex = -1
+    this.seekOffset = this.segments[index].startTime
+    this.queue.reset()
+    for (let i = index; i < this.segments.length; i++) {
+      this.queue.enqueue(this.segments[i].samples)
+    }
+    this.highlightSegment(index)
+    if (wasPlaying) {
+      this.play()
+    } else {
+      this.startTracking()
+    }
+  }
 
   async play(): Promise<void> {
     await this.queue.resume()
@@ -261,28 +310,12 @@ export class Player {
     this.activeIndex = -1
     this.seekOffset = 0
     this.done = false
+    this.pendingSeekIndex = -1
+    this.pendingSeekWasPlaying = false
   }
 
   private renderSegment(transcript: Segment, index: number): void {
-    const clickHandler = () => {
-      const wasPlaying = this.queue.state === 'running'
-      this.stopTracking()
-      if (this.activeIndex >= 0) {
-        this.segmentEls[this.activeIndex]?.classList.remove('active')
-      }
-      this.activeIndex = -1
-      this.seekOffset = this.segments[index].startTime
-      this.queue.reset()
-      for (let i = index; i < this.segments.length; i++) {
-        this.queue.enqueue(this.segments[i].samples)
-      }
-      this.highlightSegment(index)
-      if (wasPlaying) {
-        this.play()
-      } else {
-        this.startTracking()
-      }
-    }
+    const clickHandler = () => { this.seekTo(index) }
 
     const pending = this.pendingSpans[index]
     if (pending) {
