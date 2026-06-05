@@ -122,7 +122,7 @@ export class Player {
   // Public API
   // ---------------------------------------------------------------------------
 
-  synthesize(text: string, voice?: string, pendingSpans?: HTMLElement[]): void {
+  synthesize(text: string, voice?: string, pendingSpans?: HTMLElement[], documentId?: string): void {
     this.reset()
     this.pendingSpans = pendingSpans ?? []
     if (this.pendingSpans.length === 0) {
@@ -134,7 +134,8 @@ export class Player {
 
     this.ws.onopen = () => {
       const msg: Record<string, string> = { text }
-      if (voice) msg.voice = voice
+      if (voice)      msg.voice       = voice
+      if (documentId) msg.document_id = documentId
       this.ws!.send(JSON.stringify(msg))
     }
 

@@ -2,28 +2,51 @@
 
 ## REST API (`app/src/main.rs`)
 ```
-GET  /voices          → { voices: [{id, name, backend, description}] }
-GET   /doc?url=&voice= → { url, title, authors, date, plain_text, content,
-                            synthesized_voices: [voice_id, ...],
-                            cached: { content: bool, audio: voice_cache_key|null },
-                            audio_duration_secs?: number,
-                            publish: bool, published_voice?: string }
-PATCH /doc?url=        ← { publish: bool, published_voice?: string } → 204
-GET  /articles         → [{ url, title?, authors, date?, description?, cached_at,
-                             synthesized_voices, voice_durations,
-                             publish: bool, published_voice?: string }]
-GET  /ws              → WebSocket upgrade
-POST /jobs            → { text, voice, url? } → job (deduplicates by text+voice)
-GET  /jobs            → [job, ...]
-GET  /jobs/:id        → job
-DELETE /jobs/:id      → cancel job
+GET  /voices               → { voices: [{id, name, backend, description}] }
+
+POST /documents            ← { url } → { id }   (returns immediately; fetch runs async)
+GET  /documents            → [{ id, status, source_url?, title?, authors, date?,
+                                description?, cached_at?, publish, voices }]
+GET  /documents/:id        → { id, status, source_url?, title?, authors, date?,
+                                description?, cached_at?, content?, plain_text?,
+                                publish, voices, error? }
+PATCH /documents/:id       ← { publish?: bool, published_voice?: string } → 204
+
+GET  /ws                   → WebSocket upgrade
+POST /jobs                 ← { text, voice, document_id? } → job (deduplicates by text+voice)
+GET  /jobs                 → [job, ...]
+GET  /jobs/:id             → job
+DELETE /jobs/:id           → cancel job
 ```
+
+### Document status (`GET /documents/:id`)
+- `status: "fetching"` — fetch in progress; `content`, `plain_text`, `source_url` are `null`
+- `status: "ready"` — all fields populated
+- `status: "error"` — fetch failed; `error` field contains the message
+- Poll until `status: "ready"` (Phase 2 will replace polling with WS events)
+
+### Voice state shape (in document responses)
+```json
+{
+  "f5:sarah": { "status": "ready", "duration": 312.4, "job_id": "...", "published": true },
+  "f5:nova":  { "status": "in-progress", "job_id": "..." }
+}
+```
+- `status`: `in-progress | ready | stale | error`
+- `stale`: content changed since synthesis — old audio still playable, warning badge shown
+- `published: true` on at most one voice per document
+- `publish` in document frontmatter: document-level intent; `false` overrides any `published` voice
+
+### Deduplication on `POST /documents`
+1. Check `source_url` index (fast path — same URL)
+2. Check `content_hash` index (catches redirects — same content from different URL)
+3. On miss: create `fetching` record, return `{ id }`, spawn async fetch
 
 ## WebSocket messages
 
-Client → server (voice must be prefixed):
+Client → server (voice must be prefixed, document_id optional):
 ```json
-{ "text": "...", "voice": "f5:sarah" }
+{ "text": "...", "voice": "f5:sarah", "document_id": "uuid" }
 ```
 Server → client (one per sentence):
 ```json

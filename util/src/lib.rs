@@ -4,8 +4,10 @@
 //!
 //! - [`frontmatter`] — parse YAML frontmatter from markdown files
 //! - [`voice`] — load F5-TTS voice definitions from `voices/<name>/`
-//! - [`cache`] — article cache in `~/.odoru/articles/`
+//! - [`documents`] — UUID-keyed document store in `~/.odoru/documents/<uuid>/`
+//! - [`index`] — in-memory source_url + content_hash indexes
 
 pub mod frontmatter;
 pub mod voice;
-pub mod cache;
+pub mod documents;
+pub mod index;

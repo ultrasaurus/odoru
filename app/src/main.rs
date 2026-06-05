@@ -23,7 +23,7 @@ mod jobs;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query, State,
+        Path, State,
     },
     http::StatusCode,
     response::IntoResponse,
@@ -37,9 +37,11 @@ use tts::{AudioSegment, Backend, TtsEngine, Voice};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info, warn};
-use util::{cache, voice as voice_util};
+use util::{documents, index::{DocumentIndex, html_content_hash}, voice as voice_util};
+use util::documents::VoiceStatus;
 
 use jobs::{JobStore, JobStatus};
 
@@ -115,6 +117,10 @@ struct AppState {
     voices: Vec<VoiceInfo>,
     cache: SegmentCache,
     jobs: Arc<JobStore>,
+    /// In-memory document indexes (source_url → uuid, content_hash → uuid).
+    doc_index: Arc<DocumentIndex>,
+    /// Per-document RwLock for voices.json writes, keyed by document UUID.
+    voice_locks: Arc<DashMap<String, Arc<RwLock<()>>>>,
 }
 
 impl AppState {
@@ -141,6 +147,14 @@ impl AppState {
             _ => Err(format!("unknown backend: {backend:?}")),
         }
     }
+
+    /// Get or create the per-document RwLock for voices.json writes.
+    fn voice_lock(&self, doc_id: &str) -> Arc<RwLock<()>> {
+        self.voice_locks
+            .entry(doc_id.to_string())
+            .or_insert_with(|| Arc::new(RwLock::new(())))
+            .clone()
+    }
 }
 
 /// Split "f5:sarah" into ("f5", "sarah"). Returns None if there is no ':'.
@@ -158,6 +172,9 @@ struct SynthRequest {
     /// Prefixed voice ID, e.g. "f5:sarah" or "kokoro:am_puck".
     /// Unprefixed names are rejected. Defaults to the first available voice.
     voice: Option<String>,
+    /// UUID of the document being synthesized. When provided, voices.json is
+    /// updated to `ready` with duration on completion.
+    document_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -220,146 +237,265 @@ async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// GET /doc?url=<url>[&voice=<voice_id>]
+// POST /documents — fetch-or-create, returns { id } immediately
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
-struct DocQuery {
+struct CreateDocumentRequest {
     url: String,
-    /// Optional prefixed voice ID — if provided, `cached.audio` reflects whether
-    /// all sentences are in the audio disk cache for that voice.
-    voice: Option<String>,
 }
 
 #[derive(Serialize)]
-struct CachedInfo {
-    content: bool,
-    /// Voice cache key (e.g. "f5:sarah:0.85:2.0") if all audio is on disk for
-    /// the requested voice; `null` otherwise or if no voice was requested.
-    audio: Option<String>,
+struct CreateDocumentResponse {
+    id: String,
 }
 
-#[derive(Serialize)]
-struct DocResponse {
-    url: String,
-    title: Option<String>,
-    authors: Vec<String>,
-    date: Option<String>,
-    plain_text: String,
-    content: String,
-    cached: CachedInfo,
-    /// Voice IDs (e.g. "f5:sarah") for which all sentences are synthesized.
-    synthesized_voices: Vec<String>,
-    /// Total audio duration in seconds for the requested voice, if known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    audio_duration_secs: Option<f64>,
-    publish: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    published_voice: Option<String>,
-}
-
-async fn get_doc(
+async fn create_document(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<DocQuery>,
+    Json(body): Json<CreateDocumentRequest>,
 ) -> impl IntoResponse {
-    if !q.url.starts_with("http://") && !q.url.starts_with("https://") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "url must start with http:// or https://" })),
+    if !body.url.starts_with("http://") && !body.url.starts_with("https://") {
+        return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "url must start with http:// or https://" }))
         ).into_response();
     }
 
-    match cache::lookup(&q.url) {
-        Ok(Some(hit)) => {
-            let audio = check_audio(&state, &q.url, q.voice.as_deref(),
-                &hit.plain_text, &hit.synthesized_voices).await;
-            let audio_duration_secs = q.voice.as_deref()
-                .and_then(|v| hit.voice_durations.get(v).copied())
-                .filter(|&d| d > 0.0);
-            return Json(DocResponse {
-                url: hit.url,
-                title: hit.title,
-                authors: hit.authors,
-                date: hit.date,
-                plain_text: hit.plain_text,
-                content: hit.content,
-                cached: CachedInfo { content: true, audio },
-                synthesized_voices: hit.synthesized_voices,
-                audio_duration_secs,
-                publish: hit.publish,
-                published_voice: hit.published_voice,
-            }).into_response();
-        }
-        Ok(None) => {}
-        Err(e) => error!("Cache lookup error: {e}"),
+    // Check source_url index first (fast path).
+    if let Some(id) = state.doc_index.get_by_source_url(&body.url).await {
+        return Json(CreateDocumentResponse { id }).into_response();
     }
 
-    let url = q.url.clone();
-    let result = tokio::task::spawn_blocking(move || dl::fetch_and_extract(&url)).await;
-
-    let article = match result {
-        Ok(Ok(a)) => a,
-        Ok(Err(e)) => return (
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": format!("Fetch failed: {e}") })),
-        ).into_response(),
-        Err(e) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Task error: {e}") })),
-        ).into_response(),
+    // Create a fetching record immediately so the client has an ID to poll.
+    let id = match documents::create_fetching(Some(&body.url)) {
+        Ok(id) => id,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
     };
 
-    // Use q.url (the request URL) as the cache key — trafilatura's reported
-    // article.url is unreliable (often returns the site root rather than the
-    // article URL), which breaks cache lookup on subsequent requests.
-    if let Err(e) = cache::store(
-        &q.url,
-        article.title.as_deref(),
-        &article.authors,
-        article.date.as_deref(),
-        article.description.as_deref(),
-        &article.content,
-        &article.plain_text,
-    ) {
-        error!("Cache store error: {e}");
-    }
+    // Insert into source_url index now so concurrent requests dedup correctly.
+    state.doc_index.insert(&id, Some(&body.url), None).await;
 
-    // A freshly fetched article can't have any synthesized voices yet.
-    let audio = check_audio(&state, &q.url, q.voice.as_deref(),
-        &article.plain_text, &[]).await;
-    Json(DocResponse {
-        url: q.url,
-        title: article.title,
-        authors: article.authors,
-        date: article.date,
-        plain_text: article.plain_text,
-        content: article.content,
-        cached: CachedInfo { content: false, audio },
-        synthesized_voices: vec![],
-        audio_duration_secs: None,
-        publish: false,
-        published_voice: None,
-    }).into_response()
+    // Spawn blocking fetch task.
+    let url = body.url.clone();
+    let doc_id = id.clone();
+    let doc_index = state.doc_index.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let html = match dl::fetch::fetch(&url) {
+            Ok(h) => h,
+            Err(e) => {
+                error!("[documents] fetch failed for {url}: {e}");
+                let _ = documents::store_error(&doc_id, &e.to_string());
+                return;
+            }
+        };
+
+        let content_hash = html_content_hash(&html);
+
+        // Check content_hash index — catches redirects to already-cached content.
+        // We need a blocking check; use a fresh tokio runtime handle.
+        // Since we're in spawn_blocking, we can't .await — use block_in_place.
+        let existing_id = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                doc_index.get_by_content_hash(&content_hash)
+            )
+        });
+
+        if let Some(existing) = existing_id {
+            // This URL resolves to content we already have. Remove the
+            // placeholder we just created and update the source_url index
+            // to point at the existing document.
+            let articles_dir = match documents::documents_dir() {
+                Ok(d) => d,
+                Err(e) => { error!("[documents] documents_dir error: {e}"); return; }
+            };
+            let _ = std::fs::remove_dir_all(articles_dir.join(&doc_id));
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(
+                    doc_index.insert(&existing, Some(&url), None)
+                )
+            });
+            return;
+        }
+
+        let article = match dl::extract(&html, &url) {
+            Ok(a) => a,
+            Err(e) => {
+                error!("[documents] extract failed for {url}: {e}");
+                let _ = documents::store_error(&doc_id, &e.to_string());
+                return;
+            }
+        };
+
+        if let Err(e) = documents::store_ready(
+            &doc_id,
+            Some(&url),
+            article.title.as_deref(),
+            &article.authors,
+            article.date.as_deref(),
+            article.description.as_deref(),
+            &article.content,
+            &article.plain_text,
+            &html,
+            &content_hash,
+        ) {
+            error!("[documents] store_ready failed for {doc_id}: {e}");
+            let _ = documents::store_error(&doc_id, &e.to_string());
+            return;
+        }
+
+        // Update content_hash index now that we have the hash.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                doc_index.insert(&doc_id, None, Some(&content_hash))
+            )
+        });
+
+        info!("[documents] ready: {doc_id} ({url})");
+    });
+
+    Json(CreateDocumentResponse { id }).into_response()
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /doc?url=<url> — update publish settings for a cached article
+// GET /documents/:id — poll for fetch status + full document
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct DocumentResponse {
+    id: String,
+    status: documents::FetchStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
+    title: Option<String>,
+    authors: Vec<String>,
+    date: Option<String>,
+    description: Option<String>,
+    cached_at: Option<String>,
+    /// Present only when status == ready.
+    content: Option<String>,
+    /// Present only when status == ready.
+    plain_text: Option<String>,
+    publish: bool,
+    voices: documents::VoicesMap,
+    /// Present only when status == error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn get_document(
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match documents::lookup_by_id(&id) {
+        Ok(Some(doc)) => {
+            let error = if doc.status == documents::FetchStatus::Error {
+                doc.description.clone()
+            } else {
+                None
+            };
+            let (content, plain_text) = if doc.status == documents::FetchStatus::Ready {
+                (Some(doc.content), Some(doc.plain_text))
+            } else {
+                (None, None)
+            };
+            Json(DocumentResponse {
+                id: doc.id,
+                status: doc.status,
+                source_url: doc.source_url,
+                title: doc.title,
+                authors: doc.authors,
+                date: doc.date,
+                description: doc.description,
+                cached_at: doc.cached_at,
+                content,
+                plain_text,
+                publish: doc.publish,
+                voices: doc.voices,
+                error,
+            }).into_response()
+        }
+        Ok(None) => (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GET /documents — list all (no content/plain_text)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct DocumentSummary {
+    id: String,
+    status: documents::FetchStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    authors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_at: Option<String>,
+    publish: bool,
+    voices: documents::VoicesMap,
+}
+
+async fn list_documents() -> impl IntoResponse {
+    match documents::list_all() {
+        Ok(docs) => {
+            let summaries: Vec<DocumentSummary> = docs.into_iter().map(|d| DocumentSummary {
+                id: d.id,
+                status: d.status,
+                source_url: d.source_url,
+                title: d.title,
+                authors: d.authors,
+                date: d.date,
+                description: d.description,
+                cached_at: d.cached_at,
+                publish: d.publish,
+                voices: d.voices,
+            }).collect();
+            Json(summaries).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /documents/:id — Phase 1: publish flag + published_voice
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
-struct PatchDocBody {
-    publish: bool,
+struct PatchDocumentBody {
+    #[serde(default)]
+    publish: Option<bool>,
     published_voice: Option<String>,
 }
 
-async fn patch_doc(
-    Query(q): Query<DocQuery>,
-    Json(body): Json<PatchDocBody>,
+async fn patch_document(
+    Path(id): Path<String>,
+    Json(body): Json<PatchDocumentBody>,
 ) -> impl IntoResponse {
-    let url = q.url.clone();
+    // Verify document exists.
+    match documents::lookup_by_id(&id) {
+        Ok(None) => return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Ok(Some(_)) => {}
+    }
+
+    let publish = body.publish.unwrap_or(false);
     let voice = body.published_voice.clone();
     let result = tokio::task::spawn_blocking(move || {
-        cache::update_publish(&url, body.publish, voice.as_deref())
+        documents::update_publish(&id, publish, voice.as_deref())
     }).await;
 
     match result {
@@ -369,104 +505,6 @@ async fn patch_doc(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
     }
-}
-
-// ---------------------------------------------------------------------------
-// GET /articles — list all cached articles (metadata only)
-// ---------------------------------------------------------------------------
-
-#[derive(Serialize)]
-struct ArticleSummary {
-    url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    title: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    authors: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    date: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    cached_at: String,
-    synthesized_voices: Vec<String>,
-    voice_durations: std::collections::HashMap<String, f64>,
-    publish: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    published_voice: Option<String>,
-}
-
-async fn list_articles() -> impl IntoResponse {
-    match tokio::task::spawn_blocking(cache::list_all).await {
-        Ok(Ok(articles)) => {
-            let summaries: Vec<ArticleSummary> = articles.into_iter().map(|a| ArticleSummary {
-                url: a.url,
-                title: a.title,
-                authors: a.authors,
-                date: a.date,
-                description: a.description,
-                cached_at: a.cached_at,
-                synthesized_voices: a.synthesized_voices,
-                voice_durations: a.voice_durations,
-                publish: a.publish,
-                published_voice: a.published_voice,
-            }).collect();
-            Json(summaries).into_response()
-        }
-        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Audio synthesis check
-// ---------------------------------------------------------------------------
-
-/// Check whether all sentences of `plain_text` are synthesized for `voice_id`.
-///
-/// Fast path: voice_id is in `synthesized_voices` from the article record —
-/// returns the voice cache key with no I/O or Python calls.
-///
-/// Slow path: runs `all_audio_cached` (Python + stat calls) in spawn_blocking.
-/// On success, writes the result back to the article record so future calls
-/// take the fast path.
-async fn check_audio(
-    state: &Arc<AppState>,
-    url: &str,
-    voice_id: Option<&str>,
-    plain_text: &str,
-    synthesized_voices: &[String],
-) -> Option<String> {
-    let voice_id = voice_id?;
-    let (engine, voice_name) = state.engine_for_voice(voice_id).ok()?;
-
-    // Fast path — already recorded in the article store.
-    if synthesized_voices.iter().any(|v| v == voice_id) {
-        return engine.voice_cache_key(&voice_name);
-    }
-
-    // Slow path — check the audio store (involves PyO3 normalizer per sentence).
-    let text = plain_text.to_string();
-    let vname = voice_name.clone();
-    let engine2 = Arc::clone(&engine);
-
-    let all_cached = tokio::task::spawn_blocking(move || {
-        engine2.all_audio_cached(&text, &vname)
-    }).await.ok()??;
-
-    if !all_cached {
-        return None;
-    }
-
-    // Persist so the next GET /doc is instant.
-    // Duration unknown here (slow path only checks existence); job path writes it.
-    let url = url.to_string();
-    let vid = voice_id.to_string();
-    if let Err(e) = tokio::task::spawn_blocking(move || cache::mark_synthesized(&url, &vid, 0.0)).await {
-        error!("mark_synthesized error: {e}");
-    }
-
-    engine.voice_cache_key(&voice_name)
 }
 
 // ---------------------------------------------------------------------------
@@ -480,9 +518,9 @@ struct CreateJobRequest {
     text: String,
     /// Prefixed voice ID, e.g. "f5:sarah".
     voice: String,
-    /// Article URL — used to write audio duration to the article store on completion.
+    /// Document UUID. Used to update voices.json on completion.
     #[serde(default)]
-    url: Option<String>,
+    document_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -491,7 +529,7 @@ struct JobResponse {
     voice: String,
     text_preview: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    article_url: Option<String>,
+    document_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     article_title: Option<String>,
     status: JobStatus,
@@ -508,7 +546,7 @@ impl JobResponse {
             id: job.id.clone(),
             voice: job.voice.clone(),
             text_preview: job.text_preview.clone(),
-            article_url: job.article_url.clone(),
+            document_id: job.document_id.clone(),
             article_title: job.article_title.clone(),
             status: job.status.clone(),
             total_sentences: job.total_sentences,
@@ -534,10 +572,10 @@ async fn create_job(
             Json(serde_json::json!({ "error": e }))).into_response(),
     };
 
-    // Look up article title from the store if a URL was provided.
-    let article_title = body.url.as_deref().and_then(|url| {
-        util::cache::lookup(url).ok().flatten().and_then(|a| a.title)
-    });
+    // Look up article title from the document store if a document_id was provided.
+    let article_title = body.document_id.as_deref()
+        .and_then(|id| documents::lookup_by_id(id).ok().flatten())
+        .and_then(|d| d.title);
 
     // Dedup: return existing non-terminal job for same text + voice.
     // If it's pending with no live task (e.g. after server restart), restart it.
@@ -559,8 +597,9 @@ async fn create_job(
                 job.completed_sentences = 0;
                 let _ = state.jobs.persist(&job);
             }
+            let art_id = existing.read().await.document_id.clone();
             jobs::spawn_job(existing.clone(), cancel_flag, body.text,
-                voice_name, body.voice, body.url, engine, state.jobs.clone());
+                voice_name, body.voice, art_id, engine, state.jobs.clone());
         }
         let job = existing.read().await;
         return Json(JobResponse::from_job(&job)).into_response();
@@ -570,14 +609,31 @@ async fn create_job(
     let total = tts::splitter_sentence_count(&body.text);
 
     let (shared, cancel_flag) = match state.jobs.create(
-        &body.text, &body.voice, total, body.url.clone(), article_title,
+        &body.text, &body.voice, total,
+        body.document_id.clone(), article_title,
     ).await {
         Ok(pair) => pair,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("Failed to create job: {e}") }))).into_response(),
     };
 
-    jobs::spawn_job(shared.clone(), cancel_flag, body.text, voice_name, body.voice, body.url, engine, state.jobs.clone());
+    // Mark voice as in-progress in voices.json if a document_id was provided.
+    if let Some(doc_id) = &body.document_id {
+        let job_id = shared.read().await.id.clone();
+        let dir = documents::documents_dir().map(|d| d.join(doc_id));
+        if let Ok(dir) = dir {
+            let lock = state.voice_lock(doc_id);
+            let _guard = lock.write().await;
+            if let Err(e) = documents::update_voice_status_in(
+                &dir, &body.voice, VoiceStatus::InProgress, None, Some(&job_id),
+            ) {
+                warn!("Failed to set voice in-progress for {doc_id}: {e}");
+            }
+        }
+    }
+
+    jobs::spawn_job(shared.clone(), cancel_flag, body.text, voice_name, body.voice,
+        body.document_id, engine, state.jobs.clone());
 
     let job = shared.read().await;
     Json(JobResponse::from_job(&job)).into_response()
@@ -625,17 +681,16 @@ async fn cancel_job(
 // Startup: restart pending jobs sequentially
 // ---------------------------------------------------------------------------
 
-/// On startup, restart any pending jobs that have an article_url by looking up
-/// the text from the article store. Jobs are run one at a time so the server
-/// remains responsive when a client connects.
+/// On startup, restart any pending jobs that have an document_id.
+/// Jobs are run one at a time so the server remains responsive when a client connects.
 fn restart_pending_jobs(state: Arc<AppState>) {
     tokio::spawn(async move {
         let pending: Vec<_> = {
             let mut v = Vec::new();
             for shared in state.jobs.all() {
                 let job = shared.read().await;
-                if job.status == JobStatus::Pending && job.article_url.is_some() {
-                    v.push((shared.clone(), job.voice.clone(), job.article_url.clone().unwrap()));
+                if job.status == JobStatus::Pending && job.document_id.is_some() {
+                    v.push((shared.clone(), job.voice.clone(), job.document_id.clone().unwrap()));
                 }
             }
             v
@@ -644,21 +699,21 @@ fn restart_pending_jobs(state: Arc<AppState>) {
         if pending.is_empty() { return; }
         info!("[jobs] auto-restarting {} pending job(s)", pending.len());
 
-        for (shared, voice_id, article_url) in pending {
+        for (shared, voice_id, document_id) in pending {
             // Skip if another path (e.g. a client POST /jobs) already started it.
             if state.jobs.has_cancel_flag(&shared.read().await.id) { continue; }
 
-            let article = match tokio::task::spawn_blocking({
-                let url = article_url.clone();
-                move || util::cache::lookup(&url)
+            let plain_text = match tokio::task::spawn_blocking({
+                let id = document_id.clone();
+                move || documents::lookup_by_id(&id)
             }).await {
-                Ok(Ok(Some(a))) => a,
+                Ok(Ok(Some(d))) => d.plain_text,
                 Ok(Ok(None)) => {
-                    warn!("[jobs] auto-restart: article not in cache for {article_url}");
+                    warn!("[jobs] auto-restart: document not found for id {document_id}");
                     continue;
                 }
                 Ok(Err(e)) => {
-                    error!("[jobs] auto-restart: lookup error for {article_url}: {e}");
+                    error!("[jobs] auto-restart: lookup error for id {document_id}: {e}");
                     continue;
                 }
                 Err(e) => {
@@ -684,8 +739,8 @@ fn restart_pending_jobs(state: Arc<AppState>) {
             }
 
             // Run this job to completion before starting the next.
-            let handle = jobs::spawn_job(shared, cancel_flag, article.plain_text,
-                voice_name, voice_id, Some(article_url), engine, state.jobs.clone());
+            let handle = jobs::spawn_job(shared, cancel_flag, plain_text,
+                voice_name, voice_id, Some(document_id), engine, state.jobs.clone());
             let _ = handle.await;
         }
     });
@@ -747,19 +802,47 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         return;
     }
 
+    // If a document_id was provided, record voice as in-progress.
+    if let Some(doc_id) = &req.document_id {
+        let lock = state.voice_lock(doc_id);
+        let _guard = lock.write().await;
+        let dir = documents::documents_dir()
+            .map(|d| d.join(doc_id));
+        if let Ok(dir) = dir {
+            if let Err(e) = documents::update_voice_status_in(
+                &dir, &voice_id, VoiceStatus::InProgress, None, None,
+            ) {
+                warn!("Failed to set voice in-progress for {doc_id}: {e}");
+            }
+        }
+    }
+
     // ── Cache miss: synthesize, cache, stream ─────────────────────────────
     info!("Cache miss — synthesizing with voice '{voice_id}'…");
     let mut stream = engine.synthesize(&req.text, &voice_name);
     let mut rendered: Vec<CachedSegment> = Vec::new();
+    let mut last_end = 0.0f64;
 
     while let Some(result) = stream.next().await {
         match result {
             Ok(seg) => {
+                last_end = seg.transcript.end;
                 let cached_seg = CachedSegment::from_segment(&seg);
                 if !send_segment(&mut sender, &cached_seg, false).await { return; }
                 rendered.push(cached_seg);
             }
             Err(e) => {
+                // Mark voice as error if we have a document_id.
+                if let Some(doc_id) = &req.document_id {
+                    let lock = state.voice_lock(doc_id);
+                    let _guard = lock.write().await;
+                    let dir = documents::documents_dir().map(|d| d.join(doc_id));
+                    if let Ok(dir) = dir {
+                        let _ = documents::update_voice_status_in(
+                            &dir, &voice_id, VoiceStatus::Error, None, None,
+                        );
+                    }
+                }
                 send_error(&mut sender, &format!("Synthesis error: {e}")).await;
                 return;
             }
@@ -768,6 +851,20 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
     debug!("Caching {} segments for key {}", rendered.len(), &key[..8]);
     state.cache.insert(key, rendered);
+
+    // Mark voice ready in voices.json if we have a document_id.
+    if let Some(doc_id) = &req.document_id {
+        let lock = state.voice_lock(doc_id);
+        let _guard = lock.write().await;
+        let dir = documents::documents_dir().map(|d| d.join(doc_id));
+        if let Ok(dir) = dir {
+            if let Err(e) = documents::update_voice_status_in(
+                &dir, &voice_id, VoiceStatus::Ready, Some(last_end), None,
+            ) {
+                error!("Failed to mark voice ready for {doc_id}/{voice_id}: {e}");
+            }
+        }
+    }
 
     let done = serde_json::to_string(&DoneMsg { done: true }).unwrap();
     let _ = sender.send(Message::Text(done.into())).await;
@@ -909,12 +1006,17 @@ async fn main() -> anyhow::Result<()> {
     let job_store = Arc::new(JobStore::load()?);
     info!("Jobs store loaded ({} job(s)).", job_store.all().len());
 
+    let doc_index = Arc::new(DocumentIndex::load().await?);
+    info!("Document index loaded.");
+
     let state = Arc::new(AppState {
         kokoro: kokoro_engine,
         f5: f5_engine,
         voices: all_voices,
         cache: Arc::new(DashMap::new()),
         jobs: job_store,
+        doc_index,
+        voice_locks: Arc::new(DashMap::new()),
     });
 
     restart_pending_jobs(state.clone());
@@ -926,8 +1028,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/doc", get(get_doc).patch(patch_doc))
-        .route("/articles", get(list_articles))
+        .route("/documents", get(list_documents).post(create_document))
+        .route("/documents/:id", get(get_document).patch(patch_document))
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/:id", get(get_job).delete(cancel_job))

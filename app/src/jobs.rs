@@ -62,9 +62,9 @@ pub struct Job {
     /// Optional on disk so old entries without this field still load.
     #[serde(default)]
     pub text_preview: String,
-    /// Source article URL, used to look up text for auto-restart on startup.
+    /// UUID of the document being synthesized. Used to update voices.json on completion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub article_url: Option<String>,
+    pub document_id: Option<String>,
     /// Article title from the article store at job creation time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub article_title: Option<String>,
@@ -139,7 +139,7 @@ impl JobStore {
         text: &str,
         voice: &str,
         total_sentences: usize,
-        article_url: Option<String>,
+        document_id: Option<String>,
         article_title: Option<String>,
     ) -> anyhow::Result<(SharedJob, Arc<AtomicBool>)> {
         let text_hash = text_hash(text);
@@ -149,7 +149,7 @@ impl JobStore {
             id: id.clone(),
             voice: voice.to_string(),
             text_preview,
-            article_url,
+            document_id,
             article_title,
             created_at: Utc::now(),
             status: JobStatus::Pending,
@@ -231,7 +231,7 @@ pub fn spawn_job(
     text: String,
     voice_name: String,
     voice_id: String,
-    article_url: Option<String>,
+    document_id: Option<String>,
     engine: Arc<TtsEngine>,
     store: Arc<JobStore>,
 ) -> tokio::task::JoinHandle<()> {
@@ -282,11 +282,19 @@ pub fn spawn_job(
             }
         }
 
-        if let Some(url) = article_url {
+        // Update voices.json on completion.
+        if let Some(id) = document_id {
+            let vid = voice_id.clone();
+            let job_id_str = shared.read().await.id.clone();
             if let Err(e) = tokio::task::spawn_blocking(move || {
-                util::cache::mark_synthesized(&url, &voice_id, last_end)
+                util::documents::update_voice_status(
+                    &id, &vid,
+                    util::documents::VoiceStatus::Ready,
+                    Some(last_end),
+                    Some(&job_id_str),
+                )
             }).await {
-                error!("[jobs] mark_synthesized error: {e}");
+                error!("[jobs] update_voice_status error: {e}");
             }
         }
 
@@ -339,14 +347,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn article_url_and_title_persist_through_create_and_load() {
+    async fn document_id_and_title_persist_through_create_and_load() {
         let (store, jobs_dir, _dir) = temp_store();
 
         store.create(
             "Some article text.",
             "f5:sarah",
             3,
-            Some("https://example.com/article/".to_string()),
+            Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
             Some("Example Article".to_string()),
         ).await.unwrap();
 
@@ -367,16 +375,16 @@ mod tests {
         let all = reloaded.all();
         assert_eq!(all.len(), 1);
         let job = all[0].read().await;
-        assert_eq!(job.article_url.as_deref(), Some("https://example.com/article/"));
+        assert_eq!(job.document_id.as_deref(), Some("550e8400-e29b-41d4-a716-446655440000"));
         assert_eq!(job.article_title.as_deref(), Some("Example Article"));
         assert_eq!(job.status, JobStatus::Pending);
     }
 
     #[tokio::test]
-    async fn old_job_without_article_url_loads_cleanly() {
+    async fn job_without_document_id_loads_cleanly() {
         let (_, jobs_dir, _dir) = temp_store();
 
-        // Write a job record that lacks article_url/article_title (old format).
+        // Write a minimal job record without document_id.
         let old_json = serde_json::json!({
             "id": "aabbccdd-0000-0000-0000-000000000001",
             "voice": "f5:sarah",
@@ -395,7 +403,7 @@ mod tests {
             jobs_dir.join("aabbccdd-0000-0000-0000-000000000001.json")
         ).unwrap()).unwrap();
 
-        assert_eq!(job.article_url, None);
+        assert_eq!(job.document_id, None);
         assert_eq!(job.article_title, None);
         assert_eq!(job.status, JobStatus::Pending);
     }

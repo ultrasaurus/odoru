@@ -35,14 +35,38 @@ See [tts-backend/overview.md](tts-backend/overview.md). Python environment setup
 ## Frontend
 See [frontend.md](frontend.md).
 
-## Article store (`util/src/cache.rs`)
-- Location: `~/.odoru/articles/<request-url-slug>/`
-- Files: `article.md` (YAML frontmatter + markdown body) + `article.txt` (plain text)
-- Frontmatter fields: url, title, authors, date, description, cached_at, synthesized_voices, publish, published_voice
-- **Key is always the request URL** — trafilatura's reported URL is unreliable, never used as key
-- `synthesized_voices`: list of voice IDs (e.g. `["f5:sarah"]`) for which all sentences are
-  synthesized. Populated lazily by `GET /doc` after `all_audio_cached` returns true.
-  Makes subsequent `GET /doc` calls instant (no Python, no stat calls).
+## Document store (`util/src/documents.rs`)
+- Location: `~/.odoru/documents/<uuid>/`
+- Files per document:
+  - `document.md` — YAML frontmatter (`id`, `status`, `source_url`, `title`, `authors`, `date`, `description`, `cached_at`, `publish`, `content_hash`) + markdown body
+  - `document.txt` — plain text for TTS
+  - `source.html` — originally fetched HTML (used for content hash; display deferred)
+  - `voices.json` — per-voice synthesis state (see below)
+- Identity is a UUID assigned at creation — decoupled from URL and content
+- `source_url` is provenance metadata, not an identity field
+- `status`: `fetching | ready | error` — set at creation, updated on fetch completion
+
+## Voice state (`voices.json`)
+Per-document, keyed by voice ID (e.g. `"f5:sarah"`):
+```json
+{
+  "f5:sarah": { "status": "ready", "duration": 312.4, "job_id": "...", "published": true },
+  "f5:nova":  { "status": "in-progress", "job_id": "..." }
+}
+```
+- Statuses: `in-progress | ready | stale | error`
+- `stale`: content changed since synthesis — old audio still playable, shown with warning badge
+- `published: true` on at most one voice; combined with `publish` flag in frontmatter
+- Written by: WS handler on session done, job runner on job done
+- Concurrent writes protected by per-document `RwLock` in `AppState`
+
+## Document indexes (`util/src/index.rs`)
+- Location: `~/.odoru/index/source_url.json` and `content_hash.json`
+- Loaded into memory at startup (`DocumentIndex` in `AppState`)
+- Reads: no lock (read directly from in-memory maps)
+- Writes: `RwLock` write guard, then async flush via write-to-temp-then-rename
+- On flush failure: logs `error!`, writes `.rebuild-needed` sentinel
+- On startup with sentinel: rebuilds by scanning all document directories
 
 ## API
 See [protocol.md](protocol.md).
@@ -54,29 +78,30 @@ See [protocol.md](protocol.md).
 - `KOKORO_MODEL_DIR` env var: path to Kokoro model (default: `~/.kokoro`)
 - Both engines held in AppState simultaneously when `ODORU_BACKEND=both`
 - In-memory segment cache: SHA-256(voice_id + "|" + text) → Vec<CachedSegment>
+- `doc_index`: in-memory `DocumentIndex`
+- `voice_locks`: per-document `RwLock` for `voices.json` writes, keyed by UUID
 
 ## Background jobs (`app/src/jobs.rs`)
 - Location: `~/.odoru/jobs/<id>.json`
-- Synthesize an article in the background, populating the audio disk cache sentence-by-sentence
+- Synthesize a document in the background, populating the audio disk cache sentence-by-sentence
 - Per-sentence lock in TtsEngine prevents duplicate synthesis with live WS sessions
 - Status: `pending | in_progress | done | error | cancelled`
 - `POST /jobs` deduplicates: same text+voice returns existing job unless error/cancelled
 - Jobs that were `in_progress` at server shutdown reset to `pending` on reload (preserving
-  `completed_sentences`); on startup, pending jobs with an `article_url` auto-restart
-  sequentially — jobs without one require the client to re-submit via `POST /jobs`
+  `completed_sentences`); on startup, pending jobs with an `article_id` auto-restart
+  sequentially
+- On completion: updates `voices.json` via `update_voice_status`
 - Cancel flag (`Arc<AtomicBool>`) is in-memory only; task stops at next sentence boundary
-- `text_preview`: first 80 chars, used for display when `article_title` is not present.
-  `article_url` and `article_title` stored when job is created from a URL fetch.
-  All three fields use `#[serde(default)]` so old entries load.
+- `text_preview`, `article_id`, `article_title` use `#[serde(default)]` so old entries load
 
 ## Next up
-- Voice picker in reader — reader hardcodes f5:sarah; should use `published_voice` from article,
-  with fallback to first `synthesized_voices` entry
+- Voice picker in reader — reader hardcodes `f5:sarah`; should read from `voices.json`,
+  use voice with `published: true`, fall back to first `ready` voice
+- Frontend migration to new `/documents` API (handled by frontend session)
 
 ## Planned improvements
 
 ### Authoring
-
 *Results from URL fetch are editable* so text can be adjusted if scraping is imperfect
   1. After fetching URL, metadata can be edited
   2. Figure out where to put author, date, etc. in reader
@@ -84,8 +109,6 @@ See [protocol.md](protocol.md).
   4. Outline view
 
 - pause/cancel/resume/delete jobs
-- call `mark_synthesized` when WS sends `{done: true}` so live-streamed articles get
-  `synthesized_voices` populated (currently only background jobs populate it)
 - Open button in Documents panel: navigate to reader (or editor?) for that article
 - Error bar: currently only in New view; should be in a shared layout wrapper
 - Mispronounced words: no UI for `tts_overrides.txt` edits

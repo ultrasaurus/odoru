@@ -17,8 +17,7 @@ interface JobInfo {
   id: string
   voice: string
   text_preview: string
-  article_url?: string
-  article_title?: string
+  document_id?: string
   status: string
   total_sentences: number
   completed_sentences: number
@@ -26,17 +25,30 @@ interface JobInfo {
   error?: string
 }
 
-interface ArticleSummary {
-  url: string
+interface VoiceEntry {
+  status: 'in-progress' | 'ready' | 'stale' | 'error'
+  duration?: number
+  job_id?: string
+  published?: boolean
+}
+
+interface DocumentSummary {
+  id: string
+  status: string
+  source_url?: string
   title?: string
   authors: string[]
   date?: string
   description?: string
-  cached_at: string
-  synthesized_voices: string[]
-  voice_durations: Record<string, number>
+  cached_at?: string
   publish: boolean
-  published_voice?: string
+  voices: Record<string, VoiceEntry>
+}
+
+interface DocumentDetail extends DocumentSummary {
+  content?: string
+  plain_text?: string
+  error?: string
 }
 
 // Approximate generation seconds per word for each backend.
@@ -47,7 +59,25 @@ const SECS_PER_WORD: Record<string, number> = {
   f5: 3.0,
 }
 
-const ARTICLE_VOICE = 'f5:sarah'
+// Fallback voice used when a document has no synthesized voices (e.g. text-only
+// published documents, or documents awaiting first synthesis).
+const DEFAULT_VOICE = 'f5:sarah'
+
+// Pick the best voice from a document's voices map.
+// Priority: published → first ready → first stale → first any.
+function pickVoice(voices: Record<string, VoiceEntry>): string | null {
+  for (const [id, v] of Object.entries(voices)) {
+    if (v.published) return id
+  }
+  for (const [id, v] of Object.entries(voices)) {
+    if (v.status === 'ready') return id
+  }
+  for (const [id, v] of Object.entries(voices)) {
+    if (v.status === 'stale') return id
+  }
+  const keys = Object.keys(voices)
+  return keys.length > 0 ? keys[0] : null
+}
 
 const app = document.getElementById('app')!
 
@@ -244,9 +274,9 @@ function showReader() {
     seekStatus.style.display = 'none'
   })
 
-  let currentArticle: ArticleSummary | null = null
+  let currentDoc: DocumentSummary | null = null
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
-    () => (currentArticle?.title ?? currentArticle?.url ?? 'article').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav')
+    () => (currentDoc?.title ?? currentDoc?.source_url ?? 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav')
 
   // ── Outline ────────────────────────────────────────────────────────────────
   let headings: HeadingEntry[] = []
@@ -328,13 +358,13 @@ function showReader() {
     }, 4000)
   }
 
-  async function startJob(text: string, url: string, title?: string) {
+  async function startJob(plainText: string, documentId: string, voice: string) {
     setStatus(jobArea, 'job-status running', 'Queuing…')
     try {
       const res = await fetch('/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: ARTICLE_VOICE, url, title }),
+        body: JSON.stringify({ text: plainText, voice, document_id: documentId }),
       })
       const job: JobInfo = await res.json()
       if (!res.ok) {
@@ -351,9 +381,9 @@ function showReader() {
     }
   }
 
-  // ── Load article ───────────────────────────────────────────────────────────
-  function loadArticle(article: ArticleSummary) {
-    currentArticle = article
+  // ── Load document ──────────────────────────────────────────────────────────
+  function loadDocument(doc: DocumentSummary) {
+    currentDoc = doc
     stopPolling()
     jobArea.innerHTML = ''
     playBtn.disabled = true
@@ -362,12 +392,27 @@ function showReader() {
     timeCurrent.textContent = '0:00'
     timeTotal.textContent = '0:00'
     transcriptContainer.innerHTML = '<div class="loading">Loading…</div>'
-    articleTitleEl.textContent = article.title ?? article.url
+    articleTitleEl.textContent = doc.title ?? doc.source_url ?? doc.id
 
-    fetch(`/doc?url=${encodeURIComponent(article.url)}&voice=${encodeURIComponent(ARTICLE_VOICE)}`)
+    fetch(`/documents/${doc.id}`)
       .then(res => res.json())
-      .then(data => {
-        const audioReady = !!data.cached?.audio
+      .then((data: DocumentDetail) => {
+        if (data.status === 'error') {
+          setError(transcriptContainer, `Failed to load: ${data.error ?? 'unknown error'}`)
+          return
+        }
+        if (!data.content || !data.plain_text) {
+          setError(transcriptContainer, 'Document content not yet available.')
+          return
+        }
+
+        const voice = pickVoice(data.voices) ?? DEFAULT_VOICE
+        const voiceEntry = data.voices[voice]
+        const audioReady = voiceEntry?.status === 'ready' || voiceEntry?.status === 'stale'
+
+        if (voiceEntry?.duration) {
+          timeTotal.textContent = fmt(voiceEntry.duration)
+        }
 
         if (audioReady) {
           setStatus(jobArea, 'job-status done', '✓ Audio ready')
@@ -377,13 +422,14 @@ function showReader() {
             .then(res => res.ok ? res.json() : [])
             .then((jobs: JobInfo[]) => {
               const active = jobs.find(j =>
-                j.article_url === article.url &&
+                j.document_id === doc.id &&
                 (j.status === 'pending' || j.status === 'in_progress')
               )
               if (active) {
                 const pct = active.total_sentences > 0
                   ? Math.round((active.completed_sentences / active.total_sentences) * 100) : 0
-                setStatus(jobArea, 'job-status running', `Synthesizing… ${active.completed_sentences}/${active.total_sentences} (${pct}%)`)
+                setStatus(jobArea, 'job-status running',
+                  `Synthesizing… ${active.completed_sentences}/${active.total_sentences} (${pct}%)`)
                 pollJob(active.id, active.total_sentences)
               } else {
                 const btn = document.createElement('button')
@@ -391,32 +437,27 @@ function showReader() {
                 btn.textContent = 'Synthesize in background'
                 btn.addEventListener('click', () => {
                   btn.remove()
-                  startJob(data.plain_text, article.url, article.title)
+                  startJob(data.plain_text!, doc.id, voice)
                 })
                 jobArea.appendChild(btn)
               }
             })
             .catch(() => {
-              // Fall back to showing the button if jobs fetch fails.
               const btn = document.createElement('button')
               btn.className = 'job-btn'
               btn.textContent = 'Synthesize in background'
               btn.addEventListener('click', () => {
                 btn.remove()
-                startJob(data.plain_text, article.url, article.title)
+                startJob(data.plain_text!, doc.id, voice)
               })
               jobArea.appendChild(btn)
             })
         }
 
-        if (data.audio_duration_secs) {
-          timeTotal.textContent = fmt(data.audio_duration_secs)
-        }
-
         transcriptContainer.innerHTML = ''
         const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer)
         renderOutline(hs)
-        player.synthesize(data.plain_text, ARTICLE_VOICE, pendingSpans)
+        player.synthesize(data.plain_text, voice, pendingSpans, doc.id)
 
         // Drive active outline heading from playback position.
         player.onTimeUpdate(t => updateOutlineActive(t))
@@ -427,32 +468,32 @@ function showReader() {
       })
   }
 
-  // ── Fetch article list + load first ───────────────────────────────────────
-  fetch('/articles')
+  // ── Fetch document list + load first ──────────────────────────────────────
+  fetch('/documents')
     .then(res => res.json())
-    .then((all: ArticleSummary[]) => {
-      const articles = all.filter(a => a.publish)
+    .then((all: DocumentSummary[]) => {
+      const docs = all.filter(d => d.publish)
       articleList.innerHTML = ''
-      if (articles.length === 0) {
+      if (docs.length === 0) {
         articleList.innerHTML = '<div class="outline-loading">No documents.</div>'
         transcriptContainer.innerHTML = '<div class="loading">No documents found.</div>'
         articleTitleEl.textContent = ''
         return
       }
       const itemEls: HTMLElement[] = []
-      articles.forEach((article, i) => {
+      docs.forEach((doc, i) => {
         const el = document.createElement('div')
         el.className = 'article-item' + (i === 0 ? ' selected' : '')
-        el.textContent = article.title ?? article.url
+        el.textContent = doc.title ?? doc.source_url ?? doc.id
         el.addEventListener('click', () => {
           itemEls.forEach(e => e.classList.remove('selected'))
           el.classList.add('selected')
-          loadArticle(article)
+          loadDocument(doc)
         })
         articleList.appendChild(el)
         itemEls.push(el)
       })
-      loadArticle(articles[0])
+      loadDocument(docs[0])
     })
     .catch(() => {
       articleList.innerHTML = '<div class="outline-loading">Failed to load documents.</div>'
@@ -469,8 +510,7 @@ function showNew() {
   let voices: VoiceInfo[] = []
   let selectedVoice: string | null = null  // stores prefixed id, e.g. "f5:sarah"
   let synthStart = 0
-  let fetchedUrl: string | null = null
-  let fetchedTitle: string | null = null
+  let fetchedDocumentId: string | null = null
 
   app.innerHTML = `
     <div class="layout">
@@ -502,8 +542,9 @@ function showNew() {
               <textarea
                 id="text-input"
                 class="text-input"
-                placeholder="…or paste text here directly, then press Synthesize"
+                placeholder="Fetched text will appear here…"
                 rows="4"
+                readonly
               ></textarea>
               <div class="synth-row">
                 <div id="time-estimate" class="time-estimate"></div>
@@ -516,7 +557,7 @@ function showNew() {
             </div>
 
             <div id="transcript-container" class="transcript-container">
-              <div class="placeholder">Fetch a URL or enter text above, then press Synthesize.</div>
+              <div class="placeholder">Fetch a URL above, then press Synthesize.</div>
             </div>
 
             ${controlsHtml()}
@@ -546,7 +587,7 @@ function showNew() {
 
   const queueList = document.getElementById('queue-list')!
 
-  // ── Background Queue ───────────────────────────────────────────────────────
+  // ── Documents panel ────────────────────────────────────────────────────────
   let queuePollTimer: ReturnType<typeof setTimeout> | null = null
   let bgPollTimer:    ReturnType<typeof setTimeout> | null = null
 
@@ -559,7 +600,7 @@ function showNew() {
 
   viewCleanup = () => { stopQueuePoll(); stopBgPoll() }
 
-  function statusLabel(status: string): string {
+  function jobStatusLabel(status: string): string {
     return ({
       pending:     '⏳ Pending',
       in_progress: '⚙ Running',
@@ -569,9 +610,9 @@ function showNew() {
     } as Record<string, string>)[status] ?? status
   }
 
-  function renderQueue(articles: ArticleSummary[], jobs: JobInfo[]) {
+  function renderQueue(docs: DocumentSummary[], jobs: JobInfo[]) {
     queueList.innerHTML = ''
-    if (articles.length === 0) {
+    if (docs.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'queue-empty'
       empty.textContent = 'No documents yet.'
@@ -579,53 +620,60 @@ function showNew() {
       return
     }
 
-    // Build url → best job map for ARTICLE_VOICE only (reader is hardcoded to that voice)
+    // Build document_id → best job map (prefer active > done > others, then newest)
     const jobMap = new Map<string, JobInfo>()
     for (const job of jobs) {
-      if (!job.article_url || job.voice !== ARTICLE_VOICE) continue
-      const existing = jobMap.get(job.article_url)
-      if (!existing) { jobMap.set(job.article_url, job); continue }
+      if (!job.document_id) continue
+      const existing = jobMap.get(job.document_id)
+      if (!existing) { jobMap.set(job.document_id, job); continue }
       const rank = (s: string) => s === 'in_progress' ? 0 : s === 'pending' ? 1 : s === 'done' ? 2 : 3
       const better = rank(job.status) < rank(existing.status) ||
         (rank(job.status) === rank(existing.status) && job.created_at > existing.created_at)
-      if (better) jobMap.set(job.article_url, job)
+      if (better) jobMap.set(job.document_id, job)
     }
 
-    // Assign sort rank to each article
-    const sortRank = (a: ArticleSummary) => {
-      const job = jobMap.get(a.url)
+    // Check if any voice is ready in a document's voices map
+    const hasReadyVoice = (doc: DocumentSummary) =>
+      Object.values(doc.voices).some(v => v.status === 'ready' || v.status === 'stale')
+
+    // Assign sort rank
+    const sortRank = (doc: DocumentSummary) => {
+      const job = jobMap.get(doc.id)
       if (job?.status === 'in_progress') return 0
       if (job?.status === 'pending')     return 1
       if (job?.status === 'done')        return 2
-      if (a.synthesized_voices.includes(ARTICLE_VOICE)) return 3
+      if (hasReadyVoice(doc))            return 3
       return 4
     }
 
-    const sorted = [...articles].sort((a, b) => {
+    const sorted = [...docs].sort((a, b) => {
       const dr = sortRank(a) - sortRank(b)
       if (dr !== 0) return dr
-      return b.cached_at.localeCompare(a.cached_at)
+      return (b.cached_at ?? '').localeCompare(a.cached_at ?? '')
     })
 
-    for (const article of sorted) {
-      const job    = jobMap.get(article.url)
+    for (const doc of sorted) {
+      const job    = jobMap.get(doc.id)
       const active = job?.status === 'pending' || job?.status === 'in_progress'
       const pct    = job && job.total_sentences > 0
         ? Math.round((job.completed_sentences / job.total_sentences) * 100) : 0
 
-      // Determine status label + voice name
+      // Determine status label + voice name for display
       let statusText = ''
       let statusClass = ''
-      let voiceName = ''
+      let displayVoiceName = ''
 
       if (job) {
-        statusText  = statusLabel(job.status)
-        statusClass = job.status
-        voiceName   = voices.find(v => v.id === job.voice)?.name ?? job.voice
-      } else if (article.synthesized_voices.includes(ARTICLE_VOICE)) {
-        statusText  = '✓ Ready'
-        statusClass = 'done'
-        voiceName   = voices.find(v => v.id === ARTICLE_VOICE)?.name ?? ARTICLE_VOICE
+        statusText       = jobStatusLabel(job.status)
+        statusClass      = job.status
+        displayVoiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice
+      } else if (hasReadyVoice(doc)) {
+        const readyVoiceId = pickVoice(doc.voices)
+        statusText       = '✓ Ready'
+        statusClass      = 'done'
+        displayVoiceName = readyVoiceId
+          ? (voices.find(v => v.id === readyVoiceId)?.name ?? readyVoiceId)
+          : ''
       }
 
       const row = document.createElement('div')
@@ -637,7 +685,7 @@ function showNew() {
 
       const titleEl = document.createElement('span')
       titleEl.className = 'queue-title'
-      titleEl.textContent = article.title ?? article.url
+      titleEl.textContent = doc.title ?? doc.source_url ?? doc.id
       top.appendChild(titleEl)
 
       if (statusText) {
@@ -650,14 +698,14 @@ function showNew() {
       row.appendChild(top)
 
       // Bottom line: voice + progress (only if there's something to show)
-      if (voiceName || active) {
+      if (displayVoiceName || active) {
         const meta = document.createElement('div')
         meta.className = 'queue-row-meta'
 
-        if (voiceName) {
+        if (displayVoiceName) {
           const voiceEl = document.createElement('span')
           voiceEl.className = 'queue-voice'
-          voiceEl.textContent = voiceName
+          voiceEl.textContent = displayVoiceName
           meta.appendChild(voiceEl)
         }
 
@@ -693,16 +741,19 @@ function showNew() {
         row.appendChild(meta)
       }
 
-      // Publish controls — shown when any voices are synthesized
-      if (article.synthesized_voices.length > 0) {
+      // Publish controls — shown for any fetched document (status: ready)
+      // Voice picker shown alongside only when ready/stale voices exist
+      const readyVoices = Object.entries(doc.voices)
+        .filter(([, v]) => v.status === 'ready' || v.status === 'stale')
+      if (doc.status === 'ready') {
         const pub = document.createElement('div')
         pub.className = 'queue-row-publish'
 
         const cb = document.createElement('input')
         cb.type = 'checkbox'
         cb.className = 'queue-publish-cb'
-        cb.checked = article.publish
-        cb.id = `pub-${article.url}`
+        cb.checked = doc.publish
+        cb.id = `pub-${doc.id}`
 
         const label = document.createElement('label')
         label.htmlFor = cb.id
@@ -711,16 +762,16 @@ function showNew() {
 
         const select = document.createElement('select')
         select.className = 'queue-voice-select'
-        for (const vid of article.synthesized_voices) {
+        for (const [vid, ve] of readyVoices) {
           const opt = document.createElement('option')
           opt.value = vid
           opt.textContent = voices.find(v => v.id === vid)?.name ?? vid
-          opt.selected = vid === article.published_voice
+          opt.selected = !!ve.published
           select.appendChild(opt)
         }
 
         const patch = async () => {
-          await fetch(`/doc?url=${encodeURIComponent(article.url)}`, {
+          await fetch(`/documents/${doc.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ publish: cb.checked, published_voice: select.value || undefined }),
@@ -728,9 +779,10 @@ function showNew() {
         }
 
         cb.addEventListener('change', patch)
-        select.addEventListener('change', patch)
+        if (readyVoices.length > 0) select.addEventListener('change', patch)
 
-        pub.append(cb, label, select)
+        pub.append(cb, label)
+        if (readyVoices.length > 0) pub.appendChild(select)
         row.appendChild(pub)
       }
 
@@ -741,12 +793,12 @@ function showNew() {
   async function pollQueue() {
     stopQueuePoll()
     try {
-      const [articlesRes, jobsRes] = await Promise.all([
-        fetch('/articles'),
+      const [docsRes, jobsRes] = await Promise.all([
+        fetch('/documents'),
         fetch('/jobs'),
       ])
-      if (articlesRes.ok && jobsRes.ok) {
-        renderQueue(await articlesRes.json(), await jobsRes.json())
+      if (docsRes.ok && jobsRes.ok) {
+        renderQueue(await docsRes.json(), await jobsRes.json())
       }
     } catch { /* silent */ }
     queuePollTimer = setTimeout(pollQueue, 10_000)
@@ -768,12 +820,12 @@ function showNew() {
   }
   errorBarRetry.addEventListener('click', () => loadVoices())
 
-  const synthBtn    = document.getElementById('synth-btn')    as HTMLButtonElement
-  const bgSynthCb   = document.getElementById('bg-synth-cb')  as HTMLInputElement
-  const textInput   = document.getElementById('text-input')   as HTMLTextAreaElement
+  const synthBtn     = document.getElementById('synth-btn')    as HTMLButtonElement
+  const bgSynthCb    = document.getElementById('bg-synth-cb')  as HTMLInputElement
+  const textInput    = document.getElementById('text-input')   as HTMLTextAreaElement
   const timeEstimate = document.getElementById('time-estimate') as HTMLDivElement
-  const urlInput    = document.getElementById('url-input')    as HTMLInputElement
-  const fetchStatus = document.getElementById('fetch-status') as HTMLDivElement
+  const urlInput     = document.getElementById('url-input')    as HTMLInputElement
+  const fetchStatus  = document.getElementById('fetch-status') as HTMLDivElement
   const voiceList        = document.getElementById('voice-list')        as HTMLDivElement
   const voiceDescription = document.getElementById('voice-description') as HTMLDivElement
   const transcriptContainer = document.getElementById('transcript-container')!
@@ -787,8 +839,7 @@ function showNew() {
     playBtn.disabled = true
   })
 
-  // downloadFilename is passed as a function so it's evaluated at click time,
-  // after the user has had a chance to enter a URL.
+  // downloadFilename is passed as a function so it's evaluated at click time.
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
     downloadFilename)
 
@@ -883,29 +934,56 @@ function showNew() {
     }
   }
 
-  // Fetch a URL into the textarea. Returns true on success.
-  async function fetchUrl(url: string): Promise<boolean> {
+  // Fetch a URL via POST /documents, poll until ready, populate textarea.
+  async function fetchDocument(url: string): Promise<boolean> {
     fetchStatus.textContent = 'Fetching…'
     fetchStatus.className = 'fetch-status loading'
     urlInput.disabled = true
     synthBtn.disabled = true
+    fetchedDocumentId = null
+    textInput.value = ''
+
     try {
-      const res = await fetch(`/doc?url=${encodeURIComponent(url)}`)
-      const data = await res.json()
-      if (!res.ok) {
-        fetchStatus.textContent = data.error ?? 'Fetch failed'
+      // Create or retrieve document
+      const createRes = await fetch('/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}))
+        fetchStatus.textContent = (err as any).error ?? 'Fetch failed'
         fetchStatus.className = 'fetch-status error'
         return false
       }
-      textInput.value = data.plain_text
-      updateEstimate(data.plain_text)
-      fetchedUrl = url
-      fetchedTitle = data.title ?? null
-      const cached = data.cached?.content ? ' (cached)' : ''
-      const title = data.title ?? url
-      fetchStatus.textContent = `✔ ${title}${cached}`
-      fetchStatus.className = 'fetch-status success'
-      return true
+      const { id } = await createRes.json() as { id: string }
+
+      // Poll until ready
+      while (true) {
+        const pollRes = await fetch(`/documents/${id}`)
+        if (!pollRes.ok) {
+          fetchStatus.textContent = 'Fetch failed'
+          fetchStatus.className = 'fetch-status error'
+          return false
+        }
+        const doc: DocumentDetail = await pollRes.json()
+        if (doc.status === 'error') {
+          fetchStatus.textContent = doc.error ?? 'Fetch failed'
+          fetchStatus.className = 'fetch-status error'
+          return false
+        }
+        if (doc.status === 'ready' && doc.plain_text) {
+          textInput.value = doc.plain_text
+          updateEstimate(doc.plain_text)
+          fetchedDocumentId = id
+          const cached = doc.cached_at ? ' (cached)' : ''
+          fetchStatus.textContent = `✔ ${doc.title ?? url}${cached}`
+          fetchStatus.className = 'fetch-status success'
+          return true
+        }
+        // Still fetching — wait 2 seconds and poll again
+        await new Promise(r => setTimeout(r, 2000))
+      }
     } catch {
       fetchStatus.textContent = 'Network error'
       fetchStatus.className = 'fetch-status error'
@@ -924,10 +1002,10 @@ function showNew() {
     timeCurrent.textContent = '0:00'
     timeTotal.textContent = '0:00'
     synthStart = Date.now()
-    player.synthesize(text, selectedVoice ?? undefined)
+    player.synthesize(text, selectedVoice ?? undefined, undefined, fetchedDocumentId ?? undefined)
   }
 
-  // ── Background job (polls until done, shows progress in transcript area) ──
+  // ── Background job ─────────────────────────────────────────────────────────
 
   function pollBgJob(jobId: string, total: number) {
     stopBgPoll()
@@ -965,15 +1043,17 @@ function showNew() {
     }, 4000)
   }
 
-  async function startBgJob(text: string, url?: string, title?: string) {
+  async function startBgJob(text: string, documentId?: string) {
     stopBgPoll()
     synthBtn.disabled = true
     transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>'
     try {
+      const body: Record<string, string> = { text, voice: selectedVoice ?? DEFAULT_VOICE }
+      if (documentId) body.document_id = documentId
       const res = await fetch('/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: selectedVoice, url: url || undefined, title: title || undefined }),
+        body: JSON.stringify(body),
       })
       const job: JobInfo = await res.json()
       if (!res.ok) {
@@ -1001,31 +1081,26 @@ function showNew() {
     const url  = urlInput.value.trim()
 
     if (!text && !url) {
-      fetchStatus.textContent = 'Paste a URL or enter text first.'
+      fetchStatus.textContent = 'Paste a URL first.'
       fetchStatus.className = 'fetch-status error'
       return
     }
 
-    const resolvedText = text || (await fetchUrl(url) ? textInput.value.trim() : '')
+    // If text area is empty, fetch the URL first
+    const resolvedText = text || (await fetchDocument(url) ? textInput.value.trim() : '')
     if (!resolvedText) return
 
     if (bgSynthCb.checked) {
-      await startBgJob(resolvedText, fetchedUrl || url || undefined, fetchedTitle || undefined)
+      await startBgJob(resolvedText, fetchedDocumentId ?? undefined)
     } else {
       startSynth(resolvedText)
     }
   })
 
-  textInput.addEventListener('input', () => updateEstimate(textInput.value))
-
-  textInput.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) synthBtn.click()
-  })
-
   urlInput.addEventListener('keydown', async (e: KeyboardEvent) => {
     if (e.key !== 'Enter') return
     const url = urlInput.value.trim()
-    if (url) await fetchUrl(url)
+    if (url) await fetchDocument(url)
   })
 }
 

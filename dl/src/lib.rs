@@ -1,6 +1,6 @@
 mod augment;
 mod error;
-mod fetch;
+pub mod fetch;
 
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;

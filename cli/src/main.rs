@@ -4,7 +4,7 @@ use clap::{Parser, ValueEnum};
 use config::AudioConfig;
 use dl::ParsedArticle;
 use tts::{Backend, TtsEngine};
-use util::cache;
+use util::{documents, index::html_content_hash};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 use std::time::Duration;
@@ -179,36 +179,49 @@ fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Opt
             ),
         }
     } else if input.starts_with("http://") || input.starts_with("https://") {
-        // Check cache first
+        // Check document store first (scan for matching source_url).
         if !no_cache {
-            if let Some(hit) = cache::lookup(input)? {
-                let article = ParsedArticle {
-                    url: hit.url,
-                    title: hit.title,
-                    authors: hit.authors,
-                    date: hit.date,
-                    description: hit.description,
-                    content: hit.content,
-                    plain_text: hit.plain_text,
-                };
-                return Ok((article, None));
+            let docs = documents::list_all()?;
+            if let Some(hit) = docs.into_iter().find(|d| d.source_url.as_deref() == Some(input)) {
+                if hit.status == documents::FetchStatus::Ready {
+                    // Re-read with content.
+                    if let Some(full) = documents::lookup_by_id(&hit.id)? {
+                        let article = ParsedArticle {
+                            url: full.source_url.unwrap_or_else(|| input.to_string()),
+                            title: full.title,
+                            authors: full.authors,
+                            date: full.date,
+                            description: full.description,
+                            content: full.content,
+                            plain_text: full.plain_text,
+                        };
+                        return Ok((article, None));
+                    }
+                }
             }
         }
 
-        // Cache miss or --no-cache: fetch and store
-        let article = dl::fetch_and_extract(input)
+        // Cache miss or --no-cache: fetch and store.
+        let html = dl::fetch::fetch(input)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let content_hash = html_content_hash(&html);
+        let article = dl::extract(&html, input)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-        if let Err(e) = cache::store(
-            &article.url,
+        let id = documents::create_fetching(Some(input))?;
+        if let Err(e) = documents::store_ready(
+            &id,
+            Some(input),
             article.title.as_deref(),
             &article.authors,
             article.date.as_deref(),
             article.description.as_deref(),
             &article.content,
             &article.plain_text,
+            &html,
+            &content_hash,
         ) {
-            eprintln!("Warning: failed to cache article: {e}");
+            eprintln!("Warning: failed to store document: {e}");
         }
 
         Ok((article, None))

@@ -78,7 +78,7 @@ export class Player {
     // ---------------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------------
-    synthesize(text, voice, pendingSpans) {
+    synthesize(text, voice, pendingSpans, documentId) {
         this.reset();
         this.pendingSpans = pendingSpans ?? [];
         if (this.pendingSpans.length === 0) {
@@ -90,6 +90,8 @@ export class Player {
             const msg = { text };
             if (voice)
                 msg.voice = voice;
+            if (documentId)
+                msg.document_id = documentId;
             this.ws.send(JSON.stringify(msg));
         };
         this.ws.onmessage = (ev) => {
