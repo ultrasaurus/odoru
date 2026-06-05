@@ -39,14 +39,24 @@ and populates the source_url index. Manual run is fine (personal tool, small num
 
 ### Deduplication indexes
 
-Two indexes in `~/.odoru/index/`:
+Two indexes in `~/.odoru/index/`, each a JSON map file:
 
-- `source_url.json`: map of `url → uuid` — catches re-fetches of the same URL
-- `content_hash.json`: map of `sha256(normalized body) → uuid` — catches redirects
+- `source_url.json`: `url → uuid` — catches re-fetches of the same URL (fast path)
+- `content_hash.json`: `sha256(original_fetched_content) → uuid` — catches redirects
   (URL A and URL B resolve to the same content)
 
 On `POST /documents` with a URL: check source_url index first (cheap), then content_hash
 (catches redirects). If found, return the existing document immediately — no fetch, no synthesis.
+
+**Content hash stability:** the hash is computed over the originally fetched content and never
+recomputed. Trafilatura's output can vary between runs for the same page (dynamic page elements,
+version differences), but since the hash is taken once at fetch time and stored, it is stable.
+The original fetched content is saved as provenance — both for the hash and so authors can
+compare against a later re-fetch if the extracted text looks wrong.
+
+**Concurrent writes:** two simultaneous fetches could corrupt the JSON index files.
+Serialize writes through a Tokio Mutex held in AppState. Simple and sufficient for a
+personal tool. See scalability note in [future-export.md](future-export.md).
 
 The `cached_at` frontmatter field gives the author visibility into when content was last fetched,
 so they can judge whether a dedup hit is stale. A `POST /documents/:id/refresh` endpoint
@@ -112,27 +122,27 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 
 ## Open Questions
 
-1. **What triggers document creation for snippets?**
-   On first WS synthesis? On explicit "save" action? On background job submission?
-   An explicit save/create action is cleaner authoring UX but risks data loss if the
-   author doesn't save before navigating away. Creating on first synthesis avoids loss
-   but may create orphan documents for one-off experiments. Tension unresolved.
-
-2. **Mutable text and audio cache invalidation**
+1. **Mutable text and audio cache invalidation**
    If the user edits a sentence, the cached audio for that sentence is stale.
    The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
    naturally miss on changed text. But `synthesized_voices` in frontmatter would
    be wrong (it claims all sentences are synthesized when some have changed).
-   Need a strategy: clear `synthesized_voices` on any text edit? Track per-sentence
-   dirty state? Note: future vision includes automatic versioning that retains the
-   original document — this may change what "invalidation" means.
+   Clearing `synthesized_voices` on any text edit is safest but loses visibility into
+   which voices are almost done / actively being worked on. Per-sentence dirty state
+   is more precise but complex. The future versioning vision (retaining original document)
+   may change what "invalidation" means entirely. Not needed for Phase 1 — defer.
 
 ## Resolved
 
-- **UUID for all documents** — UUID keys for everything, including URL-fetched; one-time migration script for existing URL-keyed articles
-- **Deduplication** — source_url index (primary) + content_hash index (redirect detection); `cached_at` gives author visibility into staleness
+- **UUID for all documents** — UUID keys for everything, including URL-fetched; one-time migration script re-keys existing URL-slug directories and populates both indexes from existing frontmatter
+- **Deduplication** — source_url index (primary) + content_hash index (redirect detection); hash taken once at fetch time and stored; `cached_at` gives author visibility into staleness
+- **Original content saved** — originally fetched content stored as provenance; authors can compare against a later re-fetch if extracted text looks wrong
 - **Fetch flow** — `POST /documents` returns `{ id }` immediately; Phase 1 polls `GET /documents/:id`; Phase 2 replaces polling with WS `document_status` events
+- **WS message protocol** — Phase 0: add `type` field to all WS messages; client console.logs and ignores any unrecognized types; makes Phase 2 WS events safe to add
 - **API naming** — standardize on "document" throughout; `GET /documents/:id` replaces `GET /doc?url=`
 - **Source URL vs. canonical URL** — cleanly separated: `id` is stable key, `source_url` is provenance metadata
 - **Frontend WS identity** — client passes document ID with WS request; `mark_synthesized` called on done; creation must precede synthesis start
-- **PDF / file upload** — both upload and paste will be supported; identity model works for both without special-casing
+- **Snippet creation timing** — create document on first synthesis (author has shown intent); use first N words of text as provisional title
+- **Everything is a document** — no special-casing for snippets, PDFs, or pastes; author can delete; consistent with modern auto-save expectations
+- **PDF / file upload** — both upload and paste supported; identity model works for both without special-casing
+- **Concurrent index writes** — serialize through a Tokio Mutex in AppState
