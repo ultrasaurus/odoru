@@ -155,7 +155,11 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 - Same channel already used for synthesis — fetch progress is one more event type
 - Eliminates polling pattern; architecturally cleaner
 
-**Phase 3 (new input surface area):**
+**Phase 3 (important details):**
+- `DELETE /documents/:id` — cancel in-progress jobs first, then remove directory
+- Full `PATCH /documents/:id` scope: content editing with stale voice transition
+
+**Phase 4 (new input surface area):**
 - `PATCH /documents/:id` with stale voice transition
 - Snippets, upload, and paste input paths
 
@@ -182,14 +186,13 @@ Code changes required alongside the migration script:
 - [ ] **`POST /documents`** — new endpoint replacing `GET /doc?url=` fetch-or-create path; returns `{ id }` immediately; remove old endpoint
 - [ ] **`GET /documents/:id`** — new endpoint replacing `GET /doc?url=` return path; remove old endpoint
 - [ ] **`GET /documents`** — replaces `GET /articles`; returns list shape (see Resolved section); remove old endpoint
-- [ ] **`PATCH /documents/:id`** — minimal Phase 1 scope: `publish` flag and `published_voice` (set `published: true` on one voice, clear others); replaces `PATCH /doc?url=`; remove old endpoint
+- [ ] **`PATCH /documents/:id`** — minimal Phase 1 scope: `publish` flag and `published_voice` (set `published: true` on one voice, clear others)
 - [ ] **Frontend** — switch from `url` to `id` as primary article identifier throughout; update WS requests to include `document_id`
 - [ ] **Migration script** — `util/bin/migrate_v0_2_uuid_keys.rs`: re-key URL-slug dirs to UUID, write `voices.json` from existing frontmatter fields, populate indexes, bump `util` crate to `0.2.0`
 
 ## Open Questions
 
-
- **Mutable text and audio cache invalidation**
+**Mutable text and audio cache invalidation**
 
 If the user edits a sentence, the cached audio for that sentence is stale.
 The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
@@ -239,5 +242,5 @@ The future versioning vision (retaining original document) may change what
 - **Upload / paste** — both supported; identity model works for both without special-casing
 - **Concurrent index writes** — indexes kept in memory (`RwLock`); writes flush to disk via write-to-temp-then-rename; sentinel file triggers rebuild on next startup if flush fails
 - **Concurrent `voices.json` writes** — two synthesis jobs on different voices for the same document could race; use a per-document `RwLock` in AppState (keyed by document UUID); per-document granularity avoids unnecessary serialization across documents; per-document actors can be added later if needed
-- **`DELETE /documents/:id`** — must cancel any in-progress synthesis jobs for the document before removing files; job cancellation happens first, then directory removal
+- **`DELETE /documents/:id`** — must cancel any in-progress synthesis jobs for the document before removing files; job cancellation happens first, then directory removal (Phase 3)
 - **Phase ordering** — Phase 1 includes voice state so URL fetch → synthesize → listen loop is solid before expanding input surface area; Phase 3 adds PATCH, snippets, upload, paste
