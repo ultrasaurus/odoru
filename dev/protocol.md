@@ -4,9 +4,13 @@
 ```
 GET  /voices          → { voices: [{id, name, backend, description}] }
 GET  /doc?url=&voice= → { url, title, authors, date, plain_text, content,
-                           cached: { content: bool, audio: voice_cache_key|null } }
+                           synthesized_voices: [voice_id, ...],
+                           cached: { content: bool, audio: voice_cache_key|null },
+                           audio_duration_secs?: number }
+GET  /articles        → [{ url, title?, authors, date?, description?, cached_at,
+                            synthesized_voices, voice_durations }]
 GET  /ws              → WebSocket upgrade
-POST /jobs            → { text, voice } → job (deduplicates by text+voice)
+POST /jobs            → { text, voice, url? } → job (deduplicates by text+voice)
 GET  /jobs            → [job, ...]
 GET  /jobs/:id        → job
 DELETE /jobs/:id      → cancel job

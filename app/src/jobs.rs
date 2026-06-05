@@ -314,3 +314,88 @@ fn make_preview(text: &str) -> String {
         preview
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Build a JobStore backed by a temp directory.
+    /// Returns the store, the path, and the TempDir guard (must stay alive for the test).
+    fn temp_store() -> (JobStore, PathBuf, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let store = JobStore {
+            jobs: Arc::new(DashMap::new()),
+            cancel_flags: Arc::new(DashMap::new()),
+            jobs_dir: path.clone(),
+        };
+        (store, path, dir)
+    }
+
+    #[tokio::test]
+    async fn article_url_and_title_persist_through_create_and_load() {
+        let (store, jobs_dir, _dir) = temp_store();
+
+        store.create(
+            "Some article text.",
+            "f5:sarah",
+            3,
+            Some("https://example.com/article/".to_string()),
+            Some("Example Article".to_string()),
+        ).await.unwrap();
+
+        // Reload from disk — simulates server restart.
+        let reloaded = JobStore {
+            jobs: Arc::new(DashMap::new()),
+            cancel_flags: Arc::new(DashMap::new()),
+            jobs_dir: jobs_dir.clone(),
+        };
+        for entry in std::fs::read_dir(&jobs_dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
+            let src = std::fs::read_to_string(&path).unwrap();
+            let job: Job = serde_json::from_str(&src).unwrap();
+            reloaded.jobs.insert(job.id.clone(), Arc::new(RwLock::new(job)));
+        }
+
+        let all = reloaded.all();
+        assert_eq!(all.len(), 1);
+        let job = all[0].read().await;
+        assert_eq!(job.article_url.as_deref(), Some("https://example.com/article/"));
+        assert_eq!(job.article_title.as_deref(), Some("Example Article"));
+        assert_eq!(job.status, JobStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn old_job_without_article_url_loads_cleanly() {
+        let (_, jobs_dir, _dir) = temp_store();
+
+        // Write a job record that lacks article_url/article_title (old format).
+        let old_json = serde_json::json!({
+            "id": "aabbccdd-0000-0000-0000-000000000001",
+            "voice": "f5:sarah",
+            "text_preview": "Hello world.",
+            "created_at": "2025-01-01T00:00:00Z",
+            "status": "pending",
+            "total_sentences": 1,
+            "completed_sentences": 0
+        });
+        std::fs::write(
+            jobs_dir.join("aabbccdd-0000-0000-0000-000000000001.json"),
+            serde_json::to_string(&old_json).unwrap(),
+        ).unwrap();
+
+        let job: Job = serde_json::from_str(&std::fs::read_to_string(
+            jobs_dir.join("aabbccdd-0000-0000-0000-000000000001.json")
+        ).unwrap()).unwrap();
+
+        assert_eq!(job.article_url, None);
+        assert_eq!(job.article_title, None);
+        assert_eq!(job.status, JobStatus::Pending);
+    }
+}

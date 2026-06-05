@@ -55,6 +55,8 @@ pub struct CachedArticle {
     pub authors: Vec<String>,
     pub date: Option<String>,
     pub description: Option<String>,
+    /// RFC 3339 timestamp when the article was fetched and cached.
+    pub cached_at: String,
     /// Markdown content.
     pub content: String,
     /// Plain text content (for TTS).
@@ -150,11 +152,63 @@ fn lookup_in(base: &PathBuf, url: &str) -> Result<Option<CachedArticle>> {
         authors: fm.authors,
         date: fm.date,
         description: fm.description,
+        cached_at: fm.cached_at,
         content: body.to_string(),
         plain_text,
         synthesized_voices: fm.synthesized_voices,
         voice_durations: fm.voice_durations,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// List all
+// ---------------------------------------------------------------------------
+
+/// Return metadata for every cached article. Skips unreadable entries silently.
+/// Does not read `content` — metadata only.
+pub fn list_all() -> Result<Vec<CachedArticle>> {
+    list_all_in(&cache_dir()?)
+}
+
+fn list_all_in(base: &PathBuf) -> Result<Vec<CachedArticle>> {
+    let mut articles = Vec::new();
+    let entries = match std::fs::read_dir(base) {
+        Ok(e) => e,
+        Err(_) => return Ok(articles),
+    };
+    for entry in entries {
+        let path = match entry { Ok(e) => e.path(), Err(_) => continue };
+        let md_path = path.join("article.md");
+        let txt_path = path.join("article.txt");
+        if !md_path.exists() { continue; }
+        let src = match std::fs::read_to_string(&md_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let (fm, _body) = match frontmatter::parse::<ArticleFrontmatter>(&src) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        articles.push(CachedArticle {
+            url: fm.url,
+            title: fm.title,
+            authors: fm.authors,
+            date: fm.date,
+            description: fm.description,
+            cached_at: fm.cached_at,
+            // content is not read for the list endpoint — callers that need
+            // body text should call lookup() directly.
+            content: String::new(),
+            plain_text: if txt_path.exists() {
+                std::fs::read_to_string(&txt_path).unwrap_or_default()
+            } else {
+                String::new()
+            },
+            synthesized_voices: fm.synthesized_voices,
+            voice_durations: fm.voice_durations,
+        });
+    }
+    Ok(articles)
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +276,11 @@ fn store_in(
 /// and its duration to `voice_durations`, then rewrites the file. No-ops if
 /// not cached. Intended to be called from `spawn_blocking`.
 pub fn mark_synthesized(url: &str, voice_id: &str, duration_secs: f64) -> Result<()> {
-    let dir = cache_dir()?.join(url_to_slug(url));
+    mark_synthesized_in(&cache_dir()?, url, voice_id, duration_secs)
+}
+
+fn mark_synthesized_in(base: &PathBuf, url: &str, voice_id: &str, duration_secs: f64) -> Result<()> {
+    let dir = base.join(url_to_slug(url));
     let md_path = dir.join("article.md");
     if !md_path.exists() { return Ok(()); }
 
@@ -306,6 +364,7 @@ mod tests {
         assert_eq!(hit.date.as_deref(), Some("2024-01-15"));
         assert_eq!(hit.content, "# Test\n\nMarkdown body.");
         assert_eq!(hit.plain_text, "Test\n\nPlain text body.");
+        assert!(!hit.cached_at.is_empty(), "cached_at should be set");
     }
 
     #[test]
@@ -314,5 +373,57 @@ mod tests {
         let base = tmp.path().to_path_buf();
         let result = lookup_in(&base, "https://example.com/not-cached/").unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn list_all_returns_all_articles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        store_in(&base, "https://example.com/a/", Some("Article A"), &[], None, None,
+            "# A", "Plain A").unwrap();
+        store_in(&base, "https://example.com/b/", Some("Article B"), &[], None, None,
+            "# B", "Plain B").unwrap();
+
+        let mut articles = list_all_in(&base).unwrap();
+        articles.sort_by(|a, b| a.url.cmp(&b.url));
+
+        assert_eq!(articles.len(), 2);
+        assert_eq!(articles[0].title.as_deref(), Some("Article A"));
+        assert_eq!(articles[1].title.as_deref(), Some("Article B"));
+        assert!(!articles[0].cached_at.is_empty());
+        assert!(!articles[1].cached_at.is_empty());
+    }
+
+    #[test]
+    fn list_all_skips_unreadable_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        // A valid article.
+        store_in(&base, "https://example.com/good/", Some("Good"), &[], None, None,
+            "# Good", "Good plain").unwrap();
+
+        // A directory with no article.md — should be silently skipped.
+        std::fs::create_dir_all(base.join("junk-dir")).unwrap();
+
+        let articles = list_all_in(&base).unwrap();
+        assert_eq!(articles.len(), 1);
+        assert_eq!(articles[0].title.as_deref(), Some("Good"));
+    }
+
+    #[test]
+    fn list_all_includes_synthesized_voices() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        store_in(&base, "https://example.com/voiced/", Some("Voiced"), &[], None, None,
+            "# V", "Plain V").unwrap();
+        mark_synthesized_in(&base, "https://example.com/voiced/", "f5:sarah", 42.0).unwrap();
+
+        let articles = list_all_in(&base).unwrap();
+        assert_eq!(articles.len(), 1);
+        assert_eq!(articles[0].synthesized_voices, vec!["f5:sarah"]);
+        assert_eq!(articles[0].voice_durations.get("f5:sarah").copied(), Some(42.0));
     }
 }

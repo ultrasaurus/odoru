@@ -247,6 +247,8 @@ struct DocResponse {
     plain_text: String,
     content: String,
     cached: CachedInfo,
+    /// Voice IDs (e.g. "f5:sarah") for which all sentences are synthesized.
+    synthesized_voices: Vec<String>,
     /// Total audio duration in seconds for the requested voice, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_duration_secs: Option<f64>,
@@ -278,6 +280,7 @@ async fn get_doc(
                 plain_text: hit.plain_text,
                 content: hit.content,
                 cached: CachedInfo { content: true, audio },
+                synthesized_voices: hit.synthesized_voices,
                 audio_duration_secs,
             }).into_response();
         }
@@ -326,8 +329,51 @@ async fn get_doc(
         plain_text: article.plain_text,
         content: article.content,
         cached: CachedInfo { content: false, audio },
+        synthesized_voices: vec![],
         audio_duration_secs: None,
     }).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// GET /articles — list all cached articles (metadata only)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct ArticleSummary {
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    authors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    cached_at: String,
+    synthesized_voices: Vec<String>,
+    voice_durations: std::collections::HashMap<String, f64>,
+}
+
+async fn list_articles() -> impl IntoResponse {
+    match tokio::task::spawn_blocking(cache::list_all).await {
+        Ok(Ok(articles)) => {
+            let summaries: Vec<ArticleSummary> = articles.into_iter().map(|a| ArticleSummary {
+                url: a.url,
+                title: a.title,
+                authors: a.authors,
+                date: a.date,
+                description: a.description,
+                cached_at: a.cached_at,
+                synthesized_voices: a.synthesized_voices,
+                voice_durations: a.voice_durations,
+            }).collect();
+            Json(summaries).into_response()
+        }
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -832,6 +878,7 @@ async fn main() -> anyhow::Result<()> {
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/doc", get(get_doc))
+        .route("/articles", get(list_articles))
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/:id", get(get_job).delete(cancel_job))

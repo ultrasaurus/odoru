@@ -70,7 +70,7 @@ See [protocol.md](protocol.md).
 
 A. Documents panel: shows all documents (aka articles) with full metadata where known
 
-   Server-side (do first):
+   Server-side (DONE):
    1. *Jobs*: store article URL + title in job record; auto-restart pending jobs on server startup
       by looking up text from article store (currently requires manual re-submit)
    2. Article store: expose `synthesized_voices` list in `GET /doc` response for UI use;
