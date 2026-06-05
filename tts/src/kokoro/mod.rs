@@ -65,6 +65,8 @@ struct KokoroInference {
     speed: f32,
     vocab: std::collections::HashMap<char, usize>,
     g2p: G2pEngine,
+    /// Cached max token count per voice (derived from voice file size).
+    voice_max_tokens: std::collections::HashMap<String, usize>,
 }
 
 impl KokoroInference {
@@ -93,23 +95,13 @@ impl KokoroInference {
 
         let vocab = build_vocab(&model_dir)?;
 
-        Ok(Self { session, model_dir, speed, vocab, g2p })
+        Ok(Self { session, model_dir, speed, vocab, g2p, voice_max_tokens: std::collections::HashMap::new() })
     }
 
-    fn synthesize_with_voice(&mut self, text: &str, voice: &str, _index: usize) -> Result<(Vec<f32>, u32, f64)> {
+    fn synthesize_with_voice(&mut self, text: &str, voice: &str, index: usize) -> Result<(Vec<f32>, u32, f64)> {
         let rt = tokio::runtime::Runtime::new()?;
-        let phonemes = rt.block_on(async {
-            let mut stream = self.g2p.phonemize(text);
-            let mut result = String::new();
-            while let Some(chunk) = stream.next().await {
-                match chunk {
-                    Ok(c) => result = c.phonemes,
-                    Err(e) => warn!("G2P error: {e}"),
-                }
-            }
-            result
-        });
 
+        let phonemes = self.phonemize(&rt, text);
         if phonemes.is_empty() {
             bail!("No phonemes produced for: {text:?}");
         }
@@ -119,10 +111,83 @@ impl KokoroInference {
             bail!("No token IDs for phonemes: {phonemes:?}");
         }
 
-        let (samples, durations) = self.run_onnx(&token_ids, voice)?;
-        let duration = audio_duration_from_durations(&durations);
+        let max_tokens = self.max_tokens_for_voice(voice)?;
 
-        Ok((samples, 24_000, duration))
+        // Fast path: sentence fits within the voice file limit.
+        if token_ids.len() < max_tokens {
+            let (samples, durations) = self.run_onnx(&token_ids, voice)?;
+            return Ok((samples, 24_000, audio_duration_from_durations(&durations)));
+        }
+
+        // Slow path: sentence is too long — split into clauses, synthesize
+        // each, and concatenate. Transparent to the caller.
+        let groups = split_into_clauses(text, token_ids.len(), max_tokens);
+        warn!("sentence {index} too long ({} tokens, max {max_tokens}) — split into {} groups",
+              token_ids.len(), groups.len());
+
+        const SAMPLE_RATE: u32 = 24_000;
+        const SILENCE_MS: u64 = 50;
+        let silence: Vec<f32> = vec![0.0; (SAMPLE_RATE as u64 * SILENCE_MS / 1000) as usize];
+
+        let mut all_samples: Vec<f32> = Vec::new();
+        let mut total_duration = 0.0f64;
+
+        for (i, group) in groups.iter().enumerate() {
+            let group_phonemes = self.phonemize(&rt, group);
+            let mut group_tokens = tokenize(&group_phonemes, &self.vocab);
+
+            // Safety clamp: if a group is still over the limit (e.g. a single
+            // very long word), truncate rather than error.
+            if group_tokens.len() >= max_tokens {
+                warn!("sentence {index} group {i} still over limit after split ({} tokens) — clamping",
+                      group_tokens.len());
+                group_tokens.truncate(max_tokens - 1);
+            }
+
+            if group_tokens.is_empty() { continue; }
+
+            let (samples, durations) = self.run_onnx(&group_tokens, voice)?;
+            total_duration += audio_duration_from_durations(&durations);
+            all_samples.extend_from_slice(&samples);
+
+            if i + 1 < groups.len() {
+                all_samples.extend_from_slice(&silence);
+                total_duration += SILENCE_MS as f64 / 1000.0;
+            }
+        }
+
+        Ok((all_samples, SAMPLE_RATE, total_duration))
+    }
+
+    /// Phonemize `text` using the G2P engine on the provided runtime.
+    fn phonemize(&mut self, rt: &tokio::runtime::Runtime, text: &str) -> String {
+        rt.block_on(async {
+            let mut stream = self.g2p.phonemize(text);
+            let mut result = String::new();
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(c) => result = c.phonemes,
+                    Err(e) => warn!("G2P error: {e}"),
+                }
+            }
+            result
+        })
+    }
+
+    /// Return the max supported token count for a voice, derived from its
+    /// style file size. Result is cached after the first call per voice.
+    fn max_tokens_for_voice(&mut self, voice: &str) -> Result<usize> {
+        if let Some(&n) = self.voice_max_tokens.get(voice) {
+            return Ok(n);
+        }
+        let path = self.model_dir.join("voices").join(format!("{voice}.bin"));
+        let byte_len = std::fs::metadata(&path)
+            .map_err(|e| anyhow::anyhow!("Voice file metadata {}: {e}", path.display()))?
+            .len() as usize;
+        // Each row is 256 f32 values (4 bytes each).
+        let max_tokens = byte_len / (256 * 4);
+        self.voice_max_tokens.insert(voice.to_string(), max_tokens);
+        Ok(max_tokens)
     }
 
     fn run_onnx(&mut self, token_ids: &[i64], voice: &str) -> Result<(Vec<f32>, Vec<f32>)> {
@@ -162,6 +227,122 @@ impl KokoroInference {
 
         Ok((waveform.to_vec(), durations.to_vec()))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Long-sentence splitting
+// ---------------------------------------------------------------------------
+
+/// Split `text` into groups each estimated to be under `max_tokens`, using
+/// clause boundaries as split points. `total_tokens` is the known token count
+/// for the full sentence (used for proportional estimation).
+fn split_into_clauses(text: &str, total_tokens: usize, max_tokens: usize) -> Vec<String> {
+    let pieces = split_on_clause_boundaries(text);
+    let text_len = text.len().max(1);
+
+    let mut groups: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_est = 0usize;
+
+    for piece in pieces {
+        // Proportional token estimate for this piece.
+        let piece_est = (piece.len() as f64 / text_len as f64 * total_tokens as f64).ceil() as usize;
+
+        // If the piece alone exceeds max_tokens, word-split it first.
+        if piece_est >= max_tokens {
+            // Flush current accumulator.
+            if !current.trim().is_empty() {
+                groups.push(current.trim().to_string());
+                current = String::new();
+                current_est = 0;
+            }
+            groups.extend(word_split(&piece, piece_est, max_tokens));
+            continue;
+        }
+
+        if !current.is_empty() && current_est + piece_est >= max_tokens {
+            groups.push(current.trim().to_string());
+            current = piece.to_string();
+            current_est = piece_est;
+        } else {
+            current.push_str(&piece);
+            current_est += piece_est;
+        }
+    }
+    if !current.trim().is_empty() {
+        groups.push(current.trim().to_string());
+    }
+
+    if groups.is_empty() {
+        groups.push(text.to_string());
+    }
+    groups
+}
+
+/// Split `text` into roughly equal word-count chunks, each estimated under
+/// `max_tokens`. Used as a fallback when a single clause is still too long.
+fn word_split(text: &str, estimated_tokens: usize, max_tokens: usize) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() { return vec![]; }
+    let n_chunks = (estimated_tokens + max_tokens - 1) / max_tokens; // ceil
+    let chunk_size = (words.len() + n_chunks - 1) / n_chunks;
+    words.chunks(chunk_size)
+        .map(|w| w.join(" "))
+        .collect()
+}
+
+/// Split `text` at clause boundaries, keeping each separator attached to the
+/// preceding piece. Returns the pieces in order; joining them reconstructs
+/// the original text.
+fn split_on_clause_boundaries(text: &str) -> Vec<String> {
+    // Separators tried in order. Each is a string we split *after*, so the
+    // separator stays with the left piece.
+    // Multi-char conjunctions split *before* the keyword (e.g. " and ") so
+    // the right piece starts with the conjunction — more natural to speak.
+    let after: &[&str]  = &["; ", "— ", "– ", ": ", ", "];
+    let before: &[&str] = &[" and ", " but ", " or ", " nor ",
+                             " which ", " that ", " while ", " where ", " when "];
+
+    // Collect all split points as byte offsets where the right piece starts.
+    let mut split_at: Vec<usize> = Vec::new();
+
+    for sep in after {
+        let mut pos = 0;
+        while let Some(found) = text[pos..].find(sep) {
+            let abs = pos + found + sep.len();
+            if abs < text.len() { split_at.push(abs); }
+            pos += found + sep.len();
+        }
+    }
+    for sep in before {
+        let mut pos = 0;
+        while let Some(found) = text[pos..].find(sep) {
+            // Split before the leading space of the separator.
+            let abs = pos + found;
+            if abs > 0 && abs < text.len() { split_at.push(abs); }
+            pos += found + sep.len();
+        }
+    }
+
+    split_at.sort_unstable();
+    split_at.dedup();
+
+    if split_at.is_empty() {
+        return vec![text.to_string()];
+    }
+
+    let mut pieces = Vec::new();
+    let mut prev = 0;
+    for &at in &split_at {
+        if at > prev {
+            pieces.push(text[prev..at].to_string());
+        }
+        prev = at;
+    }
+    if prev < text.len() {
+        pieces.push(text[prev..].to_string());
+    }
+    pieces
 }
 
 // ---------------------------------------------------------------------------
@@ -319,5 +500,91 @@ mod tests {
         let seg = durations_to_segment("x", &[1.0, 2.0], 0.5);
         assert_eq!(seg.start, 0.5);
         assert_eq!(seg.end, 0.5);
+    }
+
+    // ── split_on_clause_boundaries ────────────────────────────────────────
+
+    #[test]
+    fn split_boundaries_semicolon() {
+        let pieces = split_on_clause_boundaries("one; two; three");
+        assert_eq!(pieces, vec!["one; ", "two; ", "three"]);
+    }
+
+    #[test]
+    fn split_boundaries_comma() {
+        let pieces = split_on_clause_boundaries("a, b, c");
+        assert_eq!(pieces, vec!["a, ", "b, ", "c"]);
+    }
+
+    #[test]
+    fn split_boundaries_conjunction() {
+        // " and " splits before the conjunction, so right piece starts with "and"
+        let pieces = split_on_clause_boundaries("alpha and beta");
+        assert_eq!(pieces, vec!["alpha", " and beta"]);
+    }
+
+    #[test]
+    fn split_boundaries_no_boundaries_returns_whole() {
+        let pieces = split_on_clause_boundaries("no split here");
+        assert_eq!(pieces, vec!["no split here"]);
+    }
+
+    #[test]
+    fn split_boundaries_preserves_roundtrip() {
+        let text = "first, second; third and fourth";
+        let pieces = split_on_clause_boundaries(text);
+        assert_eq!(pieces.join(""), text);
+    }
+
+    // ── word_split ────────────────────────────────────────────────────────
+
+    #[test]
+    fn word_split_divides_evenly() {
+        // 6 words, estimated 200 tokens, max 100 → 2 chunks of 3 words each
+        let chunks = word_split("a b c d e f", 200, 100);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "a b c");
+        assert_eq!(chunks[1], "d e f");
+    }
+
+    #[test]
+    fn word_split_single_chunk_when_under_limit() {
+        let chunks = word_split("hello world", 50, 100);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "hello world");
+    }
+
+    // ── split_into_clauses ────────────────────────────────────────────────
+
+    #[test]
+    fn split_into_clauses_short_text_unchanged() {
+        // total_tokens < max_tokens → single group
+        let groups = split_into_clauses("A short sentence.", 10, 500);
+        assert_eq!(groups, vec!["A short sentence."]);
+    }
+
+    #[test]
+    fn split_into_clauses_splits_at_comma() {
+        // Craft a sentence where comma pieces are each ~60% of max_tokens,
+        // so they can't be merged without exceeding the limit.
+        // total_tokens=200, max=120. Each half ~100 tokens → must split.
+        let text = "first clause here, second clause here";
+        let groups = split_into_clauses(text, 200, 120);
+        assert_eq!(groups.len(), 2);
+        assert!(groups[0].contains("first"));
+        assert!(groups[1].contains("second"));
+    }
+
+    #[test]
+    fn split_into_clauses_falls_back_to_word_split() {
+        // A single piece with no clause boundaries that is too long.
+        let words: Vec<_> = (0..20).map(|i| format!("word{i}")).collect();
+        let text = words.join(" ");
+        // total=600, max=200 → needs word splitting
+        let groups = split_into_clauses(&text, 600, 200);
+        assert!(groups.len() >= 2, "should produce multiple groups");
+        // Reassembled text should contain all words
+        let rejoined = groups.join(" ");
+        for w in &words { assert!(rejoined.contains(w.as_str())); }
     }
 }

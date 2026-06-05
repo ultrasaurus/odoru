@@ -59,7 +59,7 @@ pub trait TtsBackend: Send + Sync {
 - Location: `~/.odoru/audio/`
 - Files: `<hash>.f32` (raw f32le samples) + `<hash>.json` (metadata)
 - Key: SHA-256(normalized_text + "|" + voice_cache_key)
-- Only used for F5 (Kokoro is fast enough to skip)
+- Only used for F5 — Kokoro does not yet opt in (seeking in long Kokoro articles re-synthesizes)
 - `exists(key)` checks file presence only (no reads) — used by `all_audio_cached`
 - `lookup(key)` reads full samples — used during synthesis
 - Enables resumable synthesis: Ctrl+C and restart, completed sentences load instantly
