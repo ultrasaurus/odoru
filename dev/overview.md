@@ -77,9 +77,11 @@ A. Documents panel: shows all documents (aka articles) with full metadata where 
       add `GET /articles` endpoint returning all cached articles
 
    Frontend (after A1-2):
-   3. Documents panel in New view: show title/URL per job instead of text_preview;
-      wire Open button to navigate to reader view for that article
-   4. pause(cancel)/resume/delete jobs
+   3. Articles list in Reader sidebar comes from live data (DONE)
+   4. Documents may be jobs or direct synthesis, panel in New view: 
+      a) show title/URL per job instead of text_preview (DONE)
+      b) shows all documents (not just jobs)
+   5. pause(cancel)/resume/delete jobs
 
 B. *Results from URL fetch are editable*
    so text can be adjusted if scraping is imperfect
@@ -91,6 +93,7 @@ B. *Results from URL fetch are editable*
    
 
 ### Not yet implemented (discussed)
+- Open button in job list: navigate to reader view for that article...or?
 - Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
 - Error bar: currently only in New view; should be in a shared layout wrapper
 - Mispronounced words: no UI for `tts_overrides.txt` edits

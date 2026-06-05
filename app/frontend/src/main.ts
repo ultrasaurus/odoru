@@ -17,11 +17,24 @@ interface JobInfo {
   id: string
   voice: string
   text_preview: string
+  article_url?: string
+  article_title?: string
   status: string
   total_sentences: number
   completed_sentences: number
   created_at: string
   error?: string
+}
+
+interface ArticleSummary {
+  url: string
+  title?: string
+  authors: string[]
+  date?: string
+  description?: string
+  cached_at: string
+  synthesized_voices: string[]
+  voice_durations: Record<string, number>
 }
 
 // Approximate generation seconds per word for each backend.
@@ -32,18 +45,7 @@ const SECS_PER_WORD: Record<string, number> = {
   f5: 3.0,
 }
 
-const ARTICLE_URL   = 'https://www.dougengelbart.org/content/view/148'
 const ARTICLE_VOICE = 'f5:sarah'
-
-const ARTICLES = [
-  { title: 'Authorship Provisions in Augment', url: ARTICLE_URL, live: true },
-  { title: 'As We May Think' },
-  { title: 'A File Structure for the Complex, the Changing, and the Indeterminate' },
-  { title: 'Augmenting Human Intellect' },
-  { title: 'Intermedia: The Architecture and Construction of an Object-Oriented Hypermedia System and Applications Framework' },
-  { title: "Hypertext '87 Keynote Address" },
-  { title: 'Hypertext: An Introduction and Survey' },
-]
 
 const app = document.getElementById('app')!
 
@@ -157,12 +159,6 @@ function grabControlEls() {
 function showReader() {
   viewCleanup?.()
 
-  const listHtml = ARTICLES.map((a, i) => `
-    <div class="article-item${i === 0 ? ' selected' : ''}${a.live ? '' : ' disabled'}" data-index="${i}">
-      ${a.title}
-    </div>
-  `).join('')
-
   app.innerHTML = `
     <div class="reader-layout">
       <nav class="article-sidebar">
@@ -173,14 +169,16 @@ function showReader() {
             <button class="sidebar-tab active" id="tab-outline">Outline</button>
           </div>
         </div>
-        <div class="article-list" id="article-list" style="display:none">${listHtml}</div>
+        <div class="article-list" id="article-list" style="display:none">
+          <div class="outline-loading">Loading…</div>
+        </div>
         <div class="outline-list" id="outline-list">
           <div class="outline-loading">Loading…</div>
         </div>
       </nav>
       <div class="reader-main">
         <div class="reader-header">
-          <h1 class="article-title">Authorship Provisions in Augment</h1>
+          <h1 class="article-title" id="article-title">Loading…</h1>
           <div class="reader-header-row">
             <div id="job-area" class="job-area"></div>
             <label class="autoscroll-label">
@@ -216,6 +214,7 @@ function showReader() {
   tabArticles.addEventListener('click', () => showTab('articles'))
   tabOutline.addEventListener('click',  () => showTab('outline'))
 
+  const articleTitleEl      = document.getElementById('article-title')!
   const transcriptContainer = document.getElementById('transcript-container')!
   const jobArea             = document.getElementById('job-area')!
   const autoscrollCb        = document.getElementById('autoscroll-cb') as HTMLInputElement
@@ -243,8 +242,9 @@ function showReader() {
     seekStatus.style.display = 'none'
   })
 
+  let currentArticle: ArticleSummary | null = null
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
-    () => 'authorship-provisions-in-augment.wav')
+    () => (currentArticle?.title ?? currentArticle?.url ?? 'article').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav')
 
   // ── Outline ────────────────────────────────────────────────────────────────
   let headings: HeadingEntry[] = []
@@ -326,13 +326,13 @@ function showReader() {
     }, 4000)
   }
 
-  async function startJob(text: string) {
+  async function startJob(text: string, url: string, title?: string) {
     setStatus(jobArea, 'job-status running', 'Queuing…')
     try {
       const res = await fetch('/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: ARTICLE_VOICE, url: ARTICLE_URL }),
+        body: JSON.stringify({ text, voice: ARTICLE_VOICE, url, title }),
       })
       const job: JobInfo = await res.json()
       if (!res.ok) {
@@ -349,40 +349,86 @@ function showReader() {
     }
   }
 
-  // ── Doc fetch + pre-render ─────────────────────────────────────────────────
-  fetch(`/doc?url=${encodeURIComponent(ARTICLE_URL)}&voice=${encodeURIComponent(ARTICLE_VOICE)}`)
+  // ── Load article ───────────────────────────────────────────────────────────
+  function loadArticle(article: ArticleSummary) {
+    currentArticle = article
+    stopPolling()
+    jobArea.innerHTML = ''
+    playBtn.disabled = true
+    downloadBtn.disabled = true
+    progressFill.style.width = '0%'
+    timeCurrent.textContent = '0:00'
+    timeTotal.textContent = '0:00'
+    transcriptContainer.innerHTML = '<div class="loading">Loading…</div>'
+    articleTitleEl.textContent = article.title ?? article.url
+
+    fetch(`/doc?url=${encodeURIComponent(article.url)}&voice=${encodeURIComponent(ARTICLE_VOICE)}`)
+      .then(res => res.json())
+      .then(data => {
+        const audioReady = !!data.cached?.audio
+
+        if (audioReady) {
+          setStatus(jobArea, 'job-status done', '✓ Audio ready')
+        } else {
+          const btn = document.createElement('button')
+          btn.className = 'job-btn'
+          btn.textContent = 'Synthesize in background'
+          btn.addEventListener('click', () => {
+            btn.remove()
+            startJob(data.plain_text, article.url, article.title)
+          })
+          jobArea.appendChild(btn)
+        }
+
+        if (data.audio_duration_secs) {
+          timeTotal.textContent = fmt(data.audio_duration_secs)
+        }
+
+        transcriptContainer.innerHTML = ''
+        const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer)
+        renderOutline(hs)
+        player.synthesize(data.plain_text, ARTICLE_VOICE, pendingSpans)
+
+        // Drive active outline heading from playback position.
+        player.onTimeUpdate(t => updateOutlineActive(t))
+      })
+      .catch(() => {
+        setError(transcriptContainer, 'Failed to load document.')
+        stopPolling()
+      })
+  }
+
+  // ── Fetch article list + load first ───────────────────────────────────────
+  // TODO: filter by publish:true once server supports it
+  fetch('/articles')
     .then(res => res.json())
-    .then(data => {
-      const audioReady = !!data.cached?.audio
-
-      if (audioReady) {
-        setStatus(jobArea, 'job-status done', '✓ Audio ready')
-      } else {
-        const btn = document.createElement('button')
-        btn.className = 'job-btn'
-        btn.textContent = 'Synthesize in background'
-        btn.addEventListener('click', () => {
-          btn.remove()
-          startJob(data.plain_text)
+    .then((articles: ArticleSummary[]) => {
+      articleList.innerHTML = ''
+      if (articles.length === 0) {
+        articleList.innerHTML = '<div class="outline-loading">No documents.</div>'
+        transcriptContainer.innerHTML = '<div class="loading">No documents found.</div>'
+        articleTitleEl.textContent = ''
+        return
+      }
+      const itemEls: HTMLElement[] = []
+      articles.forEach((article, i) => {
+        const el = document.createElement('div')
+        el.className = 'article-item' + (i === 0 ? ' selected' : '')
+        el.textContent = article.title ?? article.url
+        el.addEventListener('click', () => {
+          itemEls.forEach(e => e.classList.remove('selected'))
+          el.classList.add('selected')
+          loadArticle(article)
         })
-        jobArea.appendChild(btn)
-      }
-
-      if (data.audio_duration_secs) {
-        timeTotal.textContent = fmt(data.audio_duration_secs)
-      }
-
-      transcriptContainer.innerHTML = ''
-      const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer)
-      renderOutline(hs)
-      player.synthesize(data.plain_text, ARTICLE_VOICE, pendingSpans)
-
-      // Drive active outline heading from playback position.
-      player.onTimeUpdate(t => updateOutlineActive(t))
+        articleList.appendChild(el)
+        itemEls.push(el)
+      })
+      loadArticle(articles[0])
     })
     .catch(() => {
-      setError(transcriptContainer, 'Failed to load article.')
-      stopPolling()
+      articleList.innerHTML = '<div class="outline-loading">Failed to load documents.</div>'
+      setError(transcriptContainer, 'Failed to load document list.')
+      articleTitleEl.textContent = ''
     })
 }
 
@@ -394,6 +440,8 @@ function showNew() {
   let voices: VoiceInfo[] = []
   let selectedVoice: string | null = null  // stores prefixed id, e.g. "f5:sarah"
   let synthStart = 0
+  let fetchedUrl: string | null = null
+  let fetchedTitle: string | null = null
 
   app.innerHTML = `
     <div class="layout">
@@ -524,7 +572,7 @@ function showNew() {
 
       const titleEl = document.createElement('span')
       titleEl.className = 'queue-title'
-      titleEl.textContent = job.text_preview
+      titleEl.textContent = job.article_title ?? job.article_url ?? job.text_preview
       top.appendChild(titleEl)
 
       const statusEl = document.createElement('span')
@@ -732,6 +780,8 @@ function showNew() {
       }
       textInput.value = data.plain_text
       updateEstimate(data.plain_text)
+      fetchedUrl = url
+      fetchedTitle = data.title ?? null
       const cached = data.cached?.content ? ' (cached)' : ''
       const title = data.title ?? url
       fetchStatus.textContent = `✔ ${title}${cached}`
@@ -796,7 +846,7 @@ function showNew() {
     }, 4000)
   }
 
-  async function startBgJob(text: string, url?: string) {
+  async function startBgJob(text: string, url?: string, title?: string) {
     stopBgPoll()
     synthBtn.disabled = true
     transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>'
@@ -804,7 +854,7 @@ function showNew() {
       const res = await fetch('/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: selectedVoice, url: url || undefined }),
+        body: JSON.stringify({ text, voice: selectedVoice, url: url || undefined, title: title || undefined }),
       })
       const job: JobInfo = await res.json()
       if (!res.ok) {
@@ -841,7 +891,7 @@ function showNew() {
     if (!resolvedText) return
 
     if (bgSynthCb.checked) {
-      await startBgJob(resolvedText, url || undefined)
+      await startBgJob(resolvedText, fetchedUrl || url || undefined, fetchedTitle || undefined)
     } else {
       startSynth(resolvedText)
     }

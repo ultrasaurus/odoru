@@ -238,7 +238,13 @@ export class Player {
     // Private
     // ---------------------------------------------------------------------------
     reset() {
-        this.ws?.close();
+        if (this.ws) {
+            this.ws.onclose = null;
+            this.ws.onerror = null;
+            this.ws.onmessage = null;
+            this.ws.close();
+            this.ws = undefined;
+        }
         this.stopTracking();
         this.queue.reset();
         this.segments = [];

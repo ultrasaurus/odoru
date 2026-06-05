@@ -94,7 +94,7 @@ export class Player {
   private activeIndex = -1
   private rafId = 0
   private container: HTMLElement
-  private ws: WebSocket | null = null
+  private ws: WebSocket | null | undefined = null
   private timeUpdateCbs: Array<(t: number) => void> = []
   private endedCbs: Array<() => void> = []
   private onReadyCb: (() => void) | null = null
@@ -301,7 +301,13 @@ export class Player {
   // ---------------------------------------------------------------------------
 
   private reset(): void {
-    this.ws?.close()
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.onmessage = null
+      this.ws.close()
+      this.ws = undefined
+    }
     this.stopTracking()
     this.queue.reset()
     this.segments = []
