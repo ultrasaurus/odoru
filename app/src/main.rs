@@ -402,6 +402,10 @@ struct JobResponse {
     id: String,
     voice: String,
     text_preview: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    article_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    article_title: Option<String>,
     status: JobStatus,
     total_sentences: usize,
     completed_sentences: usize,
@@ -416,6 +420,8 @@ impl JobResponse {
             id: job.id.clone(),
             voice: job.voice.clone(),
             text_preview: job.text_preview.clone(),
+            article_url: job.article_url.clone(),
+            article_title: job.article_title.clone(),
             status: job.status.clone(),
             total_sentences: job.total_sentences,
             completed_sentences: job.completed_sentences,
@@ -439,6 +445,11 @@ async fn create_job(
         Err(e) => return (StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": e }))).into_response(),
     };
+
+    // Look up article title from the store if a URL was provided.
+    let article_title = body.url.as_deref().and_then(|url| {
+        util::cache::lookup(url).ok().flatten().and_then(|a| a.title)
+    });
 
     // Dedup: return existing non-terminal job for same text + voice.
     // If it's pending with no live task (e.g. after server restart), restart it.
@@ -470,7 +481,9 @@ async fn create_job(
     // Count sentences so the client can show progress.
     let total = tts::splitter_sentence_count(&body.text);
 
-    let (shared, cancel_flag) = match state.jobs.create(&body.text, &body.voice, total).await {
+    let (shared, cancel_flag) = match state.jobs.create(
+        &body.text, &body.voice, total, body.url.clone(), article_title,
+    ).await {
         Ok(pair) => pair,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("Failed to create job: {e}") }))).into_response(),
@@ -518,6 +531,76 @@ async fn cancel_job(
         (StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "job not found or already finished" }))).into_response()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Startup: restart pending jobs sequentially
+// ---------------------------------------------------------------------------
+
+/// On startup, restart any pending jobs that have an article_url by looking up
+/// the text from the article store. Jobs are run one at a time so the server
+/// remains responsive when a client connects.
+fn restart_pending_jobs(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let pending: Vec<_> = {
+            let mut v = Vec::new();
+            for shared in state.jobs.all() {
+                let job = shared.read().await;
+                if job.status == JobStatus::Pending && job.article_url.is_some() {
+                    v.push((shared.clone(), job.voice.clone(), job.article_url.clone().unwrap()));
+                }
+            }
+            v
+        };
+
+        if pending.is_empty() { return; }
+        eprintln!("[jobs] auto-restarting {} pending job(s)", pending.len());
+
+        for (shared, voice_id, article_url) in pending {
+            // Skip if another path (e.g. a client POST /jobs) already started it.
+            if state.jobs.has_cancel_flag(&shared.read().await.id) { continue; }
+
+            let article = match tokio::task::spawn_blocking({
+                let url = article_url.clone();
+                move || util::cache::lookup(&url)
+            }).await {
+                Ok(Ok(Some(a))) => a,
+                Ok(Ok(None)) => {
+                    eprintln!("[jobs] auto-restart: article not in cache for {article_url}");
+                    continue;
+                }
+                Ok(Err(e)) => {
+                    eprintln!("[jobs] auto-restart: lookup error for {article_url}: {e}");
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("[jobs] auto-restart: spawn_blocking error: {e}");
+                    continue;
+                }
+            };
+
+            let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[jobs] auto-restart: {e}");
+                    continue;
+                }
+            };
+
+            let cancel_flag = state.jobs.register_cancel_flag(&shared.read().await.id);
+            {
+                let mut job = shared.write().await;
+                job.status = JobStatus::Pending;
+                job.completed_sentences = 0;
+                let _ = state.jobs.persist(&job);
+            }
+
+            // Run this job to completion before starting the next.
+            let handle = jobs::spawn_job(shared, cancel_flag, article.plain_text,
+                voice_name, voice_id, Some(article_url), engine, state.jobs.clone());
+            let _ = handle.await;
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -738,6 +821,8 @@ async fn main() -> anyhow::Result<()> {
         cache: Arc::new(DashMap::new()),
         jobs: job_store,
     });
+
+    restart_pending_jobs(state.clone());
 
     let frontend_dir = ["app/frontend/dist", "frontend/dist", "../frontend/dist"]
         .iter()

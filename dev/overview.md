@@ -79,6 +79,7 @@ A. Documents panel: shows all documents (aka articles) with full metadata where 
    Frontend (after A1-2):
    3. Documents panel in New view: show title/URL per job instead of text_preview;
       wire Open button to navigate to reader view for that article
+   4. pause(cancel)/resume/delete jobs
 
 B. *Results from URL fetch are editable*
    so text can be adjusted if scraping is imperfect

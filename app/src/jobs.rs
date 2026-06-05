@@ -61,6 +61,12 @@ pub struct Job {
     /// Optional on disk so old entries without this field still load.
     #[serde(default)]
     pub text_preview: String,
+    /// Source article URL, used to look up text for auto-restart on startup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub article_url: Option<String>,
+    /// Article title from the article store at job creation time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub article_title: Option<String>,
     pub created_at: DateTime<Utc>,
     pub status: JobStatus,
     pub total_sentences: usize,
@@ -101,7 +107,7 @@ impl JobStore {
                         // Keep completed_sentences — the disk cache has those
                         // sentences and the task will hit them instantly on restart.
                     }
-                    eprintln!("[jobs] loaded job {} ({:?})", &job.id[..8], job.status);
+                    eprintln!("[jobs] loaded job {} ({:?})", &job.id[job.id.len()-8..], job.status);
                     jobs.insert(job.id.clone(), Arc::new(RwLock::new(job)));
                 }
                 None => eprintln!("[jobs] skipping unreadable {}", path.display()),
@@ -132,6 +138,8 @@ impl JobStore {
         text: &str,
         voice: &str,
         total_sentences: usize,
+        article_url: Option<String>,
+        article_title: Option<String>,
     ) -> anyhow::Result<(SharedJob, Arc<AtomicBool>)> {
         let text_hash = text_hash(text);
         let id = format!("{text_hash}-{}", uuid::Uuid::new_v4());
@@ -140,6 +148,8 @@ impl JobStore {
             id: id.clone(),
             voice: voice.to_string(),
             text_preview,
+            article_url,
+            article_title,
             created_at: Utc::now(),
             status: JobStatus::Pending,
             total_sentences,
@@ -212,6 +222,8 @@ impl JobStore {
 
 /// Spawn a tokio task that drives synthesis for the job. Checks the cancel
 /// flag between sentences and stops gracefully if it is set.
+/// Spawn a tokio task that drives synthesis for the job. Returns the JoinHandle
+/// so callers that need to sequence jobs (e.g. auto-restart on startup) can await it.
 pub fn spawn_job(
     shared: SharedJob,
     cancel_flag: Arc<AtomicBool>,
@@ -221,7 +233,7 @@ pub fn spawn_job(
     article_url: Option<String>,
     engine: Arc<TtsEngine>,
     store: Arc<JobStore>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         {
             let mut job = shared.write().await;
@@ -233,7 +245,7 @@ pub fn spawn_job(
         }
 
         let job_id = shared.read().await.id.clone();
-        eprintln!("[jobs] starting job {}", &job_id[..8]);
+        eprintln!("[jobs] starting job {}", &job_id[job_id.len()-8..]);
 
         let mut stream = engine.synthesize(&text, &voice_name);
         let mut completed = 0usize;
@@ -242,7 +254,7 @@ pub fn spawn_job(
         while let Some(result) = stream.next().await {
             // Check cancel flag between sentences.
             if cancel_flag.load(Ordering::Relaxed) {
-                eprintln!("[jobs] cancelled job {}", &job_id[..8]);
+                eprintln!("[jobs] cancelled job {}", &job_id[job_id.len()-8..]);
                 let mut job = shared.write().await;
                 job.status = JobStatus::Cancelled;
                 let _ = store.persist(&job);
@@ -259,7 +271,7 @@ pub fn spawn_job(
                     }
                 }
                 Err(e) => {
-                    eprintln!("[jobs] synthesis error in job {}: {e}", &job_id[..8]);
+                    eprintln!("[jobs] synthesis error in job {}: {e}", &job_id[job_id.len()-8..]);
                     let mut job = shared.write().await;
                     job.status = JobStatus::Error;
                     job.error = Some(e.to_string());
@@ -279,9 +291,9 @@ pub fn spawn_job(
 
         let mut job = shared.write().await;
         job.status = JobStatus::Done;
-        eprintln!("[jobs] done job {} ({completed} sentences)", &job_id[..8]);
+        eprintln!("[jobs] done job {} ({completed} sentences)", &job_id[job_id.len()-8..]);
         let _ = store.persist(&job);
-    });
+    })
 }
 
 // ---------------------------------------------------------------------------

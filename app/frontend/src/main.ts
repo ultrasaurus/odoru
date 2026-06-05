@@ -796,7 +796,7 @@ function showNew() {
     }, 4000)
   }
 
-  async function startBgJob(text: string) {
+  async function startBgJob(text: string, url?: string) {
     stopBgPoll()
     synthBtn.disabled = true
     transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>'
@@ -804,7 +804,7 @@ function showNew() {
       const res = await fetch('/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: selectedVoice }),
+        body: JSON.stringify({ text, voice: selectedVoice, url: url || undefined }),
       })
       const job: JobInfo = await res.json()
       if (!res.ok) {
@@ -841,7 +841,7 @@ function showNew() {
     if (!resolvedText) return
 
     if (bgSynthCb.checked) {
-      await startBgJob(resolvedText)
+      await startBgJob(resolvedText, url || undefined)
     } else {
       startSynth(resolvedText)
     }
