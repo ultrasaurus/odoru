@@ -9,6 +9,7 @@
 //! Cache key: SHA-256(normalized_text + "|" + voice_cache_key)
 //! This means changing voice params (speed, cfg_strength) busts the cache.
 
+use tracing::error;
 use std::path::PathBuf;
 use std::io::{Read, Write};
 
@@ -86,7 +87,7 @@ pub fn store(key: &str, text: &str, samples: &[f32], sample_rate: u32, duration:
 
 fn store_in(dir: &PathBuf, key: &str, text: &str, samples: &[f32], sample_rate: u32, duration: f64) {
     if let Err(e) = std::fs::create_dir_all(dir) {
-        eprintln!("audio cache: failed to create dir: {e}");
+        error!("audio cache: failed to create dir: {e}");
         return;
     }
 
@@ -95,7 +96,7 @@ fn store_in(dir: &PathBuf, key: &str, text: &str, samples: &[f32], sample_rate: 
         .flat_map(|s| s.to_le_bytes())
         .collect();
     if let Err(e) = std::fs::File::create(&f32_path).and_then(|mut f| f.write_all(&bytes)) {
-        eprintln!("audio cache: failed to write samples: {e}");
+        error!("audio cache: failed to write samples: {e}");
         return;
     }
 
@@ -103,7 +104,7 @@ fn store_in(dir: &PathBuf, key: &str, text: &str, samples: &[f32], sample_rate: 
     let meta = Meta { text: text.to_string(), sample_rate, duration };
     if let Ok(json) = serde_json::to_string(&meta) {
         if let Err(e) = std::fs::write(&json_path, json) {
-            eprintln!("audio cache: failed to write metadata: {e}");
+            error!("audio cache: failed to write metadata: {e}");
         }
     }
 }

@@ -1,5 +1,6 @@
 //! TTS engine — public API and shared synthesis loop.
 
+use tracing::{debug, warn};
 use std::sync::Arc;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -157,7 +158,7 @@ async fn run_synthesis_loop(
         if let Some(ref key) = cache_key {
             // Fast path: check before acquiring the lock.
             if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
-                eprintln!("[audio cache] hit sentence {index} (pre-lock), skipping synthesis");
+                debug!("[audio cache] hit sentence {index} (pre-lock), skipping synthesis");
                 let segment = Segment {
                     start: time_offset,
                     end: time_offset + duration,
@@ -181,7 +182,7 @@ async fn run_synthesis_loop(
             let _guard = lock.lock().await;
 
             if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
-                eprintln!("[audio cache] hit sentence {index} (post-lock), skipping synthesis");
+                debug!("[audio cache] hit sentence {index} (post-lock), skipping synthesis");
                 let segment = Segment {
                     start: time_offset,
                     end: time_offset + duration,
@@ -231,7 +232,7 @@ async fn run_synthesis_loop(
                 if tx.send(Ok(seg)).await.is_err() { return; }
             }
             Err(e) => {
-                eprintln!("Warning: synthesis failed on sentence {index}: {e}");
+                warn!("Synthesis failed on sentence {index}: {e}");
                 if tx.send(Err(e)).await.is_err() { return; }
             }
         }

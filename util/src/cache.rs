@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use tracing::warn;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
@@ -183,11 +184,11 @@ fn list_all_in(base: &PathBuf) -> Result<Vec<CachedArticle>> {
         if !md_path.exists() { continue; }
         let src = match std::fs::read_to_string(&md_path) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(e) => { warn!("Skipping unreadable article {}: {e}", md_path.display()); continue; }
         };
         let (fm, _body) = match frontmatter::parse::<ArticleFrontmatter>(&src) {
             Ok(p) => p,
-            Err(_) => continue,
+            Err(e) => { warn!("Skipping unparseable article {}: {e}", md_path.display()); continue; }
         };
         articles.push(CachedArticle {
             url: fm.url,

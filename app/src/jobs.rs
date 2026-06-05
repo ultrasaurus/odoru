@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
+use tracing::{error, info, warn};
 use tts::TtsEngine;
 use util;
 
@@ -107,10 +108,10 @@ impl JobStore {
                         // Keep completed_sentences — the disk cache has those
                         // sentences and the task will hit them instantly on restart.
                     }
-                    eprintln!("[jobs] loaded job {} ({:?})", &job.id[job.id.len()-8..], job.status);
+                    info!("[jobs] loaded job {} ({:?})", &job.id[job.id.len()-8..], job.status);
                     jobs.insert(job.id.clone(), Arc::new(RwLock::new(job)));
                 }
-                None => eprintln!("[jobs] skipping unreadable {}", path.display()),
+                None => warn!("[jobs] skipping unreadable {}", path.display()),
             }
         }
 
@@ -240,12 +241,12 @@ pub fn spawn_job(
             if job.status == JobStatus::Cancelled { return; }
             job.status = JobStatus::InProgress;
             if let Err(e) = store.persist(&job) {
-                eprintln!("[jobs] persist error: {e}");
+                error!("[jobs] persist error: {e}");
             }
         }
 
         let job_id = shared.read().await.id.clone();
-        eprintln!("[jobs] starting job {}", &job_id[job_id.len()-8..]);
+        info!("[jobs] starting job {}", &job_id[job_id.len()-8..]);
 
         let mut stream = engine.synthesize(&text, &voice_name);
         let mut completed = 0usize;
@@ -254,7 +255,7 @@ pub fn spawn_job(
         while let Some(result) = stream.next().await {
             // Check cancel flag between sentences.
             if cancel_flag.load(Ordering::Relaxed) {
-                eprintln!("[jobs] cancelled job {}", &job_id[job_id.len()-8..]);
+                info!("[jobs] cancelled job {}", &job_id[job_id.len()-8..]);
                 let mut job = shared.write().await;
                 job.status = JobStatus::Cancelled;
                 let _ = store.persist(&job);
@@ -267,11 +268,11 @@ pub fn spawn_job(
                     let mut job = shared.write().await;
                     job.completed_sentences = completed;
                     if let Err(e) = store.persist(&job) {
-                        eprintln!("[jobs] persist error: {e}");
+                        error!("[jobs] persist error: {e}");
                     }
                 }
                 Err(e) => {
-                    eprintln!("[jobs] synthesis error in job {}: {e}", &job_id[job_id.len()-8..]);
+                    error!("[jobs] synthesis error in job {}: {e}", &job_id[job_id.len()-8..]);
                     let mut job = shared.write().await;
                     job.status = JobStatus::Error;
                     job.error = Some(e.to_string());
@@ -285,13 +286,13 @@ pub fn spawn_job(
             if let Err(e) = tokio::task::spawn_blocking(move || {
                 util::cache::mark_synthesized(&url, &voice_id, last_end)
             }).await {
-                eprintln!("[jobs] mark_synthesized error: {e}");
+                error!("[jobs] mark_synthesized error: {e}");
             }
         }
 
         let mut job = shared.write().await;
         job.status = JobStatus::Done;
-        eprintln!("[jobs] done job {} ({completed} sentences)", &job_id[job_id.len()-8..]);
+        info!("[jobs] done job {} ({completed} sentences)", &job_id[job_id.len()-8..]);
         let _ = store.persist(&job);
     })
 }

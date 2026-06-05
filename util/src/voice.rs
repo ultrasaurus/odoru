@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use tracing::warn;
 
 use crate::frontmatter;
 
@@ -108,7 +109,7 @@ impl VoiceDef {
             if !path.is_dir() { continue; }
             match Self::load(&path) {
                 Ok(v) => voices.push(v),
-                Err(e) => eprintln!("Skipping voice {}: {e}", path.display()),
+                Err(e) => warn!("Skipping voice {}: {e}", path.display()),
             }
         }
 

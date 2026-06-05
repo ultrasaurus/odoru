@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, services::ServeDir};
+use tracing::{debug, error, info, warn};
 use util::{cache, voice as voice_util};
 
 use jobs::{JobStore, JobStatus};
@@ -285,7 +286,7 @@ async fn get_doc(
             }).into_response();
         }
         Ok(None) => {}
-        Err(e) => eprintln!("Cache lookup error: {e}"),
+        Err(e) => error!("Cache lookup error: {e}"),
     }
 
     let url = q.url.clone();
@@ -315,7 +316,7 @@ async fn get_doc(
         &article.content,
         &article.plain_text,
     ) {
-        eprintln!("Cache store error: {e}");
+        error!("Cache store error: {e}");
     }
 
     // A freshly fetched article can't have any synthesized voices yet.
@@ -421,7 +422,7 @@ async fn check_audio(
     let url = url.to_string();
     let vid = voice_id.to_string();
     if let Err(e) = tokio::task::spawn_blocking(move || cache::mark_synthesized(&url, &vid, 0.0)).await {
-        eprintln!("mark_synthesized error: {e}");
+        error!("mark_synthesized error: {e}");
     }
 
     engine.voice_cache_key(&voice_name)
@@ -600,7 +601,7 @@ fn restart_pending_jobs(state: Arc<AppState>) {
         };
 
         if pending.is_empty() { return; }
-        eprintln!("[jobs] auto-restarting {} pending job(s)", pending.len());
+        info!("[jobs] auto-restarting {} pending job(s)", pending.len());
 
         for (shared, voice_id, article_url) in pending {
             // Skip if another path (e.g. a client POST /jobs) already started it.
@@ -612,15 +613,15 @@ fn restart_pending_jobs(state: Arc<AppState>) {
             }).await {
                 Ok(Ok(Some(a))) => a,
                 Ok(Ok(None)) => {
-                    eprintln!("[jobs] auto-restart: article not in cache for {article_url}");
+                    warn!("[jobs] auto-restart: article not in cache for {article_url}");
                     continue;
                 }
                 Ok(Err(e)) => {
-                    eprintln!("[jobs] auto-restart: lookup error for {article_url}: {e}");
+                    error!("[jobs] auto-restart: lookup error for {article_url}: {e}");
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("[jobs] auto-restart: spawn_blocking error: {e}");
+                    error!("[jobs] auto-restart: spawn_blocking error: {e}");
                     continue;
                 }
             };
@@ -628,7 +629,7 @@ fn restart_pending_jobs(state: Arc<AppState>) {
             let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
                 Ok(p) => p,
                 Err(e) => {
-                    eprintln!("[jobs] auto-restart: {e}");
+                    error!("[jobs] auto-restart: engine error: {e}");
                     continue;
                 }
             };
@@ -696,7 +697,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
     // ── Cache hit ─────────────────────────────────────────────────────────
     if let Some(segments) = state.cache.get(&key) {
-        eprintln!("Cache hit for key {}", &key[..8]);
+        debug!("Cache hit for key {}", &key[..8]);
         for seg in segments.iter() {
             if !send_segment(&mut sender, seg, true).await { return; }
         }
@@ -706,7 +707,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     }
 
     // ── Cache miss: synthesize, cache, stream ─────────────────────────────
-    eprintln!("Cache miss — synthesizing with voice '{voice_id}'…");
+    info!("Cache miss — synthesizing with voice '{voice_id}'…");
     let mut stream = engine.synthesize(&req.text, &voice_name);
     let mut rendered: Vec<CachedSegment> = Vec::new();
 
@@ -724,7 +725,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    eprintln!("Caching {} segments for key {}", rendered.len(), &key[..8]);
+    debug!("Caching {} segments for key {}", rendered.len(), &key[..8]);
     state.cache.insert(key, rendered);
 
     let done = serde_json::to_string(&DoneMsg { done: true }).unwrap();
@@ -740,7 +741,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 fn kokoro_voice_names(model_dir: &std::path::Path) -> Vec<String> {
     let voices_dir = model_dir.join("voices");
     let Ok(entries) = std::fs::read_dir(&voices_dir) else {
-        eprintln!("Warning: could not read {}", voices_dir.display());
+        warn!("Could not read voices dir: {}", voices_dir.display());
         return vec!["am_puck".into()];
     };
 
@@ -786,8 +787,8 @@ fn build_f5() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
         cfg_strength: d.cfg_strength,
     }).collect();
 
-    eprintln!("F5 backend: {} voice(s), {} worker(s)", tts_voices.len(), workers);
-    for v in &voice_infos { eprintln!("  - {}", v.id); }
+    info!("F5 backend: {} voice(s), {} worker(s)", tts_voices.len(), workers);
+    for v in &voice_infos { info!("  - {}", v.id); }
 
     let engine = TtsEngine::builder()
         .backend(Backend::F5Tts { voices: tts_voices, workers })
@@ -813,8 +814,8 @@ fn build_kokoro() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
 
     let default_voice = names.first().cloned().unwrap_or_else(|| "am_puck".into());
 
-    eprintln!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
-    for v in &voice_infos { eprintln!("  - {}", v.id); }
+    info!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
+    for v in &voice_infos { info!("  - {}", v.id); }
 
     let engine = TtsEngine::builder()
         .backend(Backend::Kokoro { model_dir, voice: default_voice, all_voices: names, speed: 1.0 })
@@ -828,6 +829,13 @@ fn build_kokoro() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        )
+        .init();
+
     let backend_env = std::env::var("ODORU_BACKEND").unwrap_or_else(|_| "kokoro".into());
     let want_f5     = matches!(backend_env.as_str(), "f5"     | "both");
     let want_kokoro = matches!(backend_env.as_str(), "kokoro" | "both");
@@ -842,23 +850,23 @@ async fn main() -> anyhow::Result<()> {
 
     // F5 first so its voices appear first in the list.
     if want_f5 {
-        eprintln!("Initializing F5 engine…");
+        info!("Initializing F5 engine…");
         let (engine, voices) = build_f5()?;
         all_voices.extend(voices);
         f5_engine = Some(Arc::new(engine));
-        eprintln!("F5 ready.");
+        info!("F5 ready.");
     }
 
     if want_kokoro {
-        eprintln!("Initializing Kokoro engine…");
+        info!("Initializing Kokoro engine…");
         let (engine, voices) = build_kokoro()?;
         all_voices.extend(voices);
         kokoro_engine = Some(Arc::new(engine));
-        eprintln!("Kokoro ready.");
+        info!("Kokoro ready.");
     }
 
     let job_store = Arc::new(JobStore::load()?);
-    eprintln!("Jobs store loaded ({} job(s)).", job_store.all().len());
+    info!("Jobs store loaded ({} job(s)).", job_store.all().len());
 
     let state = Arc::new(AppState {
         kokoro: kokoro_engine,
@@ -886,13 +894,13 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     if let Some(dir) = frontend_dir {
-        eprintln!("Serving frontend from {}", dir.display());
+        info!("Serving frontend from {}", dir.display());
         app = app.nest_service("/", ServeDir::new(dir));
     } else {
-        eprintln!("Warning: frontend/dist not found — run `cd app/frontend && npm run build`");
+        warn!("frontend/dist not found — run `cd app/frontend && npm run build`");
     }
 
-    eprintln!("Listening on http://localhost:3000");
+    info!("Listening on http://localhost:3000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())

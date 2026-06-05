@@ -8,6 +8,7 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use futures::StreamExt;
 use ort::{inputs, session::Session, value::Tensor};
 
+use tracing::{info, warn};
 use crate::chunk::{AudioSegment, Segment};
 use crate::engine::TtsBackend;
 use crate::error::TtsError;
@@ -73,7 +74,7 @@ impl KokoroInference {
             bail!("model.onnx not found in {}.\nRun setup.sh to download it.", model_dir.display());
         }
 
-        eprintln!("Loading Kokoro ONNX model…");
+        info!("Loading Kokoro ONNX model…");
         ort::init()
             .with_execution_providers([
                 ort::execution_providers::CPUExecutionProvider::default().build(),
@@ -88,7 +89,7 @@ impl KokoroInference {
             .map_err(|e| anyhow::anyhow!("Execution providers: {e}"))?
             .commit_from_file(&model_path)
             .map_err(|e| anyhow::anyhow!("Load model: {e}"))?;
-        eprintln!("Kokoro model ready.");
+        info!("Kokoro model ready.");
 
         let vocab = build_vocab(&model_dir)?;
 
@@ -103,7 +104,7 @@ impl KokoroInference {
             while let Some(chunk) = stream.next().await {
                 match chunk {
                     Ok(c) => result = c.phonemes,
-                    Err(e) => eprintln!("Warning: G2P error: {e}"),
+                    Err(e) => warn!("G2P error: {e}"),
                 }
             }
             result
@@ -289,7 +290,7 @@ mod tests {
     fn build_vocab_from_real_file() {
         let model_dir = match std::env::var("KOKORO_MODEL_DIR") {
             Ok(d) => PathBuf::from(d),
-            Err(_) => { eprintln!("Skipping: $KOKORO_MODEL_DIR not set"); return; }
+            Err(_) => { warn!("Skipping Kokoro: $KOKORO_MODEL_DIR not set"); return; }
         };
         let vocab = build_vocab(&model_dir).expect("build_vocab failed");
         assert_eq!(vocab.get(&'\u{00f0}'), Some(&81));

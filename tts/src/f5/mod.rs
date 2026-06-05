@@ -25,6 +25,7 @@ use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use tracing::{info, warn};
 use crate::backend::Voice;
 use crate::engine::TtsBackend;
 use crate::error::TtsError;
@@ -61,7 +62,7 @@ unsafe impl Sync for F5Backend {}
 impl F5Backend {
     pub fn init(worker_count: usize) -> Result<Self, anyhow::Error> {
         let worker_count = worker_count.max(1);
-        eprintln!("Loading F5-TTS ({worker_count} worker thread(s))…");
+        info!("Loading F5-TTS ({worker_count} worker thread(s))…");
 
         let mut senders = Vec::with_capacity(worker_count);
 
@@ -101,7 +102,7 @@ impl F5Backend {
                                 });
                                 let _ = item.reply.send(result);
                             }
-                            eprintln!("f5-worker-{i}: channel closed, exiting.");
+                            warn!("f5-worker-{i}: channel closed, exiting.");
                         }
                     }
                 })
@@ -109,7 +110,7 @@ impl F5Backend {
 
             // Wait for the worker to confirm the module loaded successfully.
             match ready_rx.recv() {
-                Ok(Ok(())) => eprintln!("f5-worker-{i}: ready."),
+                Ok(Ok(())) => info!("f5-worker-{i}: ready."),
                 Ok(Err(e)) => anyhow::bail!("Worker {i}: module load failed: {e}"),
                 Err(_) => anyhow::bail!("Worker {i}: thread died before signalling ready"),
             }
@@ -117,7 +118,7 @@ impl F5Backend {
             senders.push(tx);
         }
 
-        eprintln!("F5-TTS ready ({worker_count} worker(s)).");
+        info!("F5-TTS ready ({worker_count} worker(s)).");
         Ok(Self { senders, next_worker: AtomicUsize::new(0) })
     }
 
