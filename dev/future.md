@@ -27,6 +27,8 @@ export/
 
 Export reads from the existing article store + audio disk cache — no re-synthesis needed if already cached.
 
+Only articles with `publish: true` and a `published_voice` set are included. The export uses `published_voice` to select which audio files to copy. Both fields live in `article.md` frontmatter.
+
 ### Audio playback: sliding window prefetch + AbortController on seek
 
 Per-sentence audio files make seeking clean: seeking = jump to sentence N, play that file.

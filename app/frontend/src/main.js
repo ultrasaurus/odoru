@@ -292,14 +292,40 @@ function showReader() {
                 setStatus(jobArea, 'job-status done', '✓ Audio ready');
             }
             else {
-                const btn = document.createElement('button');
-                btn.className = 'job-btn';
-                btn.textContent = 'Synthesize in background';
-                btn.addEventListener('click', () => {
-                    btn.remove();
-                    startJob(data.plain_text, article.url, article.title);
+                // Check for an existing active job before showing the button.
+                fetch('/jobs')
+                    .then(res => res.ok ? res.json() : [])
+                    .then((jobs) => {
+                    const active = jobs.find(j => j.article_url === article.url &&
+                        (j.status === 'pending' || j.status === 'in_progress'));
+                    if (active) {
+                        const pct = active.total_sentences > 0
+                            ? Math.round((active.completed_sentences / active.total_sentences) * 100) : 0;
+                        setStatus(jobArea, 'job-status running', `Synthesizing… ${active.completed_sentences}/${active.total_sentences} (${pct}%)`);
+                        pollJob(active.id, active.total_sentences);
+                    }
+                    else {
+                        const btn = document.createElement('button');
+                        btn.className = 'job-btn';
+                        btn.textContent = 'Synthesize in background';
+                        btn.addEventListener('click', () => {
+                            btn.remove();
+                            startJob(data.plain_text, article.url, article.title);
+                        });
+                        jobArea.appendChild(btn);
+                    }
+                })
+                    .catch(() => {
+                    // Fall back to showing the button if jobs fetch fails.
+                    const btn = document.createElement('button');
+                    btn.className = 'job-btn';
+                    btn.textContent = 'Synthesize in background';
+                    btn.addEventListener('click', () => {
+                        btn.remove();
+                        startJob(data.plain_text, article.url, article.title);
+                    });
+                    jobArea.appendChild(btn);
                 });
-                jobArea.appendChild(btn);
             }
             if (data.audio_duration_secs) {
                 timeTotal.textContent = fmt(data.audio_duration_secs);
@@ -318,9 +344,11 @@ function showReader() {
     }
     // ── Fetch article list + load first ───────────────────────────────────────
     // TODO: filter by publish:true once server supports it
+    // For now: only show articles fully synthesized with ARTICLE_VOICE
     fetch('/articles')
         .then(res => res.json())
-        .then((articles) => {
+        .then((all) => {
+        const articles = all.filter(a => a.synthesized_voices.includes(ARTICLE_VOICE));
         articleList.innerHTML = '';
         if (articles.length === 0) {
             articleList.innerHTML = '<div class="outline-loading">No documents.</div>';
@@ -453,86 +481,137 @@ function showNew() {
             cancelled: '— Cancelled',
         }[status] ?? status;
     }
-    function renderQueue(jobs) {
+    function renderQueue(articles, jobs) {
         queueList.innerHTML = '';
-        if (jobs.length === 0) {
+        if (articles.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'queue-empty';
             empty.textContent = 'No documents yet.';
             queueList.appendChild(empty);
             return;
         }
-        // Sort: running/pending first, then ready, then cancelled/error; newest first within group.
-        jobs.sort((a, b) => {
+        // Build url → best job map for ARTICLE_VOICE only (reader is hardcoded to that voice)
+        const jobMap = new Map();
+        for (const job of jobs) {
+            if (!job.article_url || job.voice !== ARTICLE_VOICE)
+                continue;
+            const existing = jobMap.get(job.article_url);
+            if (!existing) {
+                jobMap.set(job.article_url, job);
+                continue;
+            }
             const rank = (s) => s === 'in_progress' ? 0 : s === 'pending' ? 1 : s === 'done' ? 2 : 3;
-            const dr = rank(a.status) - rank(b.status);
+            const better = rank(job.status) < rank(existing.status) ||
+                (rank(job.status) === rank(existing.status) && job.created_at > existing.created_at);
+            if (better)
+                jobMap.set(job.article_url, job);
+        }
+        // Assign sort rank to each article
+        const sortRank = (a) => {
+            const job = jobMap.get(a.url);
+            if (job?.status === 'in_progress')
+                return 0;
+            if (job?.status === 'pending')
+                return 1;
+            if (job?.status === 'done')
+                return 2;
+            if (a.synthesized_voices.includes(ARTICLE_VOICE))
+                return 3;
+            return 4;
+        };
+        const sorted = [...articles].sort((a, b) => {
+            const dr = sortRank(a) - sortRank(b);
             if (dr !== 0)
                 return dr;
-            return b.created_at.localeCompare(a.created_at);
+            return b.cached_at.localeCompare(a.cached_at);
         });
-        for (const job of jobs) {
-            const active = job.status === 'pending' || job.status === 'in_progress';
-            const ready = job.status === 'done';
-            const pct = job.total_sentences > 0
+        for (const article of sorted) {
+            const job = jobMap.get(article.url);
+            const active = job?.status === 'pending' || job?.status === 'in_progress';
+            const pct = job && job.total_sentences > 0
                 ? Math.round((job.completed_sentences / job.total_sentences) * 100) : 0;
-            const voiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice;
+            // Determine status label + voice name
+            let statusText = '';
+            let statusClass = '';
+            let voiceName = '';
+            if (job) {
+                statusText = statusLabel(job.status);
+                statusClass = job.status;
+                voiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice;
+            }
+            else if (article.synthesized_voices.includes(ARTICLE_VOICE)) {
+                statusText = '✓ Ready';
+                statusClass = 'done';
+                voiceName = voices.find(v => v.id === ARTICLE_VOICE)?.name ?? ARTICLE_VOICE;
+            }
             const row = document.createElement('div');
             row.className = 'queue-row';
-            // Top line: title/preview + status badge + Open button
+            // Top line: title + status badge
             const top = document.createElement('div');
             top.className = 'queue-row-top';
             const titleEl = document.createElement('span');
             titleEl.className = 'queue-title';
-            titleEl.textContent = job.article_title ?? job.article_url ?? job.text_preview;
+            titleEl.textContent = article.title ?? article.url;
             top.appendChild(titleEl);
-            const statusEl = document.createElement('span');
-            statusEl.className = `queue-status ${job.status}`;
-            statusEl.textContent = statusLabel(job.status);
-            top.appendChild(statusEl);
-            // Bottom line: voice, progress/sentence count, cancel
-            const meta = document.createElement('div');
-            meta.className = 'queue-row-meta';
-            const voiceEl = document.createElement('span');
-            voiceEl.className = 'queue-voice';
-            voiceEl.textContent = voiceName;
-            meta.appendChild(voiceEl);
-            if (active) {
-                const bar = document.createElement('div');
-                bar.className = 'queue-progress-bar';
-                const fill = document.createElement('div');
-                fill.className = 'queue-progress-fill';
-                fill.style.width = `${pct}%`;
-                bar.appendChild(fill);
-                meta.appendChild(bar);
-                const pctEl = document.createElement('span');
-                pctEl.className = 'queue-progress';
-                pctEl.textContent = `${pct}%`;
-                meta.appendChild(pctEl);
-                const cancelBtn = document.createElement('button');
-                cancelBtn.className = 'queue-cancel-btn';
-                cancelBtn.textContent = '✕';
-                cancelBtn.addEventListener('click', async () => {
-                    await fetch(`/jobs/${job.id}`, { method: 'DELETE' });
-                    pollQueue();
-                });
-                meta.appendChild(cancelBtn);
+            if (statusText) {
+                const statusEl = document.createElement('span');
+                statusEl.className = `queue-status ${statusClass}`;
+                statusEl.textContent = statusText;
+                top.appendChild(statusEl);
             }
-            else if (ready) {
-                const countEl = document.createElement('span');
-                countEl.className = 'queue-progress';
-                countEl.textContent = `${job.total_sentences} sentences`;
-                meta.appendChild(countEl);
+            row.appendChild(top);
+            // Bottom line: voice + progress (only if there's something to show)
+            if (voiceName || active) {
+                const meta = document.createElement('div');
+                meta.className = 'queue-row-meta';
+                if (voiceName) {
+                    const voiceEl = document.createElement('span');
+                    voiceEl.className = 'queue-voice';
+                    voiceEl.textContent = voiceName;
+                    meta.appendChild(voiceEl);
+                }
+                if (active && job) {
+                    const bar = document.createElement('div');
+                    bar.className = 'queue-progress-bar';
+                    const fill = document.createElement('div');
+                    fill.className = 'queue-progress-fill';
+                    fill.style.width = `${pct}%`;
+                    bar.appendChild(fill);
+                    meta.appendChild(bar);
+                    const pctEl = document.createElement('span');
+                    pctEl.className = 'queue-progress';
+                    pctEl.textContent = `${pct}%`;
+                    meta.appendChild(pctEl);
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.className = 'queue-cancel-btn';
+                    cancelBtn.textContent = '✕';
+                    cancelBtn.addEventListener('click', async () => {
+                        await fetch(`/jobs/${job.id}`, { method: 'DELETE' });
+                        pollQueue();
+                    });
+                    meta.appendChild(cancelBtn);
+                }
+                else if (job?.status === 'done') {
+                    const countEl = document.createElement('span');
+                    countEl.className = 'queue-progress';
+                    countEl.textContent = `${job.total_sentences} sentences`;
+                    meta.appendChild(countEl);
+                }
+                row.appendChild(meta);
             }
-            row.append(top, meta);
             queueList.appendChild(row);
         }
     }
     async function pollQueue() {
         stopQueuePoll();
         try {
-            const res = await fetch('/jobs');
-            if (res.ok)
-                renderQueue(await res.json());
+            const [articlesRes, jobsRes] = await Promise.all([
+                fetch('/articles'),
+                fetch('/jobs'),
+            ]);
+            if (articlesRes.ok && jobsRes.ok) {
+                renderQueue(await articlesRes.json(), await jobsRes.json());
+            }
         }
         catch { /* silent */ }
         queuePollTimer = setTimeout(pollQueue, 10_000);

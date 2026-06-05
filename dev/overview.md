@@ -38,7 +38,7 @@ See [frontend.md](frontend.md).
 ## Article store (`util/src/cache.rs`)
 - Location: `~/.odoru/articles/<request-url-slug>/`
 - Files: `article.md` (YAML frontmatter + markdown body) + `article.txt` (plain text)
-- Frontmatter fields: url, title, authors, date, description, cached_at, synthesized_voices
+- Frontmatter fields: url, title, authors, date, description, cached_at, synthesized_voices, publish, published_voice
 - **Key is always the request URL** — trafilatura's reported URL is unreliable, never used as key
 - `synthesized_voices`: list of voice IDs (e.g. `["f5:sarah"]`) for which all sentences are
   synthesized. Populated lazily by `GET /doc` after `all_audio_cached` returns true.
@@ -96,6 +96,12 @@ B. *Results from URL fetch are editable*
 - ~2161m 45s to synthesize (43235 words) -- should be H:MM:SS
 
 ### TODO (discussed)
+- publish: bool + published_voice: Option<String> in article.md frontmatter
+  - `publish: true` = include in next static export
+  - `published_voice` = which voice's audio to use in the export
+  - separable: can stage without choosing voice, or have voice set without publishing
+  - UI: toggle enabled only when ≥1 voice synthesized; voice picker shown if multiple voices available
+  - export runs only when both are set
 - call mark_synthesized when the WS sends {done: true} then Documents that
   never had a job have more metadata when client calls GET articles/
 - Open button in job list: navigate to reader view for that article...or?
