@@ -208,11 +208,16 @@ what "invalidation" means entirely. Not needed for now — defer.
 - **Deduplication** — source_url index (primary) + content_hash index (redirect detection); hash taken once at fetch time and stored; `cached_at` gives author visibility into staleness
 - **Original content saved** — originally fetched HTML stored as `source.html`; used for content hash; display to author deferred
 - **Voice state** — `voices.json` per document replaces `synthesized_voices`/`voice_durations`/`published_voice` frontmatter fields; four statuses: `in-progress`, `ready`, `stale`, `error`; stale is a warning badge, not a playback block; re-triggering an in-progress voice is a noop returning the existing job id
-- **`published` flag** — lives on the voice entry in `voices.json` (`"published": true`); `publish: bool` stays in frontmatter as document-level intent; at most one voice has `published: true` at a time — PATCH handler clears others when setting; export finds the published voice by scanning entries
+- **`published` flag** — lives on the voice entry in `voices.json` (`"published": true`); `publish: bool` stays in frontmatter as document-level intent (text may be published without any voice); if `publish: false` in frontmatter while a voice has `published: true`, the document is treated as unpublished — quick way for author to temporarily remove a doc without losing the preferred voice; at most one voice has `published: true` at a time — PATCH handler clears others when setting; export finds the published voice by scanning entries
 - **Voice picker** — populated from `voices.json`; author auditions voices (including stale), picks published voice, deletes unwanted jobs
 - **Fetch flow** — `POST /documents` returns `{ id }` immediately; Phase 1 polls `GET /documents/:id`; Phase 2 replaces polling with WS `document_status` events
 - **WS message protocol** — Phase 2 adds `type` field to all WS messages; client console.logs and ignores unrecognized types; existing messages get `type: "segment"` and `type: "done"`
-- **`GET /documents/:id` response** — always returns everything the server knows at call time; no special "fetching" response shape — same fields, just potentially sparse (e.g. title present if redirect resolved to a known document, voices empty if fetch not yet complete)
+- **`GET /documents/:id` response** — always returns everything the server knows at call time; top-level `status` field (`"fetching"` | `"ready"` | `"error"`) is unambiguous from context (document-level) vs per-voice `status` fields (nested under `voices`); open-ended for future fetch stages (e.g. `"extracting"`, `"normalizing"`); sparse fields (`title`, `content`, `plain_text`, `source_url`) are `null` when not yet available — never empty string, so client can distinguish "not yet fetched" from "empty"; `voices` is an empty object `{}` until fetch completes; example shapes:
+  ```json
+  { "id": "uuid", "status": "fetching", "title": null, "content": null, "plain_text": null, "source_url": null, "voices": {} }
+  { "id": "uuid", "status": "ready", "title": "...", "content": "...", "plain_text": "...", "source_url": "...", "cached_at": "...", "voices": { ... } }
+  { "id": "uuid", "status": "error", "error": "...", "title": null, "content": null, "plain_text": null, "source_url": null, "voices": {} }
+  ```
 - **API naming** — standardize on "document" throughout; `GET /documents/:id` replaces `GET /doc?url=`
 - **Source URL vs. canonical URL** — cleanly separated: `id` is stable key, `source_url` is provenance metadata
 - **Frontend WS identity** — client passes document ID with WS request; `voices.json` updated on done; creation must precede synthesis start
@@ -220,4 +225,6 @@ what "invalidation" means entirely. Not needed for now — defer.
 - **Everything is a document** — no special-casing for snippets, uploads, or pastes; author can delete; consistent with modern auto-save expectations
 - **Upload / paste** — both supported; identity model works for both without special-casing
 - **Concurrent index writes** — indexes kept in memory (`RwLock`); writes flush to disk via write-to-temp-then-rename; sentinel file triggers rebuild on next startup if flush fails
+- **Concurrent `voices.json` writes** — two synthesis jobs on different voices for the same document could race; use a per-document `RwLock` in AppState (keyed by document UUID); per-document granularity avoids unnecessary serialization across documents; per-document actors can be added later if needed
+- **`DELETE /documents/:id`** — must cancel any in-progress synthesis jobs for the document before removing files; job cancellation happens first, then directory removal
 - **Phase ordering** — Phase 1 includes voice state so URL fetch → synthesize → listen loop is solid before expanding input surface area; Phase 3 adds PATCH, snippets, upload, paste
