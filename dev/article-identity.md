@@ -158,7 +158,7 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 - `PATCH /documents/:id` with stale voice transition
 - Snippets, upload, and paste input paths
 
-## Known Constraints
+## Architectural Constraints
 
 - **Document directory layout** — each `~/.odoru/articles/<uuid>/` directory contains:
   - `article.md` — YAML frontmatter + markdown body
@@ -171,24 +171,17 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
   the store key) would be more readable — the export can generate its own slug without
   coupling it to the store key.
 
-- **Jobs store `article_url`** to look up text at auto-restart. With UUID keys,
-  this becomes `article_id`. The text lookup changes from `cache::lookup(url)` to
-  `cache::lookup_by_id(uuid)` — straightforward.
+## Migration Checklist (Phase 1)
 
-- **`mark_synthesized` and `update_publish`** address articles by URL today.
-  Both need to accept an ID instead (or in addition).
+Code changes required alongside the migration script:
 
-- **`GET /articles`** currently returns `url` as the primary identifier used by the
-  frontend to load an article via `GET /doc?url=`. This contract changes — the frontend
-  would load by ID instead: `GET /doc?id=`.
-
-- **Backward compatibility**: existing articles on disk are URL-keyed. Any new scheme
-  needs a migration path or dual-lookup support.
-
-- **WS `mark_synthesized` gap** (the issue that surfaced this design question):
-  live WS sessions can't populate voice state because non-URL articles have
-  no stable identity to write back to. UUID keys fix this — the client sends the
-  article ID with the WS request, server updates `voices.json` on done.
+- [ ] **`util/src/cache.rs`** — add `lookup_by_id(uuid)`, update `mark_synthesized` to accept ID; remove `update_publish` (superseded by `voices.json`)
+- [ ] **`app/src/jobs.rs`** — rename `article_url` field to `article_id`; update auto-restart lookup from `cache::lookup(url)` to `cache::lookup_by_id(uuid)`
+- [ ] **`POST /documents`** — new endpoint replacing `GET /doc?url=` fetch-or-create path; returns `{ id }` immediately
+- [ ] **`GET /documents/:id`** — new endpoint replacing `GET /doc?url=` return path
+- [ ] **`GET /documents`** — replaces `GET /articles`; returns list shape (see Resolved section)
+- [ ] **Frontend** — switch from `url` to `id` as primary article identifier throughout; update WS requests to include `document_id`
+- [ ] **Migration script** — `util/bin/migrate_v0_2_uuid_keys.rs`: re-key URL-slug dirs to UUID, populate indexes, bump `util` crate to `0.2.0`
 
 ## Open Questions
 
@@ -197,10 +190,11 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 
 If the user edits a sentence, the cached audio for that sentence is stale.
 The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
-naturally miss on changed text. `voices.json` status moves to `stale` on any
-text PATCH; old audio remains playable. Per-sentence dirty state is more precise
-but complex. The future versioning vision (retaining original document) may change
-what "invalidation" means entirely. Not needed for now — defer.
+naturally miss on changed text. `voices.json` status moves to `stale` for all
+voices when `PATCH /documents/:id` touches the `content` field; old audio remains
+playable with a warning badge. Per-sentence dirty state is more precise but complex.
+The future versioning vision (retaining original document) may change what
+"invalidation" means entirely. Not needed for now — defer.
 
 ## Resolved
 
@@ -212,6 +206,22 @@ what "invalidation" means entirely. Not needed for now — defer.
 - **Voice picker** — populated from `voices.json`; author auditions voices (including stale), picks published voice, deletes unwanted jobs
 - **Fetch flow** — `POST /documents` returns `{ id }` immediately; Phase 1 polls `GET /documents/:id`; Phase 2 replaces polling with WS `document_status` events
 - **WS message protocol** — Phase 2 adds `type` field to all WS messages; client console.logs and ignores unrecognized types; existing messages get `type: "segment"` and `type: "done"`
+- **`GET /documents` (list) response** — returns an array of summary objects; full `content` and `plain_text` are omitted (potentially large); includes everything needed to render the document list UI:
+  ```json
+  [
+    {
+      "id": "uuid",
+      "status": "ready",
+      "title": "...",
+      "source_url": "...",
+      "cached_at": "...",
+      "voices": {
+        "f5:sarah": { "status": "ready", "duration": 312.4, "published": true }
+      }
+    }
+  ]
+  ```
+
 - **`GET /documents/:id` response** — always returns everything the server knows at call time; top-level `status` field (`"fetching"` | `"ready"` | `"error"`) is unambiguous from context (document-level) vs per-voice `status` fields (nested under `voices`); open-ended for future fetch stages (e.g. `"extracting"`, `"normalizing"`); sparse fields (`title`, `content`, `plain_text`, `source_url`) are `null` when not yet available — never empty string, so client can distinguish "not yet fetched" from "empty"; `voices` is an empty object `{}` until fetch completes; example shapes:
   ```json
   { "id": "uuid", "status": "fetching", "title": null, "content": null, "plain_text": null, "source_url": null, "voices": {} }
