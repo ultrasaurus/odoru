@@ -3,12 +3,15 @@
 ## REST API (`app/src/main.rs`)
 ```
 GET  /voices          → { voices: [{id, name, backend, description}] }
-GET  /doc?url=&voice= → { url, title, authors, date, plain_text, content,
-                           synthesized_voices: [voice_id, ...],
-                           cached: { content: bool, audio: voice_cache_key|null },
-                           audio_duration_secs?: number }
-GET  /articles        → [{ url, title?, authors, date?, description?, cached_at,
-                            synthesized_voices, voice_durations }]
+GET   /doc?url=&voice= → { url, title, authors, date, plain_text, content,
+                            synthesized_voices: [voice_id, ...],
+                            cached: { content: bool, audio: voice_cache_key|null },
+                            audio_duration_secs?: number,
+                            publish: bool, published_voice?: string }
+PATCH /doc?url=        ← { publish: bool, published_voice?: string } → 204
+GET  /articles         → [{ url, title?, authors, date?, description?, cached_at,
+                             synthesized_voices, voice_durations,
+                             publish: bool, published_voice?: string }]
 GET  /ws              → WebSocket upgrade
 POST /jobs            → { text, voice, url? } → job (deduplicates by text+voice)
 GET  /jobs            → [job, ...]

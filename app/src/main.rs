@@ -253,6 +253,9 @@ struct DocResponse {
     /// Total audio duration in seconds for the requested voice, if known.
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_duration_secs: Option<f64>,
+    publish: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    published_voice: Option<String>,
 }
 
 async fn get_doc(
@@ -283,6 +286,8 @@ async fn get_doc(
                 cached: CachedInfo { content: true, audio },
                 synthesized_voices: hit.synthesized_voices,
                 audio_duration_secs,
+                publish: hit.publish,
+                published_voice: hit.published_voice,
             }).into_response();
         }
         Ok(None) => {}
@@ -332,7 +337,38 @@ async fn get_doc(
         cached: CachedInfo { content: false, audio },
         synthesized_voices: vec![],
         audio_duration_secs: None,
+        publish: false,
+        published_voice: None,
     }).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /doc?url=<url> — update publish settings for a cached article
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct PatchDocBody {
+    publish: bool,
+    published_voice: Option<String>,
+}
+
+async fn patch_doc(
+    Query(q): Query<DocQuery>,
+    Json(body): Json<PatchDocBody>,
+) -> impl IntoResponse {
+    let url = q.url.clone();
+    let voice = body.published_voice.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        cache::update_publish(&url, body.publish, voice.as_deref())
+    }).await;
+
+    match result {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +389,9 @@ struct ArticleSummary {
     cached_at: String,
     synthesized_voices: Vec<String>,
     voice_durations: std::collections::HashMap<String, f64>,
+    publish: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    published_voice: Option<String>,
 }
 
 async fn list_articles() -> impl IntoResponse {
@@ -367,6 +406,8 @@ async fn list_articles() -> impl IntoResponse {
                 cached_at: a.cached_at,
                 synthesized_voices: a.synthesized_voices,
                 voice_durations: a.voice_durations,
+                publish: a.publish,
+                published_voice: a.published_voice,
             }).collect();
             Json(summaries).into_response()
         }
@@ -885,7 +926,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/doc", get(get_doc))
+        .route("/doc", get(get_doc).patch(patch_doc))
         .route("/articles", get(list_articles))
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))

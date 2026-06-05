@@ -42,6 +42,12 @@ struct ArticleFrontmatter {
     /// Written when a background job completes synthesis.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     voice_durations: HashMap<String, f64>,
+    /// If true, include this article in the next static export.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    publish: bool,
+    /// Voice ID to use for the exported audio. Only meaningful when publish is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    published_voice: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +72,10 @@ pub struct CachedArticle {
     pub synthesized_voices: Vec<String>,
     /// Total audio duration in seconds, keyed by voice ID.
     pub voice_durations: HashMap<String, f64>,
+    /// If true, include this article in the next static export.
+    pub publish: bool,
+    /// Voice ID to use for the exported audio. Only meaningful when publish is true.
+    pub published_voice: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +168,8 @@ fn lookup_in(base: &PathBuf, url: &str) -> Result<Option<CachedArticle>> {
         plain_text,
         synthesized_voices: fm.synthesized_voices,
         voice_durations: fm.voice_durations,
+        publish: fm.publish,
+        published_voice: fm.published_voice,
     }))
 }
 
@@ -207,6 +219,8 @@ fn list_all_in(base: &PathBuf) -> Result<Vec<CachedArticle>> {
             },
             synthesized_voices: fm.synthesized_voices,
             voice_durations: fm.voice_durations,
+            publish: fm.publish,
+            published_voice: fm.published_voice,
         });
     }
     Ok(articles)
@@ -252,6 +266,8 @@ fn store_in(
         cached_at: Utc::now().to_rfc3339(),
         synthesized_voices: Vec::new(),
         voice_durations: HashMap::new(),
+        publish: false,
+        published_voice: None,
     };
     let yaml = serde_yaml::to_string(&fm)
         .context("failed to serialize frontmatter")?;
@@ -264,6 +280,37 @@ fn store_in(
         .with_context(|| format!("failed to write {}", txt_path.display()))?;
 
     Ok(dir)
+}
+
+// ---------------------------------------------------------------------------
+// Update publish settings
+// ---------------------------------------------------------------------------
+
+/// Set the `publish` flag and `published_voice` for a cached article.
+/// No-ops if the article is not cached. Intended to be called from `spawn_blocking`.
+pub fn update_publish(url: &str, publish: bool, published_voice: Option<&str>) -> Result<()> {
+    update_publish_in(&cache_dir()?, url, publish, published_voice)
+}
+
+fn update_publish_in(base: &PathBuf, url: &str, publish: bool, published_voice: Option<&str>) -> Result<()> {
+    let dir = base.join(url_to_slug(url));
+    let md_path = dir.join("article.md");
+    if !md_path.exists() { return Ok(()); }
+
+    let src = std::fs::read_to_string(&md_path)
+        .with_context(|| format!("failed to read {}", md_path.display()))?;
+    let (mut fm, body) = frontmatter::parse::<ArticleFrontmatter>(&src)
+        .with_context(|| format!("failed to parse {}", md_path.display()))?;
+
+    fm.publish = publish;
+    fm.published_voice = published_voice.map(str::to_string);
+
+    let yaml = serde_yaml::to_string(&fm)
+        .context("failed to serialize frontmatter")?;
+    std::fs::write(&md_path, format!("---\n{}---\n{}", yaml, body))
+        .with_context(|| format!("failed to write {}", md_path.display()))?;
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +413,63 @@ mod tests {
         assert_eq!(hit.content, "# Test\n\nMarkdown body.");
         assert_eq!(hit.plain_text, "Test\n\nPlain text body.");
         assert!(!hit.cached_at.is_empty(), "cached_at should be set");
+    }
+
+    #[test]
+    fn publish_defaults_to_false_on_new_article() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let url = "https://example.com/pub-test/";
+        store_in(&base, url, Some("T"), &[], None, None, "#", "plain").unwrap();
+        let hit = lookup_in(&base, url).unwrap().unwrap();
+        assert!(!hit.publish);
+        assert_eq!(hit.published_voice, None);
+    }
+
+    #[test]
+    fn update_publish_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let url = "https://example.com/pub-update/";
+        store_in(&base, url, Some("T"), &[], None, None, "#", "plain").unwrap();
+
+        update_publish_in(&base, url, true, Some("kokoro:af_heart")).unwrap();
+
+        let hit = lookup_in(&base, url).unwrap().unwrap();
+        assert!(hit.publish);
+        assert_eq!(hit.published_voice.as_deref(), Some("kokoro:af_heart"));
+    }
+
+    #[test]
+    fn update_publish_can_unset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let url = "https://example.com/pub-unset/";
+        store_in(&base, url, Some("T"), &[], None, None, "#", "plain").unwrap();
+        update_publish_in(&base, url, true, Some("kokoro:af_heart")).unwrap();
+        update_publish_in(&base, url, false, None).unwrap();
+        let hit = lookup_in(&base, url).unwrap().unwrap();
+        assert!(!hit.publish);
+        assert_eq!(hit.published_voice, None);
+    }
+
+    #[test]
+    fn old_article_without_publish_fields_loads_cleanly() {
+        // Simulate an article.md written before publish fields existed.
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let url = "https://example.com/old-article/";
+        // Write a minimal frontmatter without publish/published_voice.
+        let slug = url_to_slug(url);
+        let dir = base.join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("article.md"),
+            "---\nurl: 'https://example.com/old-article/'\ncached_at: '2024-01-01T00:00:00Z'\n---\nbody"
+        ).unwrap();
+        std::fs::write(dir.join("article.txt"), "plain").unwrap();
+        let hit = lookup_in(&base, url).unwrap().unwrap();
+        assert!(!hit.publish);
+        assert_eq!(hit.published_voice, None);
     }
 
     #[test]

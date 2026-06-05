@@ -343,12 +343,10 @@ function showReader() {
         });
     }
     // ── Fetch article list + load first ───────────────────────────────────────
-    // TODO: filter by publish:true once server supports it
-    // For now: only show articles fully synthesized with ARTICLE_VOICE
     fetch('/articles')
         .then(res => res.json())
         .then((all) => {
-        const articles = all.filter(a => a.synthesized_voices.includes(ARTICLE_VOICE));
+        const articles = all.filter(a => a.publish);
         articleList.innerHTML = '';
         if (articles.length === 0) {
             articleList.innerHTML = '<div class="outline-loading">No documents.</div>';
@@ -598,6 +596,40 @@ function showNew() {
                     meta.appendChild(countEl);
                 }
                 row.appendChild(meta);
+            }
+            // Publish controls — shown when any voices are synthesized
+            if (article.synthesized_voices.length > 0) {
+                const pub = document.createElement('div');
+                pub.className = 'queue-row-publish';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'queue-publish-cb';
+                cb.checked = article.publish;
+                cb.id = `pub-${article.url}`;
+                const label = document.createElement('label');
+                label.htmlFor = cb.id;
+                label.className = 'queue-publish-label';
+                label.textContent = 'Publish';
+                const select = document.createElement('select');
+                select.className = 'queue-voice-select';
+                for (const vid of article.synthesized_voices) {
+                    const opt = document.createElement('option');
+                    opt.value = vid;
+                    opt.textContent = voices.find(v => v.id === vid)?.name ?? vid;
+                    opt.selected = vid === article.published_voice;
+                    select.appendChild(opt);
+                }
+                const patch = async () => {
+                    await fetch(`/doc?url=${encodeURIComponent(article.url)}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ publish: cb.checked, published_voice: select.value || undefined }),
+                    });
+                };
+                cb.addEventListener('change', patch);
+                select.addEventListener('change', patch);
+                pub.append(cb, label, select);
+                row.appendChild(pub);
             }
             queueList.appendChild(row);
         }

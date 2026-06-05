@@ -62,54 +62,44 @@ See [protocol.md](protocol.md).
 - Status: `pending | in_progress | done | error | cancelled`
 - `POST /jobs` deduplicates: same text+voice returns existing job unless error/cancelled
 - Jobs that were `in_progress` at server shutdown reset to `pending` on reload (preserving
-  `completed_sentences`); they restart when the client re-submits via `POST /jobs`
+  `completed_sentences`); on startup, pending jobs with an `article_url` auto-restart
+  sequentially — jobs without one require the client to re-submit via `POST /jobs`
 - Cancel flag (`Arc<AtomicBool>`) is in-memory only; task stops at next sentence boundary
-- `text_preview`: first 80 chars, for display. `#[serde(default)]` so old entries load.
+- `text_preview`: first 80 chars, used for display when `article_title` is not present.
+  `article_url` and `article_title` stored when job is created from a URL fetch.
+  All three fields use `#[serde(default)]` so old entries load.
 
-## Next planned improvements
+## Next up
+- Voice picker in reader — reader hardcodes f5:sarah; should use `published_voice` from article,
+  with fallback to first `synthesized_voices` entry
 
-A. Documents panel: shows all documents (aka articles) with full metadata where known
+## Planned improvements
 
-   Server-side (DONE):
-   1. *Jobs*: store article URL + title in job record; auto-restart pending jobs on server startup
-      by looking up text from article store (currently requires manual re-submit)
-   2. Article store: expose `synthesized_voices` list in `GET /doc` response for UI use;
-      add `GET /articles` endpoint returning all cached articles
+### Authoring
 
-   Frontend (after A1-2):
-   3. Articles list in Reader sidebar comes from live data (DONE)
-   4. Documents may be jobs or direct synthesis, panel in New view: 
-      a) show title/URL per job instead of text_preview (DONE)
-      b) shows all documents (not just jobs)
-   5. pause(cancel)/resume/delete jobs
+*Results from URL fetch are editable* so text can be adjusted if scraping is imperfect
+  1. After fetching URL, metadata can be edited
+  2. Figure out where to put author, date, etc. in reader
+  3. Markdown editor for content with preview option
+  4. Outline view
 
-B. *Results from URL fetch are editable*
-   so text can be adjusted if scraping is imperfect
-
-   1. After fetching URL, metadata can be edited
-   2. Figure out where to put author, date, etc. in reader
-   3. Markdown editor for content with preview option
-   4. Outline view
-   
-## small bugs/improvements found during testing
-- pause/play icons so easy to see state + what action will happen
-- ~2161m 45s to synthesize (43235 words) -- should be H:MM:SS
-
-### TODO (discussed)
-- publish: bool + published_voice: Option<String> in article.md frontmatter
-  - `publish: true` = include in next static export
-  - `published_voice` = which voice's audio to use in the export
-  - separable: can stage without choosing voice, or have voice set without publishing
-  - UI: toggle enabled only when ≥1 voice synthesized; voice picker shown if multiple voices available
-  - export runs only when both are set
-- call mark_synthesized when the WS sends {done: true} then Documents that
-  never had a job have more metadata when client calls GET articles/
-- Open button in job list: navigate to reader view for that article...or?
-- Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
+- pause/cancel/resume/delete jobs
+- call `mark_synthesized` when WS sends `{done: true}` so live-streamed articles get
+  `synthesized_voices` populated (currently only background jobs populate it)
+- Open button in Documents panel: navigate to reader (or editor?) for that article
 - Error bar: currently only in New view; should be in a shared layout wrapper
 - Mispronounced words: no UI for `tts_overrides.txt` edits
+
+#### Polish / small bugs
+- pause/play icons — easy to see state + what action will happen
+- Synthesis time display: ~2161m 45s should be H:MM:SS
 - Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
-- Audio cache: encode to MP3 at synthesis time instead of WAV (raw samples → MP3 encoder directly); ~10:1 size reduction, important for static export
+- Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
+
+### Static export
+- See [future.md](future.md) for full design
+- Audio cache: encode to MP3 at synthesis time (raw samples → encoder directly); ~10:1 size reduction
+- Export command: reads article store + audio cache, writes static directory for GitHub Pages
 
 ## Known issues
 - Segfault on CLI exit when `--audio` is used (PyO3/tokio shutdown ordering)

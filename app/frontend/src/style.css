@@ -269,6 +269,35 @@ html, body {
 .queue-status.error       { color: #e07070; }
 .queue-status.cancelled   { color: var(--text-dim); opacity: 0.6; }
 
+.queue-row-publish {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+.queue-publish-cb {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.queue-publish-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.queue-voice-select {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+}
+
 .queue-progress { color: var(--text-dim); }
 
 .queue-progress-bar {
