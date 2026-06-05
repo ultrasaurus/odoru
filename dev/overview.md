@@ -91,8 +91,13 @@ B. *Results from URL fetch are editable*
    3. Markdown editor for content with preview option
    4. Outline view
    
+## small bugs/improvements found during testing
+- pause/play icons so easy to see state + what action will happen
+- ~2161m 45s to synthesize (43235 words) -- should be H:MM:SS
 
-### Not yet implemented (discussed)
+### TODO (discussed)
+- call mark_synthesized when the WS sends {done: true} then Documents that
+  never had a job have more metadata when client calls GET articles/
 - Open button in job list: navigate to reader view for that article...or?
 - Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
 - Error bar: currently only in New view; should be in a shared layout wrapper
