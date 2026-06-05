@@ -57,7 +57,7 @@ version differences), but since the hash is taken once at fetch time and stored,
 The originally fetched HTML is saved as `source.html` in the document directory — used for
 hashing and available for debugging. Displaying it to the author is deferred until needed.
 
-**Concurrent writes:** the indexes are loaded into `AppState` at startup and kept in memory.
+**Concurrent writes on indexes:** the indexes are loaded into `AppState` at startup and kept in memory.
 Reads are served from memory with no lock (`RwLock` read guard). Writes acquire a `RwLock`
 write guard, update the in-memory map, then flush to disk asynchronously. On flush failure:
 
@@ -89,7 +89,8 @@ Per-voice synthesis state is stored in `voices.json` alongside `article.md`, rep
   "f5:sarah": {
     "status": "ready",
     "duration": 312.4,
-    "job_id": "uuid"
+    "job_id": "uuid",
+    "published": true
   },
   "f5:emma": {
     "status": "stale",
@@ -117,6 +118,10 @@ existing id). It also allows job state recovery on restart.
 The voice picker is populated from `voices.json` — author can audition any voice with audio
 (including stale), pick a published voice, or delete unwanted voice/document jobs after review.
 
+**Concurrent writes on voices.json:** two WS sessions synthesizing different voices for the
+same document could race on `voices.json`. Use the same AppState RwLock pattern as the indexes
+for now — per-document locks can be added later if contention becomes an issue.
+
 ### API naming
 
 Standardize everything on "document" — current "doc" / "article" naming is inconsistent.
@@ -138,10 +143,14 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 - UUID keys, in-memory index, migration script, `voices.json` replacing frontmatter voice fields
 - `POST /documents` with a URL returns `{ id }` immediately
 - Client polls `GET /documents/:id` until `status: ready`
+- Response always includes all known fields at the time of the request — title, source_url,
+  voices, etc. — even mid-fetch if a redirect resolved to a known document early
 - Voice picker unblocked; URL fetch → synthesize → listen loop solid end-to-end
 
-**Phase 2 (WS events):**
-- Replace polling with a `document_status` WS event: `{ id, status: "fetching" | "ready" | "error", ... }`
+**Phase 2 (WS events + type field):**
+- Add `type` field to all WS messages so client can safely ignore unknown types
+  (`type: "segment"`, `type: "done"`, `type: "document_status"`)
+- Replace polling with a `document_status` WS event: `{ type: "document_status", id, status: "fetching" | "ready" | "error", ... }`
 - Same channel already used for synthesis — fetch progress is one more event type
 - Eliminates polling pattern; architecturally cleaner
 
@@ -155,7 +164,7 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
   - `article.md` — YAML frontmatter + markdown body
   - `article.txt` — plain text for TTS
   - `source.html` — originally fetched HTML (used for content hash; display to author deferred)
-  - `voices.json` — per-voice synthesis state (replaces `synthesized_voices` / `voice_durations` frontmatter fields)
+  - `voices.json` — per-voice synthesis state (replaces `synthesized_voices` / `voice_durations` / `published_voice` frontmatter fields)
 
 - **Export uses slug as directory name** (`future.md`): `articles/<slug>/meta.json`.
   UUID slugs work but are opaque. A title-derived slug at export time (separate from
@@ -183,23 +192,27 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 
 ## Open Questions
 
-1. **Mutable text and audio cache invalidation**
-   If the user edits a sentence, the cached audio for that sentence is stale.
-   The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
-   naturally miss on changed text. `voices.json` status moves to `stale` on any
-   text PATCH; old audio remains playable. Per-sentence dirty state is more precise
-   but complex. The future versioning vision (retaining original document) may change
-   what "invalidation" means entirely. Not needed for Phase 1 — defer.
+
+ **Mutable text and audio cache invalidation**
+
+If the user edits a sentence, the cached audio for that sentence is stale.
+The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
+naturally miss on changed text. `voices.json` status moves to `stale` on any
+text PATCH; old audio remains playable. Per-sentence dirty state is more precise
+but complex. The future versioning vision (retaining original document) may change
+what "invalidation" means entirely. Not needed for now — defer.
 
 ## Resolved
 
 - **UUID for all documents** — UUID keys for everything, including URL-fetched; one-time migration script re-keys existing URL-slug directories and populates both indexes from existing frontmatter
 - **Deduplication** — source_url index (primary) + content_hash index (redirect detection); hash taken once at fetch time and stored; `cached_at` gives author visibility into staleness
 - **Original content saved** — originally fetched HTML stored as `source.html`; used for content hash; display to author deferred
-- **Voice state** — `voices.json` per document replaces `synthesized_voices`/`voice_durations` frontmatter fields; four statuses: `in-progress`, `ready`, `stale`, `error`; stale is a warning badge, not a playback block; re-triggering an in-progress voice is a noop returning the existing job id
+- **Voice state** — `voices.json` per document replaces `synthesized_voices`/`voice_durations`/`published_voice` frontmatter fields; four statuses: `in-progress`, `ready`, `stale`, `error`; stale is a warning badge, not a playback block; re-triggering an in-progress voice is a noop returning the existing job id
+- **`published` flag** — lives on the voice entry in `voices.json` (`"published": true`); `publish: bool` stays in frontmatter as document-level intent; at most one voice has `published: true` at a time — PATCH handler clears others when setting; export finds the published voice by scanning entries
 - **Voice picker** — populated from `voices.json`; author auditions voices (including stale), picks published voice, deletes unwanted jobs
 - **Fetch flow** — `POST /documents` returns `{ id }` immediately; Phase 1 polls `GET /documents/:id`; Phase 2 replaces polling with WS `document_status` events
-- **WS message protocol** — Phase 0: add `type` field to all WS messages; client console.logs and ignores any unrecognized types; makes Phase 2 WS events safe to add
+- **WS message protocol** — Phase 2 adds `type` field to all WS messages; client console.logs and ignores unrecognized types; existing messages get `type: "segment"` and `type: "done"`
+- **`GET /documents/:id` response** — always returns everything the server knows at call time; no special "fetching" response shape — same fields, just potentially sparse (e.g. title present if redirect resolved to a known document, voices empty if fetch not yet complete)
 - **API naming** — standardize on "document" throughout; `GET /documents/:id` replaces `GET /doc?url=`
 - **Source URL vs. canonical URL** — cleanly separated: `id` is stable key, `source_url` is provenance metadata
 - **Frontend WS identity** — client passes document ID with WS request; `voices.json` updated on done; creation must precede synthesis start
