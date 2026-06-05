@@ -23,41 +23,63 @@ For these cases, basing identity on URL or text hash both fail:
 - **Text hash as key**: text changes during authoring → every edit is a new article,
   old synthesized audio orphaned, jobs pointing at stale records
 
-## Design Ideas
+## Chosen Design: Stable UUID Key
 
-### Stable UUID key
-
-Assign a UUID to each article at creation time. The store directory becomes
+Assign a UUID to each document at creation time. The store directory becomes
 `~/.odoru/articles/<uuid>/` rather than `~/.odoru/articles/<url-slug>/`.
 
 - Identity is completely decoupled from content and source
 - Text, title, source URL are all mutable metadata
-- Jobs reference the article by UUID instead of URL
-- `GET /articles` returns UUID alongside other fields
-- Export slug = UUID (or a title-derived slug generated at export time)
+- Jobs reference the document by UUID instead of URL
+- `source_url` becomes optional provenance metadata — "where this came from" — not an identity field
+- Export slug is title-derived at export time, independent of store key
 
-The `source_url` field in frontmatter becomes optional provenance metadata —
-"where this content originally came from" — not an identity field.
+**Migration**: one-time throw-away script that re-keys existing URL-slug directories to UUID
+and populates the source_url index. Manual run is fine (personal tool, small number of articles).
 
-**Migration**: existing URL-keyed articles need to either be re-keyed (migration script)
-or the store needs to support both formats during a transition period. Since it's a
-personal tool with a small number of articles, a one-time migration is feasible.
+### Deduplication indexes
 
-### Hybrid: keep URL key for URL-fetched, UUID for everything else
+Two indexes in `~/.odoru/index/`:
 
-URL-fetched articles keep their current key scheme (backward compatible).
-New non-URL articles get a UUID key. The store distinguishes by presence of `source_url`.
+- `source_url.json`: map of `url → uuid` — catches re-fetches of the same URL
+- `content_hash.json`: map of `sha256(normalized body) → uuid` — catches redirects
+  (URL A and URL B resolve to the same content)
 
-Simpler migration (none needed for existing articles), but two code paths to maintain.
-Lookup becomes slightly more complex.
+On `POST /documents` with a URL: check source_url index first (cheap), then content_hash
+(catches redirects). If found, return the existing document immediately — no fetch, no synthesis.
 
-### Title-slug key (generated lazily)
+The `cached_at` frontmatter field gives the author visibility into when content was last fetched,
+so they can judge whether a dedup hit is stale. A `POST /documents/:id/refresh` endpoint
+can be added later if force re-fetch becomes a need.
 
-Generate a slug from the title once one exists. Before a title is set, use a UUID.
-The key can be "promoted" from UUID to title-slug when a title is confirmed.
+Near-duplicate dedup (article updated slightly → same hash miss) is acceptable for a personal tool.
 
-More human-readable on disk, but mutable keys create rename complexity.
-Probably not worth it.
+### API naming
+
+Standardize everything on "document" — current "doc" / "article" naming is inconsistent.
+
+| New endpoint | Replaces |
+|---|---|
+| `POST /documents` | `GET /doc?url=` (fetch-or-create path) |
+| `GET /documents` | `GET /articles` |
+| `GET /documents/:id` | `GET /doc?url=` (return path) |
+| `PATCH /documents/:id` | (new — edit metadata/content) |
+| `DELETE /documents/:id` | (new) |
+| `POST /documents/:id/refresh` | (new — force re-fetch) |
+
+Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited separately.
+
+### Fetch flow (two phases)
+
+**Phase 1 (UUID migration):**
+- `POST /documents` with a URL body returns `{ id }` immediately
+- Client polls `GET /documents/:id` until `status: ready`
+- Unblocks authoring use cases and fixes `mark_synthesized` gap
+
+**Phase 2 (WS events):**
+- Replace polling with a `document_status` WS event: `{ id, status: "fetching" | "ready" | "error", ... }`
+- Same channel already used for synthesis — fetch progress is one more event type
+- Eliminates polling pattern; architecturally cleaner
 
 ## Known Constraints
 
@@ -90,37 +112,27 @@ Probably not worth it.
 
 ## Open Questions
 
-1. **UUID or URL slug for URL-fetched articles going forward?**
-   Migrate existing URL-keyed articles to UUID, or keep URL as key for URL-sourced
-   content and UUID only for new content types? The hybrid approach avoids migration
-   but adds permanent complexity.
-
-2. **What triggers article creation for snippets?**
+1. **What triggers document creation for snippets?**
    On first WS synthesis? On explicit "save" action? On background job submission?
-   Creating on first synthesis is convenient but may create orphan articles for
-   one-off experiments. An explicit save/create action is cleaner authoring UX.
+   An explicit save/create action is cleaner authoring UX but risks data loss if the
+   author doesn't save before navigating away. Creating on first synthesis avoids loss
+   but may create orphan documents for one-off experiments. Tension unresolved.
 
-3. **How does the frontend identify "current article" during a WS session?**
-   Today it doesn't need to — WS is stateless per-message. With mark_synthesized,
-   the client needs to pass an article ID. This means article creation must happen
-   *before* or *at the start of* synthesis, not after.
-
-4. **Mutable text and audio cache invalidation**
+2. **Mutable text and audio cache invalidation**
    If the user edits a sentence, the cached audio for that sentence is stale.
    The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
    naturally miss on changed text. But `synthesized_voices` in frontmatter would
    be wrong (it claims all sentences are synthesized when some have changed).
    Need a strategy: clear `synthesized_voices` on any text edit? Track per-sentence
-   dirty state?
+   dirty state? Note: future vision includes automatic versioning that retains the
+   original document — this may change what "invalidation" means.
 
-5. **Source URL vs. canonical URL**
-   For URL-fetched articles, the current `url` field serves double duty: it's both
-   the fetch key and the provenance. With UUID keys these separate cleanly:
-   `id` = stable key, `source_url` = where it came from. But `GET /doc` today
-   fetches-or-returns by URL — the "fetch from web" trigger needs a new home
-   (maybe `POST /articles` with a URL body, returning the new article).
+## Resolved
 
-6. **PDF / file upload**
-   How does extracted text arrive at the server? Direct text paste (current New view)
-   is one path. A file upload endpoint is another. The identity model should work for
-   both without special-casing.
+- **UUID for all documents** — UUID keys for everything, including URL-fetched; one-time migration script for existing URL-keyed articles
+- **Deduplication** — source_url index (primary) + content_hash index (redirect detection); `cached_at` gives author visibility into staleness
+- **Fetch flow** — `POST /documents` returns `{ id }` immediately; Phase 1 polls `GET /documents/:id`; Phase 2 replaces polling with WS `document_status` events
+- **API naming** — standardize on "document" throughout; `GET /documents/:id` replaces `GET /doc?url=`
+- **Source URL vs. canonical URL** — cleanly separated: `id` is stable key, `source_url` is provenance metadata
+- **Frontend WS identity** — client passes document ID with WS request; `mark_synthesized` called on done; creation must precede synthesis start
+- **PDF / file upload** — both upload and paste will be supported; identity model works for both without special-casing
