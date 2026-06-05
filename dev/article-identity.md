@@ -119,8 +119,8 @@ The voice picker is populated from `voices.json` — author can audition any voi
 (including stale), pick a published voice, or delete unwanted voice/document jobs after review.
 
 **Concurrent writes on voices.json:** two WS sessions synthesizing different voices for the
-same document could race on `voices.json`. Use the same AppState RwLock pattern as the indexes
-for now — per-document locks can be added later if contention becomes an issue.
+same document could race on `voices.json`. Use a per-document `RwLock` in AppState (keyed by
+document UUID) — per-document granularity avoids unnecessary serialization across documents.
 
 ### API naming
 
@@ -145,6 +145,7 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 - Client polls `GET /documents/:id` until `status: ready`
 - Response always includes all known fields at the time of the request — title, source_url,
   voices, etc. — even mid-fetch if a redirect resolved to a known document early
+- `PATCH /documents/:id` — minimal: `publish` flag + `published_voice` (set `published: true` on one voice, clear others)
 - Voice picker unblocked; URL fetch → synthesize → listen loop solid end-to-end
 
 **Phase 2 (WS events + type field):**
@@ -175,13 +176,15 @@ Jobs (`POST /jobs`) stay as-is for now; synthesis triggering can be revisited se
 
 Code changes required alongside the migration script:
 
-- [ ] **`util/src/cache.rs`** — add `lookup_by_id(uuid)`, update `mark_synthesized` to accept ID; remove `update_publish` (superseded by `voices.json`)
+- [ ] **`util/src/cache.rs`** — add `lookup_by_id(uuid)`, replace `mark_synthesized` with `update_voice_status(uuid, voice_id, status, duration?)` and `set_voice_published(uuid, voice_id)`; remove `update_publish` (superseded by `voices.json`); add `voices_json` read/write helpers
+- [ ] **`util/src/cache.rs` (fetch)**  — save `source.html` (originally fetched HTML) to document directory on fetch; compute and store content hash
 - [ ] **`app/src/jobs.rs`** — rename `article_url` field to `article_id`; update auto-restart lookup from `cache::lookup(url)` to `cache::lookup_by_id(uuid)`
-- [ ] **`POST /documents`** — new endpoint replacing `GET /doc?url=` fetch-or-create path; returns `{ id }` immediately
-- [ ] **`GET /documents/:id`** — new endpoint replacing `GET /doc?url=` return path
-- [ ] **`GET /documents`** — replaces `GET /articles`; returns list shape (see Resolved section)
+- [ ] **`POST /documents`** — new endpoint replacing `GET /doc?url=` fetch-or-create path; returns `{ id }` immediately; remove old endpoint
+- [ ] **`GET /documents/:id`** — new endpoint replacing `GET /doc?url=` return path; remove old endpoint
+- [ ] **`GET /documents`** — replaces `GET /articles`; returns list shape (see Resolved section); remove old endpoint
+- [ ] **`PATCH /documents/:id`** — minimal Phase 1 scope: `publish` flag and `published_voice` (set `published: true` on one voice, clear others); replaces `PATCH /doc?url=`; remove old endpoint
 - [ ] **Frontend** — switch from `url` to `id` as primary article identifier throughout; update WS requests to include `document_id`
-- [ ] **Migration script** — `util/bin/migrate_v0_2_uuid_keys.rs`: re-key URL-slug dirs to UUID, populate indexes, bump `util` crate to `0.2.0`
+- [ ] **Migration script** — `util/bin/migrate_v0_2_uuid_keys.rs`: re-key URL-slug dirs to UUID, write `voices.json` from existing frontmatter fields, populate indexes, bump `util` crate to `0.2.0`
 
 ## Open Questions
 
