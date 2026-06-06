@@ -1,6 +1,8 @@
 import './style.css';
 import { Player } from './player';
 import { renderMarkdown } from './markdown';
+import { Document } from './document';
+// DocumentState and VoiceEntry imported from ./document
 // Approximate generation seconds per word for each backend.
 // Kokoro: ~0.2 sec/word (measured: 143 words in 26s)
 // F5:     ~3.0 sec/word (measured: 143 words in 410s)
@@ -8,9 +10,6 @@ const SECS_PER_WORD = {
     kokoro: 0.2,
     f5: 3.0,
 };
-// Fallback voice used when a document has no synthesized voices (e.g. text-only
-// published documents, or documents awaiting first synthesis).
-const DEFAULT_VOICE = 'f5:sarah';
 // Pick the best voice from a document's voices map.
 // Priority: published → first ready → first stale → first any.
 function pickVoice(voices) {
@@ -48,6 +47,15 @@ function setError(container, msg) {
 function setStatus(container, className, msg) {
     container.innerHTML = '';
     container.appendChild(makeEl('span', className, msg));
+}
+function formatByline(authors, date) {
+    const authorStr = (authors ?? []).length > 0 ? `by ${authors.join(', ')}` : '';
+    const dateStr = date
+        ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+        : '';
+    if (authorStr && dateStr)
+        return `${authorStr}, ${dateStr}`;
+    return authorStr || dateStr;
 }
 function fmt(s) {
     const m = Math.floor(s / 60);
@@ -119,7 +127,7 @@ function showReader() {
     <div class="reader-layout">
       <nav class="article-sidebar">
         <div class="sidebar-top">
-          <button class="new-btn" id="new-btn">New</button>
+          <button class="new-btn" id="new-btn">Edit</button>
           <div class="sidebar-tabs">
             <button class="sidebar-tab" id="tab-articles">Documents</button>
             <button class="sidebar-tab active" id="tab-outline">Outline</button>
@@ -135,6 +143,8 @@ function showReader() {
       <div class="reader-main">
         <div class="reader-header">
           <h1 class="article-title" id="article-title">Loading…</h1>
+          <div class="article-byline" id="article-byline"></div>
+          <div class="article-source-url" id="article-source-url"></div>
           <div class="reader-header-row">
             <div id="job-area" class="job-area"></div>
             <label class="autoscroll-label">
@@ -150,7 +160,7 @@ function showReader() {
       </div>
     </div>
   `;
-    document.getElementById('new-btn').addEventListener('click', showNew);
+    document.getElementById('new-btn').addEventListener('click', showEdit);
     // ── Sidebar tabs ───────────────────────────────────────────────────────────
     const tabArticles = document.getElementById('tab-articles');
     const tabOutline = document.getElementById('tab-outline');
@@ -166,6 +176,8 @@ function showReader() {
     tabArticles.addEventListener('click', () => showTab('articles'));
     tabOutline.addEventListener('click', () => showTab('outline'));
     const articleTitleEl = document.getElementById('article-title');
+    const articleBylineEl = document.getElementById('article-byline');
+    const articleSourceUrlEl = document.getElementById('article-source-url');
     const transcriptContainer = document.getElementById('transcript-container');
     const jobArea = document.getElementById('job-area');
     const autoscrollCb = document.getElementById('autoscroll-cb');
@@ -241,8 +253,8 @@ function showReader() {
             pollTimer = null;
         }
     }
-    viewCleanup = stopPolling;
-    function pollJob(jobId, total) {
+    viewCleanup = () => { stopPolling(); player.stop(); };
+    function pollJob(jobId, total, onDone) {
         stopPolling();
         pollTimer = setTimeout(async () => {
             try {
@@ -254,6 +266,7 @@ function showReader() {
                 const job = await res.json();
                 if (job.status === 'done') {
                     setStatus(jobArea, 'job-status done', '✓ Audio ready');
+                    onDone?.();
                     return;
                 }
                 if (job.status === 'error') {
@@ -262,10 +275,10 @@ function showReader() {
                 }
                 const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;
                 setStatus(jobArea, 'job-status running', `Synthesizing… ${job.completed_sentences}/${total} (${pct}%)`);
-                pollJob(jobId, total);
+                pollJob(jobId, total, onDone);
             }
             catch {
-                pollJob(jobId, total); // retry silently on network blip
+                pollJob(jobId, total, onDone); // retry silently on network blip
             }
         }, 4000);
     }
@@ -304,8 +317,19 @@ function showReader() {
         timeTotal.textContent = '0:00';
         transcriptContainer.innerHTML = '<div class="loading">Loading…</div>';
         articleTitleEl.textContent = doc.title ?? doc.source_url ?? doc.id;
-        fetch(`/documents/${doc.id}`)
-            .then(res => res.json())
+        articleBylineEl.textContent = formatByline(doc.authors, doc.date);
+        articleSourceUrlEl.innerHTML = '';
+        if (doc.source_url) {
+            const a = document.createElement('a');
+            a.href = doc.source_url;
+            a.textContent = doc.source_url;
+            a.title = doc.source_url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            articleSourceUrlEl.appendChild(a);
+        }
+        Document.load(doc.id)
+            .then(d => { d.destroy(); return d.current; })
             .then((data) => {
             if (data.status === 'error') {
                 setError(transcriptContainer, `Failed to load: ${data.error ?? 'unknown error'}`);
@@ -315,11 +339,44 @@ function showReader() {
                 setError(transcriptContainer, 'Document content not yet available.');
                 return;
             }
-            const voice = pickVoice(data.voices) ?? DEFAULT_VOICE;
-            const voiceEntry = data.voices[voice];
-            const audioReady = voiceEntry?.status === 'ready' || voiceEntry?.status === 'stale';
+            const voice = pickVoice(data.voices);
+            const voiceEntry = voice ? data.voices[voice] : undefined;
+            // Any non-error voice entry means there's audio to stream (full, partial, or stale).
+            const audioReady = !!voiceEntry && voiceEntry.status !== 'error';
             if (voiceEntry?.duration) {
                 timeTotal.textContent = fmt(voiceEntry.duration);
+            }
+            // When audio is ready, send the synth request FIRST so the server
+            // starts loading from disk while we do DOM work below. JS is
+            // single-threaded so no onSegment callbacks fire until renderMarkdown
+            // returns and we call setPendingSpans — spans are always ready in time.
+            if (audioReady) {
+                player.synthesize(data.plain_text, voice, [], doc.id);
+            }
+            // Always render transcript (used for reading even without audio).
+            transcriptContainer.innerHTML = '';
+            const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer);
+            renderOutline(hs);
+            player.onTimeUpdate(t => updateOutlineActive(t));
+            // Hand the spans to the player now that they exist.
+            if (audioReady) {
+                player.setPendingSpans(pendingSpans);
+            }
+            function synthesizeNow() {
+                // Called when a background job finishes — transcript already rendered.
+                player.synthesize(data.plain_text, voice, pendingSpans, doc.id);
+            }
+            function showSynthButton() {
+                if (!voice)
+                    return; // no voice available; user must synthesize from queue view
+                const btn = document.createElement('button');
+                btn.className = 'job-btn';
+                btn.textContent = 'Synthesize in background';
+                btn.addEventListener('click', () => {
+                    btn.remove();
+                    startJob(data.plain_text, doc.id, voice);
+                });
+                jobArea.appendChild(btn);
             }
             if (audioReady) {
                 setStatus(jobArea, 'job-status done', '✓ Audio ready');
@@ -335,36 +392,14 @@ function showReader() {
                         const pct = active.total_sentences > 0
                             ? Math.round((active.completed_sentences / active.total_sentences) * 100) : 0;
                         setStatus(jobArea, 'job-status running', `Synthesizing… ${active.completed_sentences}/${active.total_sentences} (${pct}%)`);
-                        pollJob(active.id, active.total_sentences);
+                        pollJob(active.id, active.total_sentences, synthesizeNow);
                     }
                     else {
-                        const btn = document.createElement('button');
-                        btn.className = 'job-btn';
-                        btn.textContent = 'Synthesize in background';
-                        btn.addEventListener('click', () => {
-                            btn.remove();
-                            startJob(data.plain_text, doc.id, voice);
-                        });
-                        jobArea.appendChild(btn);
+                        showSynthButton();
                     }
                 })
-                    .catch(() => {
-                    const btn = document.createElement('button');
-                    btn.className = 'job-btn';
-                    btn.textContent = 'Synthesize in background';
-                    btn.addEventListener('click', () => {
-                        btn.remove();
-                        startJob(data.plain_text, doc.id, voice);
-                    });
-                    jobArea.appendChild(btn);
-                });
+                    .catch(showSynthButton);
             }
-            transcriptContainer.innerHTML = '';
-            const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer);
-            renderOutline(hs);
-            player.synthesize(data.plain_text, voice, pendingSpans, doc.id);
-            // Drive active outline heading from playback position.
-            player.onTimeUpdate(t => updateOutlineActive(t));
         })
             .catch(() => {
             setError(transcriptContainer, 'Failed to load document.');
@@ -375,7 +410,9 @@ function showReader() {
     fetch('/documents')
         .then(res => res.json())
         .then((all) => {
-        const docs = all.filter(d => d.publish);
+        const docs = all.filter(d => d.publish)
+            .sort((a, b) => (a.title ?? a.source_url ?? a.id)
+            .localeCompare(b.title ?? b.source_url ?? b.id, undefined, { sensitivity: 'base' }));
         articleList.innerHTML = '';
         if (docs.length === 0) {
             articleList.innerHTML = '<div class="outline-loading">No documents.</div>';
@@ -405,12 +442,12 @@ function showReader() {
     });
 }
 // ── New view ──────────────────────────────────────────────────────────────────
-function showNew() {
+function showEdit() {
     viewCleanup?.();
     let voices = [];
     let selectedVoice = null; // stores prefixed id, e.g. "f5:sarah"
     let synthStart = 0;
-    let fetchedDocumentId = null;
+    let fetchedDocument = null;
     app.innerHTML = `
     <div class="layout">
       <div id="error-bar" class="error-bar" style="display:none">
@@ -426,6 +463,11 @@ function showNew() {
       <main class="main">
         <div class="workspace">
           <div class="card-column">
+          <div id="queue-section" class="queue-section">
+            <div class="queue-header">Documents</div>
+            <div id="queue-list" class="queue-list"></div>
+          </div>
+
           <div class="card">
             <div class="url-area">
               <input
@@ -461,11 +503,6 @@ function showNew() {
 
             ${controlsHtml()}
           </div>
-
-          <div id="queue-section" class="queue-section">
-            <div class="queue-header">Documents</div>
-            <div id="queue-list" class="queue-list"></div>
-          </div>
           </div><!-- end card-column -->
 
           <aside class="sidebar">
@@ -486,6 +523,7 @@ function showNew() {
     // ── Documents panel ────────────────────────────────────────────────────────
     let queuePollTimer = null;
     let bgPollTimer = null;
+    const openMetaForms = new Set(); // doc IDs with metadata form expanded
     function stopQueuePoll() {
         if (queuePollTimer !== null) {
             clearTimeout(queuePollTimer);
@@ -534,7 +572,7 @@ function showNew() {
                 jobMap.set(job.document_id, job);
         }
         // Check if any voice is ready in a document's voices map
-        const hasReadyVoice = (doc) => Object.values(doc.voices).some(v => v.status === 'ready' || v.status === 'stale');
+        const hasReadyVoice = (doc) => Object.values(doc.voices).some(v => !!v.duration);
         // Assign sort rank
         const sortRank = (doc) => {
             const job = jobMap.get(doc.id);
@@ -566,15 +604,13 @@ function showNew() {
             if (job) {
                 statusText = jobStatusLabel(job.status);
                 statusClass = job.status;
-                displayVoiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice;
+                // Show voice name in meta line only while active — picker handles it when ready
+                if (active)
+                    displayVoiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice;
             }
             else if (hasReadyVoice(doc)) {
-                const readyVoiceId = pickVoice(doc.voices);
                 statusText = '✓ Ready';
                 statusClass = 'done';
-                displayVoiceName = readyVoiceId
-                    ? (voices.find(v => v.id === readyVoiceId)?.name ?? readyVoiceId)
-                    : '';
             }
             const row = document.createElement('div');
             row.className = 'queue-row';
@@ -591,6 +627,40 @@ function showNew() {
                 statusEl.textContent = statusText;
                 top.appendChild(statusEl);
             }
+            // Delete button — far right of top row
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'queue-delete-btn';
+            deleteBtn.textContent = '🗑';
+            deleteBtn.title = 'Delete document';
+            deleteBtn.addEventListener('click', () => {
+                // Replace trash btn with inline confirm
+                deleteBtn.replaceWith(confirmEl);
+            });
+            const confirmEl = document.createElement('span');
+            confirmEl.className = 'queue-delete-confirm';
+            const confirmLabel = document.createElement('span');
+            confirmLabel.className = 'queue-delete-label';
+            confirmLabel.textContent = 'Delete?';
+            const confirmYes = document.createElement('button');
+            confirmYes.className = 'queue-confirm-yes';
+            confirmYes.textContent = '✓';
+            confirmYes.addEventListener('click', async () => {
+                row.remove();
+                const res = await fetch(`/documents/${doc.id}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    queueList.appendChild(row);
+                    confirmEl.replaceWith(deleteBtn);
+                }
+                pollQueue();
+            });
+            const confirmNo = document.createElement('button');
+            confirmNo.className = 'queue-confirm-no';
+            confirmNo.textContent = '✗';
+            confirmNo.addEventListener('click', () => {
+                confirmEl.replaceWith(deleteBtn);
+            });
+            confirmEl.append(confirmLabel, confirmYes, confirmNo);
+            top.appendChild(deleteBtn);
             row.appendChild(top);
             // Bottom line: voice + progress (only if there's something to show)
             if (displayVoiceName || active) {
@@ -634,7 +704,7 @@ function showNew() {
             // Publish controls — shown for any fetched document (status: ready)
             // Voice picker shown alongside only when ready/stale voices exist
             const readyVoices = Object.entries(doc.voices)
-                .filter(([, v]) => v.status === 'ready' || v.status === 'stale');
+                .filter(([, v]) => !!v.duration);
             if (doc.status === 'ready') {
                 const pub = document.createElement('div');
                 pub.className = 'queue-row-publish';
@@ -666,10 +736,91 @@ function showNew() {
                 cb.addEventListener('change', patch);
                 if (readyVoices.length > 0)
                     select.addEventListener('change', patch);
+                // Pencil button to toggle metadata edit form
+                const editBtn = document.createElement('button');
+                editBtn.className = 'queue-edit-btn';
+                editBtn.title = 'Edit metadata';
+                editBtn.textContent = '✎';
                 pub.append(cb, label);
                 if (readyVoices.length > 0)
                     pub.appendChild(select);
+                pub.appendChild(editBtn);
                 row.appendChild(pub);
+                // Metadata edit form — hidden until pencil clicked
+                const metaForm = document.createElement('div');
+                metaForm.className = 'queue-meta-form';
+                metaForm.style.display = 'none';
+                const titleInput = document.createElement('input');
+                titleInput.type = 'text';
+                titleInput.className = 'queue-meta-input';
+                titleInput.value = doc.title ?? '';
+                const authorsInput = document.createElement('input');
+                authorsInput.type = 'text';
+                authorsInput.className = 'queue-meta-input';
+                authorsInput.value = (doc.authors ?? []).join(', ');
+                const dateInput = document.createElement('input');
+                dateInput.type = 'date';
+                dateInput.className = 'queue-meta-input';
+                dateInput.value = doc.date ?? '';
+                function makeMetaRow(labelText, input) {
+                    const row = document.createElement('div');
+                    row.className = 'queue-meta-row';
+                    const lbl = document.createElement('label');
+                    lbl.className = 'queue-meta-label';
+                    lbl.textContent = labelText;
+                    row.append(lbl, input);
+                    return row;
+                }
+                const formActions = document.createElement('div');
+                formActions.className = 'queue-meta-actions';
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'queue-meta-save';
+                saveBtn.textContent = 'Save';
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'queue-meta-cancel';
+                cancelBtn.textContent = 'Cancel';
+                formActions.append(saveBtn, cancelBtn);
+                metaForm.append(makeMetaRow('title:', titleInput), makeMetaRow('author(s):', authorsInput), makeMetaRow('date:', dateInput), formActions);
+                row.appendChild(metaForm);
+                // Restore open state if this form was open before a re-render
+                if (openMetaForms.has(doc.id)) {
+                    metaForm.style.display = '';
+                    editBtn.classList.add('active');
+                }
+                editBtn.addEventListener('click', () => {
+                    const open = metaForm.style.display !== 'none';
+                    metaForm.style.display = open ? 'none' : '';
+                    editBtn.classList.toggle('active', !open);
+                    if (open)
+                        openMetaForms.delete(doc.id);
+                    else
+                        openMetaForms.add(doc.id);
+                });
+                cancelBtn.addEventListener('click', () => {
+                    metaForm.style.display = 'none';
+                    editBtn.classList.remove('active');
+                    openMetaForms.delete(doc.id);
+                    if (openMetaForms.size === 0)
+                        pollQueue();
+                });
+                saveBtn.addEventListener('click', async () => {
+                    const authors = authorsInput.value.split(',').map(s => s.trim()).filter(Boolean);
+                    await fetch(`/documents/${doc.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: titleInput.value.trim() || undefined,
+                            authors,
+                            date: dateInput.value || undefined,
+                        }),
+                    });
+                    metaForm.style.display = 'none';
+                    editBtn.classList.remove('active');
+                    openMetaForms.delete(doc.id);
+                    // Update displayed title in this row immediately
+                    titleEl.textContent = titleInput.value.trim() || (doc.source_url ?? doc.id);
+                    pollQueue();
+                });
             }
             queueList.appendChild(row);
         }
@@ -681,8 +832,9 @@ function showNew() {
                 fetch('/documents'),
                 fetch('/jobs'),
             ]);
-            if (docsRes.ok && jobsRes.ok) {
-                renderQueue(await docsRes.json(), await jobsRes.json());
+            if (docsRes.ok && jobsRes.ok && openMetaForms.size === 0) {
+                const allDocs = await docsRes.json();
+                renderQueue(allDocs.filter(d => d.status !== 'error'), await jobsRes.json());
             }
         }
         catch { /* silent */ }
@@ -765,8 +917,12 @@ function showNew() {
             const data = await res.json();
             voices = data.voices;
             hideErrorBar();
-            if (voices.length > 0 && !selectedVoice)
-                selectVoice(voices[0].id);
+            if (voices.length > 0 && !selectedVoice) {
+                const preferred = voices.find(v => v.id === 'kokoro:af_heart')
+                    ?? voices.find(v => v.id.startsWith('kokoro:'))
+                    ?? voices[0];
+                selectVoice(preferred.id);
+            }
             else
                 renderVoices();
             updateEstimate(textInput.value);
@@ -812,57 +968,29 @@ function showNew() {
             return 'odoru.wav';
         }
     }
-    // Fetch a URL via POST /documents, poll until ready, populate textarea.
+    // Fetch a URL via Document.fetch (POST /documents + WS watch).
     async function fetchDocument(url) {
         fetchStatus.textContent = 'Fetching…';
         fetchStatus.className = 'fetch-status loading';
         urlInput.disabled = true;
         synthBtn.disabled = true;
-        fetchedDocumentId = null;
+        fetchedDocument?.destroy();
+        fetchedDocument = null;
         textInput.value = '';
         try {
-            // Create or retrieve document
-            const createRes = await fetch('/documents', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
-            });
-            if (!createRes.ok) {
-                const err = await createRes.json().catch(() => ({}));
-                fetchStatus.textContent = err.error ?? 'Fetch failed';
-                fetchStatus.className = 'fetch-status error';
-                return false;
-            }
-            const { id } = await createRes.json();
-            // Poll until ready
-            while (true) {
-                const pollRes = await fetch(`/documents/${id}`);
-                if (!pollRes.ok) {
-                    fetchStatus.textContent = 'Fetch failed';
-                    fetchStatus.className = 'fetch-status error';
-                    return false;
-                }
-                const doc = await pollRes.json();
-                if (doc.status === 'error') {
-                    fetchStatus.textContent = doc.error ?? 'Fetch failed';
-                    fetchStatus.className = 'fetch-status error';
-                    return false;
-                }
-                if (doc.status === 'ready' && doc.plain_text) {
-                    textInput.value = doc.plain_text;
-                    updateEstimate(doc.plain_text);
-                    fetchedDocumentId = id;
-                    const cached = doc.cached_at ? ' (cached)' : '';
-                    fetchStatus.textContent = `✔ ${doc.title ?? url}${cached}`;
-                    fetchStatus.className = 'fetch-status success';
-                    return true;
-                }
-                // Still fetching — wait 2 seconds and poll again
-                await new Promise(r => setTimeout(r, 2000));
-            }
+            const doc = await Document.fetch(url);
+            const state = doc.current;
+            const wasDedup = !state.cached_at || Date.now() - new Date(state.cached_at).getTime() > 5000;
+            fetchedDocument = doc;
+            textInput.value = state.plain_text ?? '';
+            updateEstimate(state.plain_text ?? '');
+            const suffix = wasDedup ? ' (previously fetched)' : '';
+            fetchStatus.textContent = `✔ ${state.title ?? url}${suffix}`;
+            fetchStatus.className = 'fetch-status success';
+            return true;
         }
-        catch {
-            fetchStatus.textContent = 'Network error';
+        catch (e) {
+            fetchStatus.textContent = e?.message ?? 'Fetch failed';
             fetchStatus.className = 'fetch-status error';
             return false;
         }
@@ -879,7 +1007,7 @@ function showNew() {
         timeCurrent.textContent = '0:00';
         timeTotal.textContent = '0:00';
         synthStart = Date.now();
-        player.synthesize(text, selectedVoice ?? undefined, undefined, fetchedDocumentId ?? undefined);
+        player.synthesize(text, selectedVoice ?? undefined, undefined, fetchedDocument?.current.id);
     }
     // ── Background job ─────────────────────────────────────────────────────────
     function pollBgJob(jobId, total) {
@@ -923,7 +1051,9 @@ function showNew() {
         synthBtn.disabled = true;
         transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>';
         try {
-            const body = { text, voice: selectedVoice ?? DEFAULT_VOICE };
+            const body = { text };
+            if (selectedVoice)
+                body.voice = selectedVoice;
             if (documentId)
                 body.document_id = documentId;
             const res = await fetch('/jobs', {
@@ -938,8 +1068,9 @@ function showNew() {
                 return;
             }
             if (job.status === 'done') {
-                transcriptContainer.innerHTML = '<div class="loading">✓ Already synthesized — press Synthesize to play</div>';
+                // Audio already cached — play it directly via the live synthesis path.
                 synthBtn.disabled = false;
+                startSynth(text);
                 return;
             }
             transcriptContainer.innerHTML =
@@ -965,7 +1096,7 @@ function showNew() {
         if (!resolvedText)
             return;
         if (bgSynthCb.checked) {
-            await startBgJob(resolvedText, fetchedDocumentId ?? undefined);
+            await startBgJob(resolvedText, fetchedDocument?.current.id);
         }
         else {
             startSynth(resolvedText);

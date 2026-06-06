@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{bail, Result};
-use hound::{SampleFormat, WavSpec, WavWriter};
 use futures::StreamExt;
 use ort::{inputs, session::Session, value::Tensor};
 
@@ -373,35 +372,22 @@ fn round3(x: f64) -> f64 { (x * 1000.0).round() / 1000.0 }
 // WAV helpers
 // ---------------------------------------------------------------------------
 
+/// Save all segments as a concatenated MP3 file. The `gap_ms` parameter is
+/// ignored (silence insertion requires re-encoding; callers should encode
+/// silence separately if needed).
 pub fn save_wav_all(
     segments: &[AudioSegment],
     path: impl AsRef<Path>,
-    gap_ms: u32,
+    _gap_ms: u32,
 ) -> Result<()> {
     let path = path.as_ref();
     if segments.is_empty() { bail!("No segments to write"); }
-    let sample_rate = segments[0].sample_rate;
-    let silence_len = (sample_rate * gap_ms / 1000) as usize;
-    let spec = WavSpec {
-        channels: 1,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-    let mut writer = WavWriter::create(path, spec)
-        .map_err(|e| anyhow::anyhow!("Create WAV {}: {e}", path.display()))?;
-    for (i, seg) in segments.iter().enumerate() {
-        for &s in &seg.samples {
-            let pcm = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-            writer.write_sample(pcm).map_err(|e| anyhow::anyhow!("WAV write: {e}"))?;
-        }
-        if i + 1 < segments.len() {
-            for _ in 0..silence_len {
-                writer.write_sample(0i16).map_err(|e| anyhow::anyhow!("WAV silence: {e}"))?;
-            }
-        }
+    let mut all_mp3: Vec<u8> = Vec::new();
+    for seg in segments {
+        all_mp3.extend_from_slice(&seg.audio);
     }
-    writer.finalize().map_err(|e| anyhow::anyhow!("WAV finalize: {e}"))
+    std::fs::write(path, &all_mp3)
+        .map_err(|e| anyhow::anyhow!("Write MP3 {}: {e}", path.display()))
 }
 
 // ---------------------------------------------------------------------------

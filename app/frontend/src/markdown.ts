@@ -118,10 +118,12 @@ export function renderMarkdown(
   const pendingSpans: HTMLElement[] = []
   const headings: HeadingEntry[] = []
   let globalIdx = 0
+  const fragment = document.createDocumentFragment()
   const tokens = marked.lexer(content)
   for (const token of tokens) {
-    globalIdx = renderToken(token, container, allSentences, globalIdx, pendingSpans, headings)
+    globalIdx = renderToken(token, fragment, allSentences, globalIdx, pendingSpans, headings)
   }
+  container.appendChild(fragment)
   return { pendingSpans, headings }
 }
 
@@ -132,7 +134,7 @@ export function renderMarkdown(
 // Returns the updated globalIdx after consuming sentences for this token.
 function renderToken(
   token: Token,
-  container: HTMLElement,
+  container: HTMLElement | DocumentFragment,
   allSentences: string[],
   globalIdx: number,
   pendingSpans: HTMLElement[],

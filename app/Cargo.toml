@@ -14,7 +14,6 @@ dl = { path = "../dl" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
-base64 = "0.22"
 dashmap = "6"
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }

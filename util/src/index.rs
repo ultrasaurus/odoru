@@ -103,6 +103,17 @@ impl DocumentIndex {
         self.flush().await;
     }
 
+    /// Remove a document from both indexes by UUID. Flushes to disk.
+    pub async fn remove(&self, uuid: &str) {
+        {
+            let mut su = self.source_url.write().await;
+            let mut ch = self.content_hash.write().await;
+            su.retain(|_, v| v != uuid);
+            ch.retain(|_, v| v != uuid);
+        }
+        self.flush().await;
+    }
+
     // -----------------------------------------------------------------------
     // Disk flush
     // -----------------------------------------------------------------------

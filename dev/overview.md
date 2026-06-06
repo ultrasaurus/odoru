@@ -9,7 +9,7 @@ plays back with synchronized transcript highlighting. Name means "dance/leap/jou
 odoru/
   tts/        — multi-backend streaming TTS library (the main crate)
   app/        — Axum WebSocket server + REST API, serves frontend
-  cli/        — `dl` binary: fetch URL or local file, synthesize to WAV
+  cli/        — `dl` binary: fetch URL or local file, synthesize to MP3
   dl/         — fetch + extract articles via trafilatura (Python)
   py-venv/    — shared PyO3 utilities
   config/     — shared AudioConfig (sample_rate, silence durations)
@@ -51,10 +51,10 @@ Per-document, keyed by voice ID (e.g. `"f5:sarah"`):
 ```json
 {
   "f5:sarah": { "status": "ready", "duration": 312.4, "job_id": "...", "published": true },
-  "f5:nova":  { "status": "in-progress", "job_id": "..." }
+  "f5:nova":  { "status": "in_progress", "job_id": "..." }
 }
 ```
-- Statuses: `in-progress | ready | stale | error`
+- Statuses: `in_progress | ready | stale | error`
 - `stale`: content changed since synthesis — old audio still playable, shown with warning badge
 - `published: true` on at most one voice; combined with `publish` flag in frontmatter
 - Written by: WS handler on session done, job runner on job done
@@ -95,34 +95,63 @@ See [protocol.md](protocol.md).
 - `text_preview`, `article_id`, `article_title` use `#[serde(default)]` so old entries load
 
 ## Next up
-- Voice picker in reader — reader hardcodes `f5:sarah`; should read from `voices.json`,
-  use voice with `published: true`, fall back to first `ready` voice
+- Voice picker in reader — `DEFAULT_VOICE` hardcode removed; reader now uses `pickVoice()`
+  (published → ready → stale → any). No UI picker yet — add a dropdown so the user can
+  choose between available voices without leaving the reader
 - Frontend migration to new `/documents` API (handled by frontend session)
 
 ## Planned improvements
 
 ### Authoring
-*Results from URL fetch are editable* so text can be adjusted if scraping is imperfect
-  1. After fetching URL, metadata can be edited
-  2. Figure out where to put author, date, etc. in reader
-  3. Markdown editor for content with preview option
-  4. Outline view
-
-- pause/cancel/resume/delete jobs
-- Open button in Documents panel: navigate to reader (or editor?) for that article
-- Error bar: currently only in New view; should be in a shared layout wrapper
-- Mispronounced words: no UI for `tts_overrides.txt` edits
-
-#### Polish / small bugs
-- pause/play icons — easy to see state + what action will happen
-- Synthesis time display: ~2161m 45s should be H:MM:SS
-- Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
-- Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
 
 ### Static export
-- See [future.md](future.md) for full design
-- Audio cache: encode to MP3 at synthesis time (raw samples → encoder directly); ~10:1 size reduction
-- Export command: reads article store + audio cache, writes static directory for GitHub Pages
+- See [future-export.md](future-export.md) for full design
+- Audio cache: encode to MP3 at synthesis time (raw samples → encoder directly); ~10:1 size reduction (DONE)
+- Export command: reads document store + audio cache, writes static directory for GitHub Pages
+- Voice picker in the reader would be nice, let's see how it feels
+
+
+### Text content without fetching URL ###
+- `PATCH /documents/:id` with stale voice transition (for content edits)
+- Snippets, upload, and paste input paths
+
+### Results from URL fetch are editable ###
+so text can be adjusted if scraping is imperfect
+  1. Markdown editor for content with preview option
+  2. Outline view for editor 
+
+### Small authoring bugs / improvements
+- pause/cancel/resume/delete jobs
+- Open button in Documents panel: navigate to reader (or editor?) for that document
+
+#### Open questions for authoring
+
+**Mutable text and audio cache invalidation**
+
+If the user edits a sentence, the cached audio for that sentence is stale.
+The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
+naturally miss on changed text. `voices.json` status moves to `stale` for all
+voices when `PATCH /documents/:id` touches the `content` field; old audio remains
+playable with a warning badge. Per-sentence dirty state is more precise but complex.
+The future versioning vision (retaining original document) may change what
+"invalidation" means entirely. Not needed for now — defer.
+
+
+### Polish / small bugs
+- Error bar: currently only in New view; should be in a shared layout wrapper
+- Paste URL → Synthesize → then check "Synth in Background" → no job created; checkbox must be
+  checked before clicking Synthesize to queue a background job
+- pause/play icons — easy to see state + what action will happen
+- Synthesis time display: ~2161m 45s should be H:MM:SS
+- Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
+
+#### TTS improvements
+- Mispronounced words: no UI for `tts_overrides.txt` edits
+- Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
+- Roman numeral / outline-style headers (`I.`, `II.`, `A.`, `B.`) cause sentence splitting
+  mismatch between server (`unicode_segmentation`) and client (`Intl.Segmenter`) — server splits
+  `"I. INTRODUCTION"` as two sentences, client may produce one; causes spans to activate out of
+  sync with audio. Affects "Augmenting Human Intellect" and similar structured documents.
 
 ## Known issues
 - Segfault on CLI exit when `--audio` is used (PyO3/tokio shutdown ordering)

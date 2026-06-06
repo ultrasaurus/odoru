@@ -1,7 +1,6 @@
 mod audio;
 
 use clap::{Parser, ValueEnum};
-use config::AudioConfig;
 use dl::ParsedArticle;
 use tts::{Backend, TtsEngine};
 use util::{documents, index::html_content_hash};
@@ -27,12 +26,12 @@ struct Cli {
     #[arg(long)]
     no_cache: bool,
 
-    /// Also synthesize audio to a WAV file
+    /// Also synthesize audio to an MP3 file
     #[arg(long)]
     audio: bool,
 
-    /// Output path for the WAV file, or directory to write into.
-    /// Defaults to out/<name>.wav in the current directory.
+    /// Output path for the MP3 file, or directory to write into.
+    /// Defaults to out/<name>.mp3 in the current directory.
     #[arg(short, long, value_name = "PATH")]
     output: Option<String>,
 
@@ -230,22 +229,22 @@ fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Opt
     }
 }
 
-/// Resolve the final WAV output path.
+/// Resolve the final MP3 output path.
 ///
-/// - If `-o` is given and is an existing directory: write `<dir>/<stem>.wav`
+/// - If `-o` is given and is an existing directory: write `<dir>/<stem>.mp3`
 /// - If `-o` is given and is a file path: use it directly (creates parent dirs)
-/// - If `-o` is absent: write to `out/<stem>.wav` in the current directory
-fn resolve_wav_path(output: Option<&str>, stem: &str) -> anyhow::Result<std::path::PathBuf> {
+/// - If `-o` is absent: write to `out/<stem>.mp3` in the current directory
+fn resolve_mp3_path(output: Option<&str>, stem: &str) -> anyhow::Result<std::path::PathBuf> {
     let path = match output {
         Some(o) => {
             let p = std::path::PathBuf::from(o);
             if p.is_dir() {
-                p.join(format!("{stem}.wav"))
+                p.join(format!("{stem}.mp3"))
             } else {
                 p
             }
         }
-        None => std::path::PathBuf::from("out").join(format!("{stem}.wav")),
+        None => std::path::PathBuf::from("out").join(format!("{stem}.mp3")),
     };
 
     // Create parent directory if needed
@@ -292,15 +291,14 @@ async fn main() -> anyhow::Result<()> {
 
     if cli.audio {
         let stem = wav_path_override
-            .unwrap_or_else(|| wav_filename(&article));
-        let wav_path = resolve_wav_path(cli.output.as_deref(), &stem)?;
+            .unwrap_or_else(|| mp3_filename(&article));
+        let mp3_path = resolve_mp3_path(cli.output.as_deref(), &stem)?;
         let (backend, voice_name) = build_backend(cli.backend, cli.voice.as_deref())?;
         let engine = TtsEngine::builder().backend(backend).build()?;
-        let config = AudioConfig::default();
         let total = tts::splitter::split(&article.plain_text).len();
         let pb = audio_progress(total);
-        audio::synthesize_to_wav(&article.plain_text, wav_path.to_str().unwrap(), &engine, &config, &pb, &voice_name).await?;
-        pb.finish_with_message(format!("✔ Audio saved to {}", wav_path.display()));
+        audio::synthesize_to_mp3(&article.plain_text, mp3_path.to_str().unwrap(), &engine, &voice_name, &pb).await?;
+        pb.finish_with_message(format!("✔ Audio saved to {}", mp3_path.display()));
     }
 
     Ok(())
@@ -346,7 +344,7 @@ fn double_space_paragraphs(text: &str) -> String {
     out
 }
 
-fn wav_filename(article: &ParsedArticle) -> String {
+fn mp3_filename(article: &ParsedArticle) -> String {
     let date = article.date.as_deref().unwrap_or("undated");
     let slug = article.title.as_deref().unwrap_or("untitled");
     let slug = slug
@@ -356,7 +354,7 @@ fn wav_filename(article: &ParsedArticle) -> String {
         .collect::<Vec<_>>()
         .join("-");
     let slug = if slug.len() > 60 { &slug[..60] } else { &slug };
-    format!("{}-{}.wav", date, slug)
+    format!("{}-{}.mp3", date, slug)
 }
 
 #[cfg(test)]
@@ -380,39 +378,39 @@ mod tests {
         }
     }
 
-    // ── wav_filename ──────────────────────────────────────────────────────
+    // ── mp3_filename ──────────────────────────────────────────────────────
 
     #[test]
-    fn wav_filename_basic() {
+    fn mp3_filename_basic() {
         let a = article(Some("Hello World"), Some("2024-01-15"));
-        assert_eq!(wav_filename(&a), "2024-01-15-hello-world.wav");
+        assert_eq!(mp3_filename(&a), "2024-01-15-hello-world.mp3");
     }
 
     #[test]
-    fn wav_filename_strips_punctuation() {
+    fn mp3_filename_strips_punctuation() {
         let a = article(Some("It's a Test: Really!"), Some("2024-03-01"));
-        assert_eq!(wav_filename(&a), "2024-03-01-its-a-test-really.wav");
+        assert_eq!(mp3_filename(&a), "2024-03-01-its-a-test-really.mp3");
     }
 
     #[test]
-    fn wav_filename_truncates_long_title() {
+    fn mp3_filename_truncates_long_title() {
         let long = "a".repeat(80);
         let a = article(Some(&long), Some("2024-01-01"));
-        let name = wav_filename(&a);
+        let name = mp3_filename(&a);
         // date- prefix + 60 chars + .wav
-        assert_eq!(name, format!("2024-01-01-{}.wav", "a".repeat(60)));
+        assert_eq!(name, format!("2024-01-01-{}.mp3", "a".repeat(60)));
     }
 
     #[test]
-    fn wav_filename_missing_title_uses_untitled() {
+    fn mp3_filename_missing_title_uses_untitled() {
         let a = article(None, Some("2024-06-01"));
-        assert_eq!(wav_filename(&a), "2024-06-01-untitled.wav");
+        assert_eq!(mp3_filename(&a), "2024-06-01-untitled.mp3");
     }
 
     #[test]
-    fn wav_filename_missing_date_uses_undated() {
+    fn mp3_filename_missing_date_uses_undated() {
         let a = article(Some("My Post"), None);
-        assert_eq!(wav_filename(&a), "undated-my-post.wav");
+        assert_eq!(mp3_filename(&a), "undated-my-post.mp3");
     }
 
     // ── double_space_paragraphs ───────────────────────────────────────────
@@ -446,31 +444,31 @@ mod tests {
         assert_eq!(output, "Just one line.\n");
     }
 
-    // ── resolve_wav_path ───────────────────────────────────────────────
+    // ── resolve_mp3_path ───────────────────────────────────────────────
 
     #[test]
-    fn resolve_wav_path_no_output_uses_out_dir() {
-        let path = resolve_wav_path(None, "my-article").unwrap();
-        assert_eq!(path, std::path::PathBuf::from("out/my-article.wav"));
+    fn resolve_mp3_path_no_output_uses_out_dir() {
+        let path = resolve_mp3_path(None, "my-article").unwrap();
+        assert_eq!(path, std::path::PathBuf::from("out/my-article.mp3"));
         // created the dir
         assert!(std::path::Path::new("out").is_dir());
     }
 
     #[test]
-    fn resolve_wav_path_explicit_file() {
+    fn resolve_mp3_path_explicit_file() {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
-        let out = dir.path().join("custom.wav");
-        let path = resolve_wav_path(Some(out.to_str().unwrap()), "ignored").unwrap();
+        let out = dir.path().join("custom.mp3");
+        let path = resolve_mp3_path(Some(out.to_str().unwrap()), "ignored").unwrap();
         assert_eq!(path, out);
     }
 
     #[test]
-    fn resolve_wav_path_directory_appends_stem() {
+    fn resolve_mp3_path_directory_appends_stem() {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
-        let path = resolve_wav_path(Some(dir.path().to_str().unwrap()), "my-stem").unwrap();
-        assert_eq!(path, dir.path().join("my-stem.wav"));
+        let path = resolve_mp3_path(Some(dir.path().to_str().unwrap()), "my-stem").unwrap();
+        assert_eq!(path, dir.path().join("my-stem.mp3"));
     }
 
     // ── load_input ─────────────────────────────────────────────────────
@@ -586,12 +584,11 @@ mod tests {
         assert!(msg.contains("Available"));
     }
 
-    // ── integration: mock synthesis to WAV ────────────────────────────────
+    // ── integration: mock synthesis to MP3 ────────────────────────────────
 
     #[tokio::test]
-    async fn mock_backend_synthesizes_to_wav() {
+    async fn mock_backend_synthesizes_to_mp3() {
         use futures::StreamExt;
-        use hound::{WavSpec, WavWriter, SampleFormat};
         use tempfile::NamedTempFile;
 
         let engine = tts::TtsEngine::builder()
@@ -600,25 +597,17 @@ mod tests {
             .expect("engine build failed");
 
         let tmp = NamedTempFile::new().unwrap();
-        let path = tmp.path().with_extension("wav");
+        let path = tmp.path().with_extension("mp3");
 
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: 24_000,
-            bits_per_sample: 32,
-            sample_format: SampleFormat::Float,
-        };
-        let mut writer = WavWriter::create(&path, spec).unwrap();
+        let mut all_mp3: Vec<u8> = Vec::new();
         let mut stream = engine.synthesize("Hello world. How are you?", "mock");
         while let Some(result) = stream.next().await {
             let seg = result.expect("segment failed");
-            for sample in &seg.samples {
-                writer.write_sample(*sample).unwrap();
-            }
+            all_mp3.extend_from_slice(&seg.audio);
         }
-        writer.finalize().unwrap();
+        std::fs::write(&path, &all_mp3).unwrap();
 
-        assert!(path.exists(), "WAV file not created");
-        assert!(path.metadata().unwrap().len() > 0, "WAV file is empty");
+        assert!(path.exists(), "MP3 file not created");
+        assert!(path.metadata().unwrap().len() > 0, "MP3 file is empty");
     }
 }

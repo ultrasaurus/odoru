@@ -21,10 +21,13 @@ HTML    HTML
 # Specify how word is spoken
 # ---------------------------------------------------------------------------
 Tymshare    timeshare
+TYMESHARE   timeshare
 YAML        yamel
 JSON        jason
 ARPANET     arpa net
-TYMESHARE   Timeshare
+TYMNET      Time net
+delete      deeleet
+move        moove
 
 # ---------------------------------------------------------------------------
 # Expansions — abbreviations spoken as full words

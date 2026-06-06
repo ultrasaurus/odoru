@@ -209,8 +209,8 @@ async fn tts_engine_single_sentence_yields_one_segment() {
     let Some(engine) = try_build_engine() else { return; };
     let mut stream = engine.synthesize("Hello world.", "mock");
     let seg = stream.next().await.unwrap().expect("segment failed");
-    assert!(!seg.samples.is_empty());
-    assert_eq!(seg.sample_rate, 24_000);
+    assert!(!seg.audio.is_empty());
+    assert!(seg.duration > 0.0);
     assert_eq!(seg.index, 0);
     assert!(stream.next().await.is_none());
 }
@@ -284,8 +284,8 @@ async fn f5_backend_synthesizes_audio() {
     let mut stream = engine.synthesize("Hello world.", "sarah");
     let seg = stream.next().await.expect("stream ended early").expect("segment error");
 
-    assert!(!seg.samples.is_empty(), "no samples returned");
-    assert_eq!(seg.sample_rate, 24_000);
+    assert!(!seg.audio.is_empty(), "no audio returned");
+    assert!(seg.duration > 0.0);
     assert_eq!(seg.index, 0);
     assert!(seg.transcript.end > seg.transcript.start);
     assert!(stream.next().await.is_none(), "expected exactly one segment");
@@ -323,6 +323,6 @@ async fn single_segment_start_end_match_words() {
     let mut stream = engine.synthesize("Hello world.", "mock");
     let seg = stream.next().await.unwrap().expect("segment failed");
     assert!(stream.next().await.is_none());
-    assert!(!seg.samples.is_empty());
+    assert!(!seg.audio.is_empty());
     assert_eq!(seg.index, 0);
 }

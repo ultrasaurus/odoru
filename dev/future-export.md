@@ -6,12 +6,12 @@ The authoring tool (client-server) exports a static single-page mini-site deploy
 
 ```
 export/
-  index.html              ← SPA shell, routes by ?article=<slug> or hash
-  manifest.json           ← article list (titles, slugs, descriptions)
+  index.html              ← SPA shell, routes by ?doc=<slug> or hash
+  manifest.json           ← document list (titles, slugs, descriptions)
   assets/
     index.js
     style.css
-  articles/
+  documents/
     <slug>/               ← title-derived slug, generated at export time
       meta.json           ← title, authors, date, source_url, voice
       transcript.json     ← [{index, text, start, end, paragraph_end}, ...]
@@ -21,11 +21,15 @@ export/
         ...
 ```
 
-Export reads from the article store + audio disk cache — no re-synthesis needed if already cached.
+Export reads from the document store + audio disk cache — no re-synthesis needed if already cached.
 
-Only articles with `publish: true` and `published_voice` set are included. Export uses `published_voice` to select which audio files to copy.
+Only documents with `publish: true` and `published_voice` set are included. Export uses `published_voice` to select which audio files to copy.
 
-Note: export slug is title-derived at export time, independent of the store key (UUID). See `article-identity.md`.
+Note: export slug is title-derived at export time, independent of the store key (UUID). See `overview.md`.
+
+## Local static folder
+
+The export is designed to work opened as a local folder (`file://`) as well as hosted on GitHub Pages. Audio plays fine via `<audio src="...">` on `file://`. Note: browsers block `fetch()` on `file://` origins — the SPA must load `manifest.json` and `transcript.json` via `<audio>` or must use a small local server; alternatively, inline the manifest and transcripts into the HTML/JS bundle at export time to avoid any `fetch()` calls.
 
 ## Audio playback: sliding window prefetch + AbortController on seek
 

@@ -81,10 +81,12 @@ export function renderMarkdown(content, plainText, container) {
     const pendingSpans = [];
     const headings = [];
     let globalIdx = 0;
+    const fragment = document.createDocumentFragment();
     const tokens = marked.lexer(content);
     for (const token of tokens) {
-        globalIdx = renderToken(token, container, allSentences, globalIdx, pendingSpans, headings);
+        globalIdx = renderToken(token, fragment, allSentences, globalIdx, pendingSpans, headings);
     }
+    container.appendChild(fragment);
     return { pendingSpans, headings };
 }
 // ---------------------------------------------------------------------------

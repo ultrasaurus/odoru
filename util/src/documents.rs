@@ -50,7 +50,7 @@ pub struct VoiceState {
     /// Present once ever synthesized; survives stale transition.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
-    /// Job ID — used to detect re-trigger of in-progress voice.
+    /// Job ID — used to detect re-trigger of in_progress voice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_id: Option<String>,
     /// True if this is the author's chosen voice for publication.
@@ -112,6 +112,8 @@ pub struct Document {
     pub plain_text: String,
     /// Per-voice synthesis state.
     pub voices: VoicesMap,
+    /// Set when voices.json failed to parse; voices will be empty.
+    pub voices_error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +236,7 @@ pub fn store_ready_in(
         .with_context(|| format!("failed to write {}", html_path.display()))?;
 
     // Create voices.json only if it doesn't already exist (preserve any
-    // in-progress state from a concurrent WS session).
+    // in_progress state from a concurrent WS session).
     let voices_path = dir.join("voices.json");
     if !voices_path.exists() {
         std::fs::write(&voices_path, "{}")
@@ -299,7 +301,13 @@ pub fn lookup_by_id_in(base: &PathBuf, id: &str) -> Result<Option<Document>> {
         String::new()
     };
 
-    let voices = read_voices_in(&dir)?;
+    let (voices, voices_error) = match read_voices_in(&dir) {
+        Ok(v) => (v, None),
+        Err(e) => {
+            warn!("failed to parse voices.json for {}: {e}", dir.display());
+            (HashMap::new(), Some(e.to_string()))
+        }
+    };
 
     Ok(Some(Document {
         id: fm.id,
@@ -315,6 +323,7 @@ pub fn lookup_by_id_in(base: &PathBuf, id: &str) -> Result<Option<Document>> {
         content: body.to_string(),
         plain_text,
         voices,
+        voices_error,
     }))
 }
 
@@ -360,6 +369,7 @@ pub fn list_all_in(base: &PathBuf) -> Result<Vec<Document>> {
             content: String::new(),
             plain_text: String::new(),
             voices,
+            voices_error: None,
         });
     }
     Ok(docs)
@@ -411,6 +421,90 @@ pub fn update_publish_in(
         write_voices_in(&dir, &voices)?;
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Metadata editing
+// ---------------------------------------------------------------------------
+
+/// Update a document's title, authors, and date fields.
+pub fn update_metadata(id: &str, title: Option<&str>, authors: &[String], date: Option<&str>) -> Result<()> {
+    update_metadata_in(&documents_dir()?, id, title, authors, date)
+}
+
+pub fn update_metadata_in(
+    base: &PathBuf,
+    id: &str,
+    title: Option<&str>,
+    authors: &[String],
+    date: Option<&str>,
+) -> Result<()> {
+    let dir = doc_dir(base, id);
+    let md_path = dir.join("document.md");
+    if !md_path.exists() { return Ok(()); }
+
+    let src = std::fs::read_to_string(&md_path)
+        .with_context(|| format!("failed to read {}", md_path.display()))?;
+    let (mut fm, body) = frontmatter::parse::<DocumentFrontmatter>(&src)
+        .with_context(|| format!("failed to parse {}", md_path.display()))?;
+
+    fm.title = title.map(str::to_string);
+    fm.authors = authors.to_vec();
+    fm.date = date.map(str::to_string);
+    write_frontmatter(&dir, &fm, body)
+}
+
+// ---------------------------------------------------------------------------
+// Content editing
+// ---------------------------------------------------------------------------
+
+/// Update a document's content and plain_text, marking all synthesized voices stale.
+pub fn update_content(id: &str, content: &str, plain_text: &str) -> Result<()> {
+    update_content_in(&documents_dir()?, id, content, plain_text)
+}
+
+pub fn update_content_in(base: &PathBuf, id: &str, content: &str, plain_text: &str) -> Result<()> {
+    let dir = doc_dir(base, id);
+    let md_path = dir.join("document.md");
+    if !md_path.exists() {
+        return Err(anyhow::anyhow!("document not found: {id}"));
+    }
+
+    let src = std::fs::read_to_string(&md_path)
+        .with_context(|| format!("failed to read {}", md_path.display()))?;
+    let (fm, _old_body) = frontmatter::parse::<DocumentFrontmatter>(&src)
+        .with_context(|| format!("failed to parse {}", md_path.display()))?;
+    write_frontmatter(&dir, &fm, content)?;
+
+    let txt_path = dir.join("document.txt");
+    std::fs::write(&txt_path, plain_text)
+        .with_context(|| format!("failed to write {}", txt_path.display()))?;
+
+    // Mark all ready/in_progress voices stale — old audio is still playable.
+    let mut voices = read_voices_in(&dir)?;
+    for v in voices.values_mut() {
+        if matches!(v.status, VoiceStatus::Ready | VoiceStatus::InProgress) {
+            v.status = VoiceStatus::Stale;
+        }
+    }
+    write_voices_in(&dir, &voices)
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+pub fn delete_document(id: &str) -> Result<()> {
+    delete_document_in(&documents_dir()?, id)
+}
+
+pub fn delete_document_in(base: &PathBuf, id: &str) -> Result<()> {
+    let dir = doc_dir(base, id);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .with_context(|| format!("failed to remove {}", dir.display()))?;
+    }
     Ok(())
 }
 

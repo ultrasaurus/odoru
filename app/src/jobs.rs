@@ -189,6 +189,24 @@ impl JobStore {
         true
     }
 
+    /// Cancel all non-terminal jobs referencing the given document UUID.
+    pub async fn cancel_for_document(&self, doc_id: &str) {
+        let jobs: Vec<SharedJob> = self.jobs.iter().map(|e| e.value().clone()).collect();
+        for shared in jobs {
+            let job_id = {
+                let job = shared.read().await;
+                if job.document_id.as_deref() == Some(doc_id) {
+                    Some(job.id.clone())
+                } else {
+                    None
+                }
+            };
+            if let Some(id) = job_id {
+                self.cancel(&id).await;
+            }
+        }
+    }
+
     pub fn all(&self) -> Vec<SharedJob> {
         self.jobs.iter().map(|e| e.value().clone()).collect()
     }

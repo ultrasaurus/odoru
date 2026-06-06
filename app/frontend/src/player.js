@@ -1,6 +1,4 @@
-function isSegment(m) { return 'audio' in m; }
-function isDone(m) { return 'done' in m; }
-function isError(m) { return 'error' in m; }
+import * as Ws from './ws';
 // ---------------------------------------------------------------------------
 // AudioQueue — chains AudioBufferSourceNodes for gapless playback
 // ---------------------------------------------------------------------------
@@ -15,6 +13,10 @@ class AudioQueue {
         this.ctx = new AudioContext({ sampleRate: 24000 });
     }
     get currentTime() { return this.ctx.currentTime; }
+    async decodeAudioData(data) {
+        const audioBuffer = await this.ctx.decodeAudioData(data);
+        return audioBuffer.getChannelData(0);
+    }
     enqueue(samples) {
         const buf = this.ctx.createBuffer(1, samples.length, 24000);
         buf.copyToChannel(samples, 0);
@@ -54,7 +56,6 @@ export class Player {
     activeIndex = -1;
     rafId = 0;
     container;
-    ws = null;
     timeUpdateCbs = [];
     endedCbs = [];
     onReadyCb = null;
@@ -64,6 +65,8 @@ export class Player {
     onSeekReadyCb = null;
     autoScroll = false; // set by caller; scrolls active segment into view when true
     done = false; // true once the WS sends {done: true}
+    // Serialises async segment processing so decodes complete in arrival order.
+    decodeChain = Promise.resolve();
     // Seconds into the full audio where the current play session started.
     seekOffset = 0;
     // Pre-rendered gray spans supplied by caller; activated in place as audio arrives.
@@ -84,58 +87,38 @@ export class Player {
         if (this.pendingSpans.length === 0) {
             this.container.innerHTML = '<div class="loading">Synthesizing…</div>';
         }
-        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-        this.ws = new WebSocket(`${proto}://${location.host}/ws`);
-        this.ws.onopen = () => {
-            const msg = { text };
-            if (voice)
-                msg.voice = voice;
-            if (documentId)
-                msg.document_id = documentId;
-            this.ws.send(JSON.stringify(msg));
-        };
-        this.ws.onmessage = (ev) => {
-            const msg = JSON.parse(ev.data);
-            if (isError(msg)) {
-                this.onErrorCb?.(msg.error);
-                return;
-            }
-            if (isDone(msg)) {
+        Ws.sendSynth(text, voice ?? '', documentId, {
+            onSegment: (msg) => {
+                this.decodeChain = this.decodeChain.then(async () => {
+                    const samples = await this.queue.decodeAudioData(msg.audioData);
+                    const duration = samples.length / 24000;
+                    const prev = this.segments[this.segments.length - 1];
+                    const startTime = prev ? prev.endTime : 0;
+                    const endTime = startTime + duration;
+                    this.queue.enqueue(samples);
+                    const newIndex = this.segments.length;
+                    this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end });
+                    this.renderSegment(msg.transcript, newIndex);
+                    if (newIndex === 0)
+                        this.onReadyCb?.();
+                    if (this.pendingSeekIndex >= 0 && newIndex >= this.pendingSeekIndex) {
+                        this._doSeek(this.pendingSeekIndex, this.pendingSeekWasPlaying);
+                        this.pendingSeekIndex = -1;
+                        this.pendingSeekWasPlaying = false;
+                        this.onSeekReadyCb?.();
+                    }
+                });
+            },
+            onDone: () => {
                 this.done = true;
                 this.onSynthDoneCb?.();
-                this.ws?.close();
-                return;
-            }
-            if (isSegment(msg)) {
-                const samples = decodeF32PCM(msg.audio);
-                const duration = samples.length / 24000;
-                // Audio-relative start = end of previous segment (or 0)
-                const prev = this.segments[this.segments.length - 1];
-                const startTime = prev ? prev.endTime : 0;
-                const endTime = startTime + duration;
-                this.queue.enqueue(samples);
-                const newIndex = this.segments.length;
-                this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end });
-                this.renderSegment(msg.transcript, newIndex);
-                if (newIndex === 0)
-                    this.onReadyCb?.();
-                if (this.pendingSeekIndex >= 0 && newIndex >= this.pendingSeekIndex) {
-                    this._doSeek(this.pendingSeekIndex, this.pendingSeekWasPlaying);
-                    this.pendingSeekIndex = -1;
-                    this.pendingSeekWasPlaying = false;
-                    this.onSeekReadyCb?.();
-                }
-            }
-        };
-        this.ws.onerror = () => { this.onErrorCb?.('WebSocket error'); };
-        this.ws.onclose = (ev) => {
-            // If the server closed the connection before sending {done:true},
-            // report an error so the UI isn't left in limbo.
-            if (!this.done && ev.code !== 1000) {
-                this.onErrorCb?.('Connection lost — server may have restarted');
-            }
-        };
+            },
+            onError: (msg) => {
+                this.onErrorCb?.(msg);
+            },
+        });
     }
+    setPendingSpans(spans) { this.pendingSpans = spans; }
     onReady(cb) { this.onReadyCb = cb; }
     /** Fires when all audio has been received (safe to download). */
     onSynthDone(cb) { this.onSynthDoneCb = cb; }
@@ -210,6 +193,7 @@ export class Player {
             .map(s => s.transcript.text.trim().split(/\s+/).filter(Boolean).length)
             .reduce((a, b) => a + b, 0);
     }
+    stop() { this.reset(); }
     downloadWav(filename) {
         if (!this.hasAudio)
             return;
@@ -240,13 +224,7 @@ export class Player {
     // Private
     // ---------------------------------------------------------------------------
     reset() {
-        if (this.ws) {
-            this.ws.onclose = null;
-            this.ws.onerror = null;
-            this.ws.onmessage = null;
-            this.ws.close();
-            this.ws = undefined;
-        }
+        Ws.cancelSynth();
         this.stopTracking();
         this.queue.reset();
         this.segments = [];
@@ -255,6 +233,7 @@ export class Player {
         this.activeIndex = -1;
         this.seekOffset = 0;
         this.done = false;
+        this.decodeChain = Promise.resolve();
         this.pendingSeekIndex = -1;
         this.pendingSeekWasPlaying = false;
     }
@@ -343,13 +322,6 @@ export class Player {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function decodeF32PCM(b64) {
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++)
-        bytes[i] = binary.charCodeAt(i);
-    return new Float32Array(bytes.buffer);
-}
 /// Encode mono Float32 PCM as a WAV file (IEEE float format).
 function encodeWav(samples, sampleRate) {
     const bytesPerSample = 4; // float32

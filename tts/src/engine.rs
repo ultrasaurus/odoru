@@ -67,7 +67,6 @@ impl TtsEngine {
 
     /// Check whether every sentence in `text` is already in the audio disk cache
     /// for the given voice. Returns `None` if the voice name is not found.
-    /// Only meaningful for the F5 backend (Kokoro is never cached).
     pub fn all_audio_cached(&self, text: &str, voice_name: &str) -> Option<bool> {
         let voice = self.voices.get(voice_name)?.clone();
         let sentences: Vec<_> = splitter::split(text)
@@ -79,12 +78,17 @@ impl TtsEngine {
         }
         let all_cached = sentences.iter()
             .all(|s| {
-                if let crate::backend::Voice::F5Tts { .. } = &voice {
-                    let normalized = crate::f5::normalizer::normalize(&s.text);
-                    let key = audio_cache::cache_key(&normalized, &voice.cache_key());
-                    audio_cache::exists(&key)
-                } else {
-                    false // Kokoro not cached
+                match &voice {
+                    crate::backend::Voice::F5Tts { .. } => {
+                        let normalized = crate::f5::normalizer::normalize(&s.text);
+                        let key = audio_cache::cache_key(&normalized, &voice.cache_key());
+                        audio_cache::exists(&key)
+                    }
+                    crate::backend::Voice::Kokoro { .. } => {
+                        let key = audio_cache::cache_key(&s.text, &voice.cache_key());
+                        audio_cache::exists(&key)
+                    }
+                    _ => false,
                 }
             });
         Some(all_cached)
@@ -143,32 +147,33 @@ async fn run_synthesis_loop(
         let backend2 = Arc::clone(&backend);
         let voice2 = voice.clone();
 
-        // For F5: use a per-sentence lock to prevent duplicate synthesis when
-        // a WS session and a background job race to the same sentence.
+        // Compute (disk_cache_key, text_for_metadata) for backends that support
+        // disk caching. Use a per-sentence lock to prevent duplicate synthesis
+        // when a WS session and a background job race to the same sentence.
         // Pattern: acquire lock → re-check disk cache → synthesize if still a
         // miss → write → release. Second caller waits, then gets a cache hit.
-        let cache_key = match &voice {
+        let cache_entry: Option<(String, String)> = match &voice {
             crate::backend::Voice::F5Tts { .. } => {
                 let normalized = crate::f5::normalizer::normalize(&sentence_text);
-                Some(audio_cache::cache_key(&normalized, &voice.cache_key()))
+                let key = audio_cache::cache_key(&normalized, &voice.cache_key());
+                Some((key, normalized))
+            }
+            crate::backend::Voice::Kokoro { .. } => {
+                let key = audio_cache::cache_key(&sentence_text, &voice.cache_key());
+                Some((key, sentence_text.clone()))
             }
             _ => None,
         };
 
-        if let Some(ref key) = cache_key {
+        if let Some((ref key, _)) = cache_entry {
             // Fast path: check before acquiring the lock.
-            if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
+            let key2 = key.clone();
+            let hit = tokio::task::spawn_blocking(move || audio_cache::lookup(&key2))
+                .await.expect("spawn_blocking panicked");
+            if let Some((mp3_bytes, duration)) = hit {
                 debug!("[audio cache] hit sentence {index} (pre-lock), skipping synthesis");
-                let segment = Segment {
-                    start: time_offset,
-                    end: time_offset + duration,
-                    text: sentence.text.clone(),
-                };
-                time_offset += duration;
-                if index + 1 < sentence_count {
-                    time_offset += if paragraph_end { paragraph_silence_secs } else { sentence_silence_secs };
-                }
-                let seg = AudioSegment { index, samples, sample_rate, transcript: segment, paragraph_end };
+                let seg = make_segment(index, mp3_bytes, duration, &sentence, time_offset);
+                time_offset = advance_offset(time_offset, duration, index, sentence_count, paragraph_end, sentence_silence_secs, paragraph_silence_secs);
                 if tx.send(Ok(seg)).await.is_err() { return; }
                 continue;
             }
@@ -181,18 +186,13 @@ async fn run_synthesis_loop(
                 .clone();
             let _guard = lock.lock().await;
 
-            if let Some((samples, sample_rate, duration)) = audio_cache::lookup(key) {
+            let key2 = key.clone();
+            let hit = tokio::task::spawn_blocking(move || audio_cache::lookup(&key2))
+                .await.expect("spawn_blocking panicked");
+            if let Some((mp3_bytes, duration)) = hit {
                 debug!("[audio cache] hit sentence {index} (post-lock), skipping synthesis");
-                let segment = Segment {
-                    start: time_offset,
-                    end: time_offset + duration,
-                    text: sentence.text.clone(),
-                };
-                time_offset += duration;
-                if index + 1 < sentence_count {
-                    time_offset += if paragraph_end { paragraph_silence_secs } else { sentence_silence_secs };
-                }
-                let seg = AudioSegment { index, samples, sample_rate, transcript: segment, paragraph_end };
+                let seg = make_segment(index, mp3_bytes, duration, &sentence, time_offset);
+                time_offset = advance_offset(time_offset, duration, index, sentence_count, paragraph_end, sentence_silence_secs, paragraph_silence_secs);
                 if tx.send(Ok(seg)).await.is_err() { return; }
                 continue;
             }
@@ -206,29 +206,21 @@ async fn run_synthesis_loop(
 
         match result {
             Ok((samples, sample_rate, duration)) => {
-                // Write to disk cache if applicable
-                if let Some(ref key) = cache_key {
-                    let normalized = crate::f5::normalizer::normalize(&sentence.text);
-                    audio_cache::store(key, &normalized, &samples, sample_rate, duration);
-                    // Lock is still held here — released when _guard drops at end of match arm.
+                // Encode to MP3 and write to disk cache (lock still held until end of match arm).
+                let mp3_bytes = tokio::task::spawn_blocking({
+                    let samples2 = samples.clone();
+                    move || audio_cache::encode_mp3(&samples2, sample_rate)
+                }).await.expect("spawn_blocking panicked");
+
+                if let Some((ref key, ref text)) = cache_entry {
+                    let (key2, text2, mp3_2) = (key.clone(), text.clone(), mp3_bytes.clone());
+                    tokio::task::spawn_blocking(move || {
+                        audio_cache::store(&key2, &text2, &mp3_2, duration);
+                    }).await.expect("spawn_blocking panicked");
                 }
 
-                let segment = Segment {
-                    start: time_offset,
-                    end: time_offset + duration,
-                    text: sentence.text.clone(),
-                };
-
-                time_offset += duration;
-                if index + 1 < sentence_count {
-                    time_offset += if paragraph_end {
-                        paragraph_silence_secs
-                    } else {
-                        sentence_silence_secs
-                    };
-                }
-
-                let seg = AudioSegment { index, samples, sample_rate, transcript: segment, paragraph_end };
+                let seg = make_segment(index, mp3_bytes, duration, &sentence, time_offset);
+                time_offset = advance_offset(time_offset, duration, index, sentence_count, paragraph_end, sentence_silence_secs, paragraph_silence_secs);
                 if tx.send(Ok(seg)).await.is_err() { return; }
             }
             Err(e) => {
@@ -237,6 +229,37 @@ async fn run_synthesis_loop(
             }
         }
     }
+}
+
+fn make_segment(
+    index: usize,
+    mp3_bytes: Vec<u8>,
+    duration: f64,
+    sentence: &crate::splitter::Sentence,
+    time_offset: f64,
+) -> AudioSegment {
+    let transcript = Segment {
+        start: time_offset,
+        end: time_offset + duration,
+        text: sentence.text.clone(),
+    };
+    AudioSegment { index, audio: mp3_bytes, duration, transcript, paragraph_end: sentence.paragraph_end }
+}
+
+fn advance_offset(
+    offset: f64,
+    duration: f64,
+    index: usize,
+    sentence_count: usize,
+    paragraph_end: bool,
+    sentence_silence_secs: f64,
+    paragraph_silence_secs: f64,
+) -> f64 {
+    let mut t = offset + duration;
+    if index + 1 < sentence_count {
+        t += if paragraph_end { paragraph_silence_secs } else { sentence_silence_secs };
+    }
+    t
 }
 
 // ---------------------------------------------------------------------------

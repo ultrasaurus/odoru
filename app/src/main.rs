@@ -30,14 +30,13 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use tts::{AudioSegment, Backend, TtsEngine, Voice};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, broadcast};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info, warn};
 use util::{documents, index::{DocumentIndex, html_content_hash}, voice as voice_util};
@@ -56,22 +55,19 @@ struct CachedSegment {
     transcript_end: f64,
     transcript_text: String,
     paragraph_end: bool,
-    audio_b64: String,
+    /// MP3-encoded audio bytes.
+    audio_bytes: Vec<u8>,
 }
 
 impl CachedSegment {
     fn from_segment(seg: &AudioSegment) -> Self {
-        let mut bytes = Vec::with_capacity(seg.samples.len() * 4);
-        for s in &seg.samples {
-            bytes.extend_from_slice(&s.to_le_bytes());
-        }
         Self {
             index: seg.index,
             transcript_start: seg.transcript.start,
             transcript_end: seg.transcript.end,
             transcript_text: seg.transcript.text.clone(),
             paragraph_end: seg.paragraph_end,
-            audio_b64: B64.encode(&bytes),
+            audio_bytes: seg.audio.clone(),
         }
     }
 }
@@ -109,6 +105,19 @@ struct VoicesResponse {
     voices: Vec<VoiceInfo>,
 }
 
+/// Event broadcast to WS clients watching a document.
+#[derive(Clone, Debug, Serialize)]
+struct DocumentStatusEvent {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+    id: String,
+    status: documents::FetchStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 #[derive(Clone)]
 struct AppState {
     kokoro: Option<Arc<TtsEngine>>,
@@ -121,6 +130,9 @@ struct AppState {
     doc_index: Arc<DocumentIndex>,
     /// Per-document RwLock for voices.json writes, keyed by document UUID.
     voice_locks: Arc<DashMap<String, Arc<RwLock<()>>>>,
+    /// Broadcast channel for document status events.
+    /// WS clients subscribe and filter by watched document IDs.
+    doc_events: broadcast::Sender<DocumentStatusEvent>,
 }
 
 impl AppState {
@@ -166,6 +178,16 @@ fn parse_voice_id(id: &str) -> Option<(&str, &str)> {
 // Protocol types
 // ---------------------------------------------------------------------------
 
+/// Incoming WS messages from the client.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ClientMsg {
+    /// Synthesize text, optionally tied to a document.
+    Synth(SynthRequest),
+    /// Subscribe to document_status events for a document.
+    Watch(WatchRequest),
+}
+
 #[derive(Deserialize)]
 struct SynthRequest {
     text: String,
@@ -177,11 +199,18 @@ struct SynthRequest {
     document_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct WatchRequest {
+    document_id: String,
+}
+
+/// JSON header frame sent before each binary audio frame.
 #[derive(Serialize)]
-struct SegmentMsg<'a> {
+struct SegmentHeaderMsg<'a> {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
     index: usize,
     transcript: TranscriptJson<'a>,
-    audio: &'a str,
     cached: bool,
     paragraph_end: bool,
 }
@@ -194,37 +223,59 @@ struct TranscriptJson<'a> {
 }
 
 #[derive(Serialize)]
-struct DoneMsg { done: bool }
+struct DoneMsg {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+}
 
 #[derive(Serialize)]
-struct ErrorMsg { error: String }
+struct ErrorMsg {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+    error: String,
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 async fn send_error(sender: &mut futures::stream::SplitSink<WebSocket, Message>, msg: &str) {
-    let json = serde_json::to_string(&ErrorMsg { error: msg.to_string() }).unwrap();
+    let json = serde_json::to_string(&ErrorMsg {
+        msg_type: "error",
+        error: msg.to_string(),
+    }).unwrap();
     let _ = sender.send(Message::Text(json.into())).await;
 }
 
+/// Send one segment: JSON header frame then binary audio frame.
+/// The client pairs them in arrival order. Returns false if either send fails.
 async fn send_segment(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
     seg: &CachedSegment,
     cached: bool,
 ) -> bool {
-    let msg = SegmentMsg {
+    let header = SegmentHeaderMsg {
+        msg_type: "segment",
         index: seg.index,
         transcript: TranscriptJson {
             start: seg.transcript_start,
             end: seg.transcript_end,
             text: &seg.transcript_text,
         },
-        audio: &seg.audio_b64,
         cached,
         paragraph_end: seg.paragraph_end,
     };
-    let json = serde_json::to_string(&msg).unwrap();
+    let json = serde_json::to_string(&header).unwrap();
+    if sender.send(Message::Text(json.into())).await.is_err() { return false; }
+    // O(1) clone — Bytes is reference-counted.
+    sender.send(Message::Binary(seg.audio_bytes.clone())).await.is_ok()
+}
+
+async fn send_json<T: Serialize>(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    msg: &T,
+) -> bool {
+    let json = serde_json::to_string(msg).unwrap();
     sender.send(Message::Text(json.into())).await.is_ok()
 }
 
@@ -279,13 +330,25 @@ async fn create_document(
     let url = body.url.clone();
     let doc_id = id.clone();
     let doc_index = state.doc_index.clone();
+    let doc_events = state.doc_events.clone();
 
     tokio::task::spawn_blocking(move || {
+        let broadcast_status = |status: documents::FetchStatus, title: Option<String>, error: Option<String>| {
+            let _ = doc_events.send(DocumentStatusEvent {
+                msg_type: "document_status",
+                id: doc_id.clone(),
+                status,
+                title,
+                error,
+            });
+        };
+
         let html = match dl::fetch::fetch(&url) {
             Ok(h) => h,
             Err(e) => {
                 error!("[documents] fetch failed for {url}: {e}");
                 let _ = documents::store_error(&doc_id, &e.to_string());
+                broadcast_status(documents::FetchStatus::Error, None, Some(e.to_string()));
                 return;
             }
         };
@@ -293,7 +356,6 @@ async fn create_document(
         let content_hash = html_content_hash(&html);
 
         // Check content_hash index — catches redirects to already-cached content.
-        // We need a blocking check; use a fresh tokio runtime handle.
         // Since we're in spawn_blocking, we can't .await — use block_in_place.
         let existing_id = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(
@@ -305,16 +367,19 @@ async fn create_document(
             // This URL resolves to content we already have. Remove the
             // placeholder we just created and update the source_url index
             // to point at the existing document.
-            let articles_dir = match documents::documents_dir() {
+            let docs_dir = match documents::documents_dir() {
                 Ok(d) => d,
                 Err(e) => { error!("[documents] documents_dir error: {e}"); return; }
             };
-            let _ = std::fs::remove_dir_all(articles_dir.join(&doc_id));
+            let _ = std::fs::remove_dir_all(docs_dir.join(&doc_id));
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(
                     doc_index.insert(&existing, Some(&url), None)
                 )
             });
+            // Notify watcher that the doc_id they were given now resolves to existing.
+            let title = documents::lookup_by_id(&existing).ok().flatten().and_then(|d| d.title);
+            broadcast_status(documents::FetchStatus::Ready, title, None);
             return;
         }
 
@@ -323,10 +388,12 @@ async fn create_document(
             Err(e) => {
                 error!("[documents] extract failed for {url}: {e}");
                 let _ = documents::store_error(&doc_id, &e.to_string());
+                broadcast_status(documents::FetchStatus::Error, None, Some(e.to_string()));
                 return;
             }
         };
 
+        let title = article.title.clone();
         if let Err(e) = documents::store_ready(
             &doc_id,
             Some(&url),
@@ -341,6 +408,7 @@ async fn create_document(
         ) {
             error!("[documents] store_ready failed for {doc_id}: {e}");
             let _ = documents::store_error(&doc_id, &e.to_string());
+            broadcast_status(documents::FetchStatus::Error, None, Some(e.to_string()));
             return;
         }
 
@@ -352,6 +420,7 @@ async fn create_document(
         });
 
         info!("[documents] ready: {doc_id} ({url})");
+        broadcast_status(documents::FetchStatus::Ready, title, None);
     });
 
     Json(CreateDocumentResponse { id }).into_response()
@@ -381,6 +450,9 @@ struct DocumentResponse {
     /// Present only when status == error.
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// Present when voices.json failed to parse; voices will be empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    voices_error: Option<String>,
 }
 
 async fn get_document(
@@ -413,6 +485,7 @@ async fn get_document(
                 publish: doc.publish,
                 voices: doc.voices,
                 error,
+                voices_error: doc.voices_error,
             }).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND,
@@ -469,7 +542,8 @@ async fn list_documents() -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
-// PATCH /documents/:id — Phase 1: publish flag + published_voice
+// PATCH /documents/:id — publish flag, published_voice, and content editing
+// DELETE /documents/:id — cancel in-progress jobs, remove document
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -477,13 +551,21 @@ struct PatchDocumentBody {
     #[serde(default)]
     publish: Option<bool>,
     published_voice: Option<String>,
+    /// Full markdown content (document.md body). Must be paired with plain_text.
+    content: Option<String>,
+    /// Plain text for TTS (document.txt). Must be paired with content.
+    plain_text: Option<String>,
+    /// Metadata fields — any subset may be provided.
+    title: Option<String>,
+    authors: Option<Vec<String>>,
+    date: Option<String>,
 }
 
 async fn patch_document(
     Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
     Json(body): Json<PatchDocumentBody>,
 ) -> impl IntoResponse {
-    // Verify document exists.
     match documents::lookup_by_id(&id) {
         Ok(None) => return (StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "document not found" }))).into_response(),
@@ -492,12 +574,89 @@ async fn patch_document(
         Ok(Some(_)) => {}
     }
 
-    let publish = body.publish.unwrap_or(false);
-    let voice = body.published_voice.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        documents::update_publish(&id, publish, voice.as_deref())
-    }).await;
+    // Content edit path — requires both fields; marks voices stale.
+    if body.content.is_some() || body.plain_text.is_some() {
+        match (&body.content, &body.plain_text) {
+            (Some(content), Some(plain_text)) => {
+                let content = content.clone();
+                let plain_text = plain_text.clone();
+                let doc_id = id.clone();
+                let voice_lock = state.voice_lock(&id);
+                let _guard = voice_lock.write().await;
+                let result = tokio::task::spawn_blocking(move || {
+                    documents::update_content(&doc_id, &content, &plain_text)
+                }).await;
+                if let Err(e) | Ok(Err(e)) = result.map_err(|e| anyhow::anyhow!(e)) {
+                    return (StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": format!("{e}") }))).into_response();
+                }
+            }
+            _ => return (StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({ "error": "content and plain_text must both be provided" }))).into_response(),
+        }
+    }
 
+    // Publish / published_voice path.
+    if body.publish.is_some() || body.published_voice.is_some() {
+        let publish = body.publish.unwrap_or(false);
+        let voice = body.published_voice.clone();
+        let doc_id = id.clone();
+        let voice_lock = state.voice_lock(&id);
+        let _guard = voice_lock.write().await;
+        let result = tokio::task::spawn_blocking(move || {
+            documents::update_publish(&doc_id, publish, voice.as_deref())
+        }).await;
+        if let Err(e) | Ok(Err(e)) = result.map_err(|e| anyhow::anyhow!(e)) {
+            return (StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response();
+        }
+    }
+
+    // Metadata edit path — title, authors, date.
+    if body.title.is_some() || body.authors.is_some() || body.date.is_some() {
+        let title = body.title.clone();
+        let authors = body.authors.clone().unwrap_or_default();
+        let date = body.date.clone();
+        let doc_id = id.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            documents::update_metadata(
+                &doc_id,
+                title.as_deref(),
+                &authors,
+                date.as_deref(),
+            )
+        }).await;
+        if let Err(e) | Ok(Err(e)) = result.map_err(|e| anyhow::anyhow!(e)) {
+            return (StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response();
+        }
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn delete_document(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match documents::lookup_by_id(&id) {
+        Ok(None) => return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Ok(Some(_)) => {}
+    }
+
+    // Cancel all jobs referencing this document before removing files.
+    state.jobs.cancel_for_document(&id).await;
+
+    // Remove from in-memory indexes and flush to disk.
+    state.doc_index.remove(&id).await;
+
+    // Drop the per-document voice lock entry.
+    state.voice_locks.remove(&id);
+
+    let result = tokio::task::spawn_blocking(move || documents::delete_document(&id)).await;
     match result {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
@@ -580,6 +739,7 @@ async fn create_job(
     // Dedup: return existing non-terminal job for same text + voice.
     // If it's pending with no live task (e.g. after server restart), restart it.
     let text_hash = jobs::text_hash(&body.text);
+    let voice_id = body.voice.clone();
     if let Some(existing) = state.jobs.find_active(&text_hash, &body.voice).await {
         let needs_task = {
             let job = existing.read().await;
@@ -601,6 +761,26 @@ async fn create_job(
             jobs::spawn_job(existing.clone(), cancel_flag, body.text,
                 voice_name, body.voice, art_id, engine, state.jobs.clone());
         }
+        // If the job is already done and a document_id was given, make sure
+        // that document's voices.json reflects the ready state — it may be a
+        // freshly-created document (e.g. after deleting and re-fetching the
+        // same URL) that never had its voice status written.
+        {
+            let job = existing.read().await;
+            if matches!(job.status, JobStatus::Done) {
+                if let Some(doc_id) = &body.document_id {
+                    if let Ok(dir) = documents::documents_dir().map(|d| d.join(doc_id)) {
+                        let lock = state.voice_lock(doc_id);
+                        let _guard = lock.write().await;
+                        if let Err(e) = documents::update_voice_status_in(
+                            &dir, &voice_id, VoiceStatus::Ready, None, Some(&job.id),
+                        ) {
+                            warn!("Failed to backfill voice ready status for {doc_id}: {e}");
+                        }
+                    }
+                }
+            }
+        }
         let job = existing.read().await;
         return Json(JobResponse::from_job(&job)).into_response();
     }
@@ -617,7 +797,7 @@ async fn create_job(
             Json(serde_json::json!({ "error": format!("Failed to create job: {e}") }))).into_response(),
     };
 
-    // Mark voice as in-progress in voices.json if a document_id was provided.
+    // Mark voice as in_progress in voices.json if a document_id was provided.
     if let Some(doc_id) = &body.document_id {
         let job_id = shared.read().await.id.clone();
         let dir = documents::documents_dir().map(|d| d.join(doc_id));
@@ -627,7 +807,7 @@ async fn create_job(
             if let Err(e) = documents::update_voice_status_in(
                 &dir, &body.voice, VoiceStatus::InProgress, None, Some(&job_id),
             ) {
-                warn!("Failed to set voice in-progress for {doc_id}: {e}");
+                warn!("Failed to set voice in_progress for {doc_id}: {e}");
             }
         }
     }
@@ -760,33 +940,89 @@ async fn ws_handler(
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
 
-    let req = loop {
-        match receiver.next().await {
-            Some(Ok(Message::Text(msg))) => {
-                match serde_json::from_str::<SynthRequest>(&msg) {
-                    Ok(req) if !req.text.trim().is_empty() => break req,
-                    Ok(_) => { send_error(&mut sender, "text must not be empty").await; return; }
-                    Err(e) => { send_error(&mut sender, &format!("Invalid request: {e}")).await; return; }
+    // Subscribe to document status broadcast events.
+    let mut events_rx = state.doc_events.subscribe();
+    // Set of document IDs this connection is watching.
+    let mut watched: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    loop {
+        tokio::select! {
+            // ── Incoming client message ───────────────────────────────────
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<ClientMsg>(&text) {
+                            Ok(ClientMsg::Watch(req)) => {
+                                let doc_id = req.document_id.clone();
+                                watched.insert(req.document_id);
+                                // Push current status immediately so the client
+                                // doesn't miss a broadcast that fired before this
+                                // watch was registered.
+                                if let Ok(Some(doc)) = documents::lookup_by_id(&doc_id) {
+                                    if !matches!(doc.status, documents::FetchStatus::Fetching) {
+                                        let evt = DocumentStatusEvent {
+                                            msg_type: "document_status",
+                                            id: doc_id,
+                                            status: doc.status,
+                                            title: doc.title,
+                                            error: None,
+                                        };
+                                        if !send_json(&mut sender, &evt).await { return; }
+                                    }
+                                }
+                            }
+                            Ok(ClientMsg::Synth(req)) => {
+                                if req.text.trim().is_empty() {
+                                    send_error(&mut sender, "text must not be empty").await;
+                                    continue;
+                                }
+                                handle_synth(&mut sender, &state, req).await;
+                            }
+                            Err(e) => {
+                                send_error(&mut sender, &format!("Invalid request: {e}")).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => return,
+                    _ => {}
                 }
             }
-            Some(Ok(Message::Close(_))) | None => return,
-            _ => continue,
-        }
-    };
 
+            // ── Outgoing document status events ───────────────────────────
+            event = events_rx.recv() => {
+                match event {
+                    Ok(evt) if watched.contains(&evt.id) => {
+                        if !send_json(&mut sender, &evt).await { return; }
+                    }
+                    Ok(_) => {} // not watched by this connection
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("WS event receiver lagged by {n} messages");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        }
+    }
+}
+
+/// Handle a single synthesis request on an open WS connection.
+async fn handle_synth(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &Arc<AppState>,
+    req: SynthRequest,
+) {
     // Resolve voice ID — use explicit voice or fall back to first available.
     let voice_id = match req.voice {
         Some(v) => v,
         None => match state.default_voice() {
             Some(v) => v.to_string(),
-            None => { send_error(&mut sender, "no voices available").await; return; }
+            None => { send_error(sender, "no voices available").await; return; }
         }
     };
 
-    // Route to the correct engine, rejecting unprefixed or unknown voices.
     let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
         Ok(pair) => pair,
-        Err(e) => { send_error(&mut sender, &e).await; return; }
+        Err(e) => { send_error(sender, &e).await; return; }
     };
 
     let key = cache_key(&req.text, &voice_id);
@@ -795,24 +1031,22 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     if let Some(segments) = state.cache.get(&key) {
         debug!("Cache hit for key {}", &key[..8]);
         for seg in segments.iter() {
-            if !send_segment(&mut sender, seg, true).await { return; }
+            if !send_segment(sender, seg, true).await { return; }
         }
-        let done = serde_json::to_string(&DoneMsg { done: true }).unwrap();
-        let _ = sender.send(Message::Text(done.into())).await;
+        send_json(sender, &DoneMsg { msg_type: "done" }).await;
         return;
     }
 
-    // If a document_id was provided, record voice as in-progress.
+    // If a document_id was provided, record voice as in_progress.
     if let Some(doc_id) = &req.document_id {
         let lock = state.voice_lock(doc_id);
         let _guard = lock.write().await;
-        let dir = documents::documents_dir()
-            .map(|d| d.join(doc_id));
+        let dir = documents::documents_dir().map(|d| d.join(doc_id));
         if let Ok(dir) = dir {
             if let Err(e) = documents::update_voice_status_in(
                 &dir, &voice_id, VoiceStatus::InProgress, None, None,
             ) {
-                warn!("Failed to set voice in-progress for {doc_id}: {e}");
+                warn!("Failed to set voice in_progress for {doc_id}: {e}");
             }
         }
     }
@@ -828,11 +1062,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             Ok(seg) => {
                 last_end = seg.transcript.end;
                 let cached_seg = CachedSegment::from_segment(&seg);
-                if !send_segment(&mut sender, &cached_seg, false).await { return; }
+                if !send_segment(sender, &cached_seg, false).await { return; }
                 rendered.push(cached_seg);
             }
             Err(e) => {
-                // Mark voice as error if we have a document_id.
                 if let Some(doc_id) = &req.document_id {
                     let lock = state.voice_lock(doc_id);
                     let _guard = lock.write().await;
@@ -843,7 +1076,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         );
                     }
                 }
-                send_error(&mut sender, &format!("Synthesis error: {e}")).await;
+                send_error(sender, &format!("Synthesis error: {e}")).await;
                 return;
             }
         }
@@ -866,8 +1099,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    let done = serde_json::to_string(&DoneMsg { done: true }).unwrap();
-    let _ = sender.send(Message::Text(done.into())).await;
+    send_json(sender, &DoneMsg { msg_type: "done" }).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,6 +1241,9 @@ async fn main() -> anyhow::Result<()> {
     let doc_index = Arc::new(DocumentIndex::load().await?);
     info!("Document index loaded.");
 
+    // Broadcast channel for document status events (capacity 64 — personal tool, low volume).
+    let (doc_events, _) = broadcast::channel(64);
+
     let state = Arc::new(AppState {
         kokoro: kokoro_engine,
         f5: f5_engine,
@@ -1017,6 +1252,7 @@ async fn main() -> anyhow::Result<()> {
         jobs: job_store,
         doc_index,
         voice_locks: Arc::new(DashMap::new()),
+        doc_events,
     });
 
     restart_pending_jobs(state.clone());
@@ -1029,7 +1265,7 @@ async fn main() -> anyhow::Result<()> {
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/documents", get(list_documents).post(create_document))
-        .route("/documents/:id", get(get_document).patch(patch_document))
+        .route("/documents/:id", get(get_document).patch(patch_document).delete(delete_document))
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/:id", get(get_job).delete(cancel_job))

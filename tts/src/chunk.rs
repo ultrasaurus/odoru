@@ -8,14 +8,14 @@ pub struct Segment {
     pub text: String,
 }
 
-/// One synthesized sentence: audio samples + transcript segment with timing.
+/// One synthesized sentence: MP3-encoded audio + transcript segment with timing.
 pub struct AudioSegment {
     /// Zero-based position of this sentence in the stream.
     pub index: usize,
-    /// Raw f32 PCM samples at `sample_rate` Hz, mono.
-    pub samples: Vec<f32>,
-    /// Sample rate in Hz (typically 24 000).
-    pub sample_rate: u32,
+    /// MP3-encoded audio bytes.
+    pub audio: Vec<u8>,
+    /// Duration in seconds.
+    pub duration: f64,
     /// Sentence text and timing.
     pub transcript: Segment,
     /// True if this is the last sentence in its paragraph.

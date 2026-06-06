@@ -1,6 +1,6 @@
 [package]
 name = "cli"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 
 [[bin]]
@@ -9,9 +9,7 @@ path = "src/main.rs"
 
 
 [dependencies]
-config = { path = "../config" }
 util = { path = "../util" }
-hound = "3"
 tts = { path = "../tts" }
 dl = { path = "../dl" }
 clap = { version = "4", features = ["derive"] }
