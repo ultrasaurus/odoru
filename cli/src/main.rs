@@ -345,73 +345,19 @@ fn double_space_paragraphs(text: &str) -> String {
 }
 
 fn mp3_filename(article: &ParsedArticle) -> String {
-    let date = article.date.as_deref().unwrap_or("undated");
-    let slug = article.title.as_deref().unwrap_or("untitled");
-    let slug = slug
-        .to_lowercase()
-        .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("-");
-    let slug = if slug.len() > 60 { &slug[..60] } else { &slug };
-    format!("{}-{}.mp3", date, slug)
+    format!(
+        "{}.mp3",
+        util::slug::export_slug(article.title.as_deref(), article.date.as_deref())
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dl::ParsedArticle;
     use std::sync::Mutex;
 
     // Serialize tests that mutate process-global env vars.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn article(title: Option<&str>, date: Option<&str>) -> ParsedArticle {
-        ParsedArticle {
-            url: "https://example.com".into(),
-            title: title.map(str::to_string),
-            date: date.map(str::to_string),
-            authors: vec![],
-            description: None,
-            content: String::new(),
-            plain_text: String::new(),
-        }
-    }
-
-    // ── mp3_filename ──────────────────────────────────────────────────────
-
-    #[test]
-    fn mp3_filename_basic() {
-        let a = article(Some("Hello World"), Some("2024-01-15"));
-        assert_eq!(mp3_filename(&a), "2024-01-15-hello-world.mp3");
-    }
-
-    #[test]
-    fn mp3_filename_strips_punctuation() {
-        let a = article(Some("It's a Test: Really!"), Some("2024-03-01"));
-        assert_eq!(mp3_filename(&a), "2024-03-01-its-a-test-really.mp3");
-    }
-
-    #[test]
-    fn mp3_filename_truncates_long_title() {
-        let long = "a".repeat(80);
-        let a = article(Some(&long), Some("2024-01-01"));
-        let name = mp3_filename(&a);
-        // date- prefix + 60 chars + .wav
-        assert_eq!(name, format!("2024-01-01-{}.mp3", "a".repeat(60)));
-    }
-
-    #[test]
-    fn mp3_filename_missing_title_uses_untitled() {
-        let a = article(None, Some("2024-06-01"));
-        assert_eq!(mp3_filename(&a), "2024-06-01-untitled.mp3");
-    }
-
-    #[test]
-    fn mp3_filename_missing_date_uses_undated() {
-        let a = article(Some("My Post"), None);
-        assert_eq!(mp3_filename(&a), "undated-my-post.mp3");
-    }
 
     // ── double_space_paragraphs ───────────────────────────────────────────
 
