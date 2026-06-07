@@ -1,5 +1,6 @@
 import './style.css'
-import { renderMarkdown, type HeadingEntry } from './markdown'
+import { renderMarkdown } from './markdown'
+import { ReaderCore, formatByline } from './reader-core'
 
 // ---------------------------------------------------------------------------
 // Types — injected by CLI at export time via window.__ODORU__
@@ -63,20 +64,7 @@ interface PlayerState {
 const PREFETCH_WINDOW = 15
 
 let player: PlayerState | null = null
-let currentSpans: HTMLElement[] = []
-
-// ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-function formatByline(authors: string[], date?: string): string {
-  const authorStr = authors.join(', ')
-  const dateStr = date
-    ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-    : ''
-  if (authorStr && dateStr) return `${authorStr}, ${dateStr}`
-  return authorStr || dateStr
-}
+let core: ReaderCore | null = null
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -119,6 +107,10 @@ function render() {
     </div>
   `
 
+  core = new ReaderCore(
+    document.getElementById('transcript-container')!,
+    document.getElementById('outline-list')!,
+  )
   populateSidebar()
   wireTabSwitcher()
   wirePlayButton()
@@ -173,6 +165,7 @@ function loadDocument(slug: string) {
   document.getElementById('article-byline')!.textContent =
     formatByline(entry.authors ?? [], entry.date)
 
+
   const sourceUrlEl = document.getElementById('article-source-url')!
   sourceUrlEl.innerHTML = ''
   if (entry.source_url) {
@@ -191,35 +184,50 @@ function loadDocument(slug: string) {
   const doc = data.documents[slug]
   const transcript = data.transcripts[slug] ?? []
 
-  let headings: HeadingEntry[] = []
+  let spans: HTMLElement[] = []
+  let headings: ReturnType<typeof renderMarkdown>['headings'] = []
   if (doc?.content) {
     const result = renderMarkdown(doc.content, doc.plain_text, container)
-    currentSpans = result.pendingSpans
+    spans = result.pendingSpans
     headings = result.headings
   } else if (transcript.length > 0) {
     // No markdown content — fall back to plain sentence spans
-    currentSpans = transcript.map(seg => {
+    spans = transcript.map(seg => {
       const span = document.createElement('span')
-      span.className = 'segment'
+      span.className = 'segment pending'
       span.textContent = seg.text + ' '
       container.appendChild(span)
       return span
     })
   } else {
-    currentSpans = []
     container.innerHTML = '<div class="loading">No content available.</div>'
   }
-
-  renderOutline(headings)
 
   // Player
   const playBtn = document.getElementById('play-btn') as HTMLButtonElement
   if (entry.has_audio && transcript.length > 0) {
-    currentSpans.forEach(s => s.classList.remove('pending'))
-    wireSpanClicks()
+    core!.loadSpans(spans, true, index => {
+      if (!player) return
+      player.playing = true
+      const icon = document.getElementById('play-icon')
+      if (icon) icon.textContent = '⏸'
+      playSentence(index)
+    })
+    core!.renderOutline(headings, index => {
+      if (!player) return
+      if (player.playing) {
+        playSentence(index)
+      } else {
+        player.currentIndex = index
+        core!.deactivateAll()
+        core!.activateSpan(index)
+      }
+    })
     initPlayer(slug, transcript)
     playBtn.disabled = false
   } else {
+    core!.loadSpans(spans, false)
+    core!.renderOutline(headings, () => {})
     playBtn.disabled = true
   }
 
@@ -352,20 +360,11 @@ function wirePlayButton() {
 }
 
 // ---------------------------------------------------------------------------
-// Span highlighting
+// Span highlighting — delegates to ReaderCore
 // ---------------------------------------------------------------------------
 
-function activateSpan(index: number) {
-  const span = currentSpans[index]
-  if (!span) return
-  span.classList.remove('pending')
-  span.classList.add('active')
-  span.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-}
-
-function deactivateAllSpans() {
-  currentSpans.forEach(el => el.classList.remove('active'))
-}
+function activateSpan(index: number) { core?.activateSpan(index) }
+function deactivateAllSpans() { core?.deactivateAll() }
 
 // ---------------------------------------------------------------------------
 // Progress display
@@ -388,58 +387,6 @@ function updateProgress(current: number, total: number) {
 
 function updateTimeDisplay(current: number, total: number) {
   updateProgress(current, total)
-}
-
-// ---------------------------------------------------------------------------
-// Click-to-seek
-// ---------------------------------------------------------------------------
-
-function wireSpanClicks() {
-  currentSpans.forEach((span, index) => {
-    span.style.cursor = 'pointer'
-    span.addEventListener('click', () => {
-      if (!player) return
-      player.playing = true
-      const icon = document.getElementById('play-icon')
-      if (icon) icon.textContent = '⏸'
-      playSentence(index)
-    })
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Outline
-// ---------------------------------------------------------------------------
-
-function renderOutline(headings: HeadingEntry[]) {
-  const outlineList = document.getElementById('outline-list')!
-  outlineList.innerHTML = ''
-
-  if (headings.length === 0) {
-    outlineList.innerHTML = '<div class="outline-loading">No headings</div>'
-    return
-  }
-
-  const minDepth = Math.min(...headings.map(h => h.depth))
-  for (const h of headings) {
-    const el = document.createElement('div')
-    el.className = 'outline-item'
-    el.dataset.depth = String(h.depth - minDepth)
-    el.textContent = h.text
-    el.addEventListener('click', () => {
-      h.element.scrollIntoView({ behavior: 'instant', block: 'start' })
-      if (player) {
-        if (player.playing) {
-          playSentence(h.sentenceIndex)
-        } else {
-          player.currentIndex = h.sentenceIndex
-          deactivateAllSpans()
-          activateSpan(h.sentenceIndex)
-        }
-      }
-    })
-    outlineList.appendChild(el)
-  }
 }
 
 // ---------------------------------------------------------------------------

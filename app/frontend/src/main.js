@@ -2,6 +2,7 @@ import './style.css';
 import { Player } from './player';
 import { renderMarkdown } from './markdown';
 import { Document } from './document';
+import { ReaderCore, formatByline } from './reader-core';
 // DocumentState and VoiceEntry imported from ./document
 // Approximate generation seconds per word for each backend.
 // Kokoro: ~0.2 sec/word (measured: 143 words in 26s)
@@ -47,15 +48,6 @@ function setError(container, msg) {
 function setStatus(container, className, msg) {
     container.innerHTML = '';
     container.appendChild(makeEl('span', className, msg));
-}
-function formatByline(authors, date) {
-    const authorStr = (authors ?? []).length > 0 ? `by ${authors.join(', ')}` : '';
-    const dateStr = date
-        ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-        : '';
-    if (authorStr && dateStr)
-        return `${authorStr}, ${dateStr}`;
-    return authorStr || dateStr;
 }
 function fmt(s) {
     const m = Math.floor(s / 60);
@@ -184,6 +176,7 @@ function showReader() {
     const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls();
     const seekStatus = document.getElementById('seek-status');
     const player = new Player(transcriptContainer);
+    const core = new ReaderCore(transcriptContainer, outlineList);
     autoscrollCb.checked = true;
     player.autoScroll = true;
     autoscrollCb.addEventListener('change', () => { player.autoScroll = autoscrollCb.checked; });
@@ -201,50 +194,7 @@ function showReader() {
     });
     let currentDoc = null;
     wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal, () => (currentDoc?.title ?? currentDoc?.source_url ?? 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav');
-    // ── Outline ────────────────────────────────────────────────────────────────
-    let headings = [];
-    let outlineEls = [];
-    let activeOutlineIdx = -1;
-    function renderOutline(hs) {
-        headings = hs;
-        outlineEls = [];
-        activeOutlineIdx = -1;
-        outlineList.innerHTML = '';
-        if (hs.length === 0) {
-            outlineList.innerHTML = '<div class="outline-loading">No headings</div>';
-            return;
-        }
-        const minDepth = Math.min(...hs.map(h => h.depth));
-        for (const h of hs) {
-            const el = document.createElement('div');
-            el.className = 'outline-item';
-            el.dataset.depth = String(h.depth - minDepth);
-            el.textContent = h.text;
-            el.addEventListener('click', () => {
-                h.element.scrollIntoView({ behavior: 'instant', block: 'start' });
-                player.seekTo(h.sentenceIndex);
-            });
-            outlineList.appendChild(el);
-            outlineEls.push(el);
-        }
-    }
-    function updateOutlineActive(position) {
-        let found = -1;
-        for (let i = 0; i < headings.length; i++) {
-            const t = player.segmentStartTime(headings[i].sentenceIndex);
-            if (t !== null && t <= position)
-                found = i;
-            else if (t !== null)
-                break;
-        }
-        if (found === activeOutlineIdx)
-            return;
-        if (activeOutlineIdx >= 0)
-            outlineEls[activeOutlineIdx]?.classList.remove('active');
-        activeOutlineIdx = found;
-        if (found >= 0)
-            outlineEls[found]?.classList.add('active');
-    }
+    // Outline rendering and active-item tracking handled by ReaderCore.
     // ── Job polling ────────────────────────────────────────────────────────────
     let pollTimer = null;
     function stopPolling() {
@@ -356,8 +306,8 @@ function showReader() {
             // Always render transcript (used for reading even without audio).
             transcriptContainer.innerHTML = '';
             const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer);
-            renderOutline(hs);
-            player.onTimeUpdate(t => updateOutlineActive(t));
+            core.renderOutline(hs, i => player.seekTo(i));
+            player.onTimeUpdate(t => core.updateOutlineActive(t, i => player.segmentStartTime(i)));
             // Hand the spans to the player now that they exist.
             if (audioReady) {
                 player.setPendingSpans(pendingSpans);

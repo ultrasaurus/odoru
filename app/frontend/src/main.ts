@@ -1,7 +1,8 @@
 import './style.css'
 import { Player } from './player'
-import { renderMarkdown, type HeadingEntry } from './markdown'
+import { renderMarkdown } from './markdown'
 import { Document, type DocumentState, type VoiceEntry } from './document'
+import { ReaderCore, formatByline } from './reader-core'
 
 interface VoiceInfo {
   id: string          // prefixed, e.g. "f5:sarah" or "kokoro:am_puck"
@@ -78,14 +79,6 @@ function setStatus(container: HTMLElement, className: string, msg: string): void
   container.appendChild(makeEl('span', className, msg))
 }
 
-function formatByline(authors: string[], date?: string): string {
-  const authorStr = (authors ?? []).length > 0 ? `by ${authors.join(', ')}` : ''
-  const dateStr = date
-    ? new Date(date + 'T12:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-    : ''
-  if (authorStr && dateStr) return `${authorStr}, ${dateStr}`
-  return authorStr || dateStr
-}
 
 function fmt(s: number): string {
   const m = Math.floor(s / 60)
@@ -240,6 +233,7 @@ function showReader() {
   const seekStatus = document.getElementById('seek-status') as HTMLDivElement
 
   const player = new Player(transcriptContainer)
+  const core = new ReaderCore(transcriptContainer, outlineList)
 
   autoscrollCb.checked = true
   player.autoScroll = true
@@ -264,49 +258,7 @@ function showReader() {
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
     () => (currentDoc?.title ?? currentDoc?.source_url ?? 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav')
 
-  // ── Outline ────────────────────────────────────────────────────────────────
-  let headings: HeadingEntry[] = []
-  let outlineEls: HTMLElement[] = []
-  let activeOutlineIdx = -1
-
-  function renderOutline(hs: HeadingEntry[]) {
-    headings = hs
-    outlineEls = []
-    activeOutlineIdx = -1
-    outlineList.innerHTML = ''
-
-    if (hs.length === 0) {
-      outlineList.innerHTML = '<div class="outline-loading">No headings</div>'
-      return
-    }
-
-    const minDepth = Math.min(...hs.map(h => h.depth))
-    for (const h of hs) {
-      const el = document.createElement('div')
-      el.className = 'outline-item'
-      el.dataset.depth = String(h.depth - minDepth)
-      el.textContent = h.text
-      el.addEventListener('click', () => {
-        h.element.scrollIntoView({ behavior: 'instant', block: 'start' })
-        player.seekTo(h.sentenceIndex)
-      })
-      outlineList.appendChild(el)
-      outlineEls.push(el)
-    }
-  }
-
-  function updateOutlineActive(position: number) {
-    let found = -1
-    for (let i = 0; i < headings.length; i++) {
-      const t = player.segmentStartTime(headings[i].sentenceIndex)
-      if (t !== null && t <= position) found = i
-      else if (t !== null) break
-    }
-    if (found === activeOutlineIdx) return
-    if (activeOutlineIdx >= 0) outlineEls[activeOutlineIdx]?.classList.remove('active')
-    activeOutlineIdx = found
-    if (found >= 0) outlineEls[found]?.classList.add('active')
-  }
+  // Outline rendering and active-item tracking handled by ReaderCore.
 
   // ── Job polling ────────────────────────────────────────────────────────────
   let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -424,8 +376,8 @@ function showReader() {
         // Always render transcript (used for reading even without audio).
         transcriptContainer.innerHTML = ''
         const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer)
-        renderOutline(hs)
-        player.onTimeUpdate(t => updateOutlineActive(t))
+        core.renderOutline(hs, i => player.seekTo(i))
+        player.onTimeUpdate(t => core.updateOutlineActive(t, i => player.segmentStartTime(i)))
 
         // Hand the spans to the player now that they exist.
         if (audioReady) {
