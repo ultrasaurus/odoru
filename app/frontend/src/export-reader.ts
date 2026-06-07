@@ -1,4 +1,34 @@
 import './style.css'
+import { marked } from 'marked'
+
+// Configure marked to use the same CSS classes as the main reader so styles
+// defined in style.css under .transcript-container apply correctly.
+marked.use({
+  renderer: {
+    heading({ tokens, depth }) {
+      const text = this.parser!.parseInline(tokens)
+      return `<h${depth} class="md-heading">${text}</h${depth}>\n`
+    },
+    paragraph({ tokens }) {
+      const text = this.parser!.parseInline(tokens)
+      return `<p class="md-paragraph">${text}</p>\n`
+    },
+    blockquote({ tokens }) {
+      const body = this.parser!.parse(tokens)
+      return `<blockquote class="md-blockquote">${body}</blockquote>\n`
+    },
+    list({ items, ordered }) {
+      const tag = ordered ? 'ol' : 'ul'
+      const body = items.map(item =>
+        `<li class="md-list-item">${this.parser!.parseInline(item.tokens)}</li>`
+      ).join('\n')
+      return `<${tag} class="md-list">${body}</${tag}>\n`
+    },
+    code({ text }) {
+      return `<pre class="md-code"><code>${text}</code></pre>\n`
+    },
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Types — injected by CLI at export time via window.__ODORU__
@@ -7,6 +37,7 @@ import './style.css'
 interface ManifestEntry {
   title: string
   slug: string
+  authors?: string[]
   description?: string
   date?: string
 }
@@ -19,9 +50,14 @@ interface TranscriptEntry {
   paragraph_end: boolean
 }
 
+interface DocumentContent {
+  content: string  // markdown
+}
+
 interface OdoruExport {
   manifest: ManifestEntry[]
   transcripts: Record<string, TranscriptEntry[]>
+  documents: Record<string, DocumentContent>
 }
 
 declare global {
@@ -34,7 +70,7 @@ declare global {
 // Data — populated by CLI injection; empty stubs for Stage 1
 // ---------------------------------------------------------------------------
 
-const data: OdoruExport = window.__ODORU__ ?? { manifest: [], transcripts: {} }
+const data: OdoruExport = window.__ODORU__ ?? { manifest: [], transcripts: {}, documents: {} }
 
 // ---------------------------------------------------------------------------
 // Render
@@ -119,13 +155,24 @@ function loadDocument(slug: string) {
   header.style.display = ''
   document.getElementById('article-title')!.textContent = entry.title
   const byline = document.getElementById('article-byline')!
-  byline.textContent = [entry.date].filter(Boolean).join(' · ')
+  const bylineParts = [
+    entry.authors?.join(', '),
+    entry.date,
+  ].filter(Boolean)
+  byline.textContent = bylineParts.join(' · ')
 
-  // Transcript — Stage 2 will render sentence spans; for now render plain text
+  // Render markdown content if available; fall back to sentence spans
   const container = document.getElementById('transcript-container')!
+  const doc = data.documents[slug]
+  if (doc?.content) {
+    container.innerHTML = marked.parse(doc.content) as string
+    return
+  }
+
+  // Fallback: sentence spans (used in Stage 3 for audio sync)
   const transcript = data.transcripts[slug]
   if (!transcript || transcript.length === 0) {
-    container.innerHTML = '<div class="loading">No transcript available.</div>'
+    container.innerHTML = '<div class="loading">No content available.</div>'
     return
   }
   container.innerHTML = transcript.map(seg =>

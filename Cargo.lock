@@ -335,6 +335,7 @@ dependencies = [
  "dl",
  "futures",
  "indicatif",
+ "serde_json",
  "tempfile",
  "tokio",
  "tts",

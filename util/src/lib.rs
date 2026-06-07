@@ -7,9 +7,11 @@
 //! - [`documents`] — UUID-keyed document store in `~/.odoru/documents/<uuid>/`
 //! - [`index`] — in-memory source_url + content_hash indexes
 //! - [`slug`] — title-to-slug conversion and export directory name helpers
+//! - [`export`] — shared data types for static SPA export
 
 pub mod frontmatter;
 pub mod voice;
 pub mod documents;
 pub mod index;
 pub mod slug;
+pub mod export;

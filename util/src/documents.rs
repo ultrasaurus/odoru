@@ -117,6 +117,42 @@ pub struct Document {
 }
 
 // ---------------------------------------------------------------------------
+// Export metadata
+// ---------------------------------------------------------------------------
+
+/// Metadata for a document included in a static export.
+///
+/// Always constructible from a `Document` — `voice_id` is `None` when no voice
+/// has been marked published. The CLI warns in that case but still exports text.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExportMeta {
+    pub title: Option<String>,
+    pub authors: Vec<String>,
+    pub date: Option<String>,
+    pub source_url: Option<String>,
+    /// Voice ID of the published voice (e.g. `"f5:sarah"`), if set.
+    pub voice_id: Option<String>,
+}
+
+impl Document {
+    /// Build export metadata from this document.
+    ///
+    /// `voice_id` is `None` when no voice has `published: true`.
+    pub fn export_meta(&self) -> ExportMeta {
+        let voice_id = self.voices.iter()
+            .find(|(_, v)| v.published)
+            .map(|(id, _)| id.clone());
+        ExportMeta {
+            title: self.title.clone(),
+            authors: self.authors.clone(),
+            date: self.date.clone(),
+            source_url: self.source_url.clone(),
+            voice_id,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Directory helpers
 // ---------------------------------------------------------------------------
 
