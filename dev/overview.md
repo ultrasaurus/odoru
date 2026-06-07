@@ -102,9 +102,6 @@ See [protocol.md](protocol.md).
 - `PATCH /documents/:id` with stale voice transition (for content edits)
 - Snippets, upload, and paste input paths
 
-#### Static export
-- See [export.md](export.md) for current implementation & CLI usage
-- Export UI in authoring, consider warning for incomplete audio
 
 #### Results from URL fetch are editable ###
 so text can be adjusted if scraping is imperfect
