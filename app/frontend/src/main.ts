@@ -113,6 +113,7 @@ function wireControls(
     const pct = dur > 0 ? (t / dur) * 100 : 0
     progressFill.style.width = `${Math.min(pct, 100)}%`
     timeTotal.textContent = fmt(dur)
+    playIcon.textContent = player.paused ? '▶' : '⏸'
   })
 
   player.onEnded(() => {
@@ -120,8 +121,8 @@ function wireControls(
     progressFill.style.width = '100%'
   })
 
-  playBtn.addEventListener('click', () => {
-    player.toggle()
+  playBtn.addEventListener('click', async () => {
+    await player.toggle()
     playIcon.textContent = player.paused ? '▶' : '⏸'
   })
 
@@ -323,9 +324,11 @@ function showReader() {
   // ── Load document ──────────────────────────────────────────────────────────
   function loadDocument(doc: DocumentState) {
     currentDoc = doc
+    player.stop()
     stopPolling()
     jobArea.innerHTML = ''
     playBtn.disabled = true
+    playBtn.querySelector('.play-icon')!.textContent = '▶'
     downloadBtn.disabled = true
     progressFill.style.width = '0%'
     timeCurrent.textContent = '0:00'
@@ -376,7 +379,11 @@ function showReader() {
         // Always render transcript (used for reading even without audio).
         transcriptContainer.innerHTML = ''
         const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer)
-        core.renderOutline(hs, i => player.seekTo(i))
+        core.renderOutline(hs, i => {
+          player.seekTo(i, false)
+          const icon = playBtn.querySelector('.play-icon')
+          if (icon) icon.textContent = '▶'
+        })
         player.onTimeUpdate(t => core.updateOutlineActive(t, i => player.segmentStartTime(i)))
 
         // Hand the spans to the player now that they exist.

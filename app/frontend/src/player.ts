@@ -160,8 +160,8 @@ export class Player {
   /** Fires when a pending seek completes as the target segment arrives. */
   onSeekReady(cb: () => void): void                { this.onSeekReadyCb = cb }
 
-  seekTo(index: number): void {
-    const wasPlaying = this.queue.state === 'running'
+  seekTo(index: number, autoPlay?: boolean): void {
+    const wasPlaying = autoPlay ?? this.queue.state === 'running'
     if (index < this.segments.length) {
       this._doSeek(index, wasPlaying)
       this.pendingSeekIndex = -1
