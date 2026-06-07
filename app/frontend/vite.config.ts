@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 
 export default defineConfig({
+  base: './',
   server: {
     proxy: {
           '/api': 'http://localhost:3000',
@@ -9,5 +11,12 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    modulePreload: { polyfill: false },
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        'export-reader': resolve(__dirname, 'export-reader.html'),
+      },
+    },
   },
 })

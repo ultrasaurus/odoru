@@ -1,6 +1,7 @@
 mod audio;
 
-use clap::{Parser, ValueEnum};
+use anyhow::Context;
+use clap::{Parser, Subcommand, ValueEnum};
 use dl::ParsedArticle;
 use tts::{Backend, TtsEngine};
 use util::{documents, index::html_content_hash};
@@ -9,8 +10,22 @@ use std::path::Path;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "dl", about = "Fetch a URL or read a local file (.txt, .html) as markdown or plain text")]
+#[command(name = "dl")]
 struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Fetch a URL or local file (.txt, .html) as markdown or plain text
+    Fetch(FetchArgs),
+    /// Export published documents as a standalone static SPA
+    Spa(SpaArgs),
+}
+
+#[derive(Parser)]
+struct FetchArgs {
     /// URL to fetch, or path to a local .txt or .html file
     input: String,
 
@@ -43,6 +58,12 @@ struct Cli {
     /// combined with --backend f5. Errors if used with other backends.
     #[arg(long)]
     voice: Option<String>,
+}
+
+#[derive(Parser)]
+struct SpaArgs {
+    /// Directory to write the exported SPA into (created if it doesn't exist)
+    output_dir: String,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -261,11 +282,17 @@ fn resolve_mp3_path(output: Option<&str>, stem: &str) -> anyhow::Result<std::pat
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    match cli.command {
+        Command::Fetch(args) => run_fetch(args).await,
+        Command::Spa(args) => run_spa(args),
+    }
+}
 
-    let sp = spinner(&format!("Loading {}...", cli.input));
-    let input = cli.input.clone();
-    let input_display = cli.input.clone();
-    let no_cache = cli.no_cache;
+async fn run_fetch(args: FetchArgs) -> anyhow::Result<()> {
+    let sp = spinner(&format!("Loading {}...", args.input));
+    let input = args.input.clone();
+    let input_display = args.input.clone();
+    let no_cache = args.no_cache;
     let (article, wav_path_override) = match tokio::task::spawn_blocking(move || {
         load_input(&input, no_cache)
     }).await? {
@@ -280,20 +307,20 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    if cli.frontmatter {
+    if args.frontmatter {
         print!("{}", render_frontmatter(&article));
     }
-    let content = match cli.format {
+    let content = match args.format {
         Format::Text => double_space_paragraphs(&article.plain_text),
         Format::Markdown => article.content.clone(),
     };
     print!("{}", content);
 
-    if cli.audio {
+    if args.audio {
         let stem = wav_path_override
             .unwrap_or_else(|| mp3_filename(&article));
-        let mp3_path = resolve_mp3_path(cli.output.as_deref(), &stem)?;
-        let (backend, voice_name) = build_backend(cli.backend, cli.voice.as_deref())?;
+        let mp3_path = resolve_mp3_path(args.output.as_deref(), &stem)?;
+        let (backend, voice_name) = build_backend(args.backend, args.voice.as_deref())?;
         let engine = TtsEngine::builder().backend(backend).build()?;
         let total = tts::splitter::split(&article.plain_text).len();
         let pb = audio_progress(total);
@@ -303,6 +330,163 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
+    let out = std::path::PathBuf::from(&args.output_dir);
+    std::fs::create_dir_all(&out)
+        .with_context(|| format!("failed to create output directory {}", out.display()))?;
+
+    // Locate built frontend assets.
+    let dist = find_frontend_dist()?;
+
+    let reader_html_path = dist.join("export-reader.html");
+    if !reader_html_path.exists() {
+        anyhow::bail!(
+            "export-reader.html not found in {}.\nRun: cd app/frontend && npm run build",
+            dist.display()
+        );
+    }
+
+    // Build a self-contained index.html with all JS/CSS inlined so it works
+    // on file:// without CORS errors, and so we can inject window.__ODORU__.
+    let html = inline_assets(&reader_html_path, &dist)
+        .context("failed to inline assets into export-reader.html")?;
+    std::fs::write(out.join("index.html"), html)
+        .context("failed to write index.html")?;
+
+    println!("✔ Exported to {}", out.display());
+    Ok(())
+}
+
+/// Read `html_path`, replace every `<link rel="stylesheet" href="...">` and
+/// `<script ... src="...">` that point into `dist_dir` with inline
+/// `<style>` / `<script>` blocks.  Also strips `crossorigin` attributes.
+fn inline_assets(html_path: &std::path::Path, dist_dir: &std::path::Path) -> anyhow::Result<String> {
+    let html = std::fs::read_to_string(html_path)
+        .with_context(|| format!("failed to read {}", html_path.display()))?;
+
+    let mut out = String::with_capacity(html.len() * 2);
+    let mut rest = html.as_str();
+
+    while !rest.is_empty() {
+        // Try to find the next tag we care about.
+        if let Some(tag_start) = rest.find('<') {
+            out.push_str(&rest[..tag_start]);
+            rest = &rest[tag_start..];
+
+            // <link rel="stylesheet" ... href="./assets/foo.css" ...>
+            if rest.starts_with("<link") {
+                if let Some(tag_end) = rest.find('>') {
+                    let tag = &rest[..=tag_end];
+                    if tag.contains("stylesheet") {
+                        if let Some(href) = extract_attr(tag, "href") {
+                            let asset_path = dist_dir.join(href.trim_start_matches("./"));
+                            if asset_path.exists() {
+                                let css = std::fs::read_to_string(&asset_path)
+                                    .with_context(|| format!("failed to read {}", asset_path.display()))?;
+                                out.push_str("<style>\n");
+                                out.push_str(&css);
+                                out.push_str("\n</style>");
+                                rest = &rest[tag_end + 1..];
+                                continue;
+                            }
+                        }
+                    }
+                    // modulepreload links — drop them, they're redundant once inlined
+                    if tag.contains("modulepreload") {
+                        rest = &rest[tag_end + 1..];
+                        continue;
+                    }
+                    out.push_str(tag);
+                    rest = &rest[tag_end + 1..];
+                    continue;
+                }
+            }
+
+            // <script ... src="./assets/foo.js" ...></script>
+            if rest.starts_with("<script") {
+                if let Some(tag_end) = rest.find('>') {
+                    let open_tag = &rest[..=tag_end];
+                    // Find closing </script>
+                    let after_open = &rest[tag_end + 1..];
+                    let close = after_open.find("</script>").unwrap_or(after_open.len());
+                    let full_end = tag_end + 1 + close + "</script>".len();
+
+                    if let Some(src) = extract_attr(open_tag, "src") {
+                        let asset_path = dist_dir.join(src.trim_start_matches("./"));
+                        if asset_path.exists() {
+                            let js = std::fs::read_to_string(&asset_path)
+                                .with_context(|| format!("failed to read {}", asset_path.display()))?;
+                            out.push_str("<script type=\"module\">\n");
+                            out.push_str(&js);
+                            out.push_str("\n</script>");
+                            rest = &rest[full_end..];
+                            continue;
+                        }
+                    }
+                    // Script tag with no src (or unresolved) — pass through as-is
+                    out.push_str(&rest[..full_end]);
+                    rest = &rest[full_end..];
+                    continue;
+                }
+            }
+
+            // Any other tag — pass one character and continue
+            out.push('<');
+            rest = &rest[1..];
+        } else {
+            out.push_str(rest);
+            break;
+        }
+    }
+
+    Ok(out)
+}
+
+/// Extract the value of a named attribute from an HTML tag string.
+fn extract_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+    let needle_dq = format!("{attr}=\"");
+    let needle_sq = format!("{attr}='");
+    if let Some(pos) = tag.find(&needle_dq) {
+        let start = pos + needle_dq.len();
+        let end = tag[start..].find('"')? + start;
+        return Some(&tag[start..end]);
+    }
+    if let Some(pos) = tag.find(&needle_sq) {
+        let start = pos + needle_sq.len();
+        let end = tag[start..].find('\'')? + start;
+        return Some(&tag[start..end]);
+    }
+    None
+}
+
+/// Search for the built frontend dist directory.
+fn find_frontend_dist() -> anyhow::Result<std::path::PathBuf> {
+    let candidates = [
+        "app/frontend/dist",
+        "frontend/dist",
+        "../app/frontend/dist",
+        "../frontend/dist",
+    ];
+    for candidate in candidates {
+        let p = std::path::PathBuf::from(candidate);
+        if p.is_dir() {
+            return Ok(p);
+        }
+    }
+    // Also honour an explicit env var override.
+    if let Ok(dir) = std::env::var("ODORU_FRONTEND_DIST") {
+        let p = std::path::PathBuf::from(dir);
+        if p.is_dir() {
+            return Ok(p);
+        }
+    }
+    anyhow::bail!(
+        "Could not find app/frontend/dist. Run: cd app/frontend && npm run build\n\
+         Or set ODORU_FRONTEND_DIST to its path."
+    )
+}
+
 
 fn render_frontmatter(article: &ParsedArticle) -> String {
     let mut fm = String::from("---\n");
