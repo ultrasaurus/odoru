@@ -479,6 +479,12 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
     std::fs::write(out.join("index.html"), &html)
         .context("failed to write index.html")?;
 
+    let favicon_src = dist.join("favicon.ico");
+    if favicon_src.exists() {
+        std::fs::copy(&favicon_src, out.join("favicon.ico"))
+            .context("failed to copy favicon.ico")?;
+    }
+
     println!("✔ Exported {} document(s) to {}", manifest.len(), out.display());
     Ok(())
 }
