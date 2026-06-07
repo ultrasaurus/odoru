@@ -94,28 +94,19 @@ See [protocol.md](protocol.md).
 - Cancel flag (`Arc<AtomicBool>`) is in-memory only; task stops at next sentence boundary
 - `text_preview`, `article_id`, `article_title` use `#[serde(default)]` so old entries load
 
-## Next up
-- Voice picker in reader — `DEFAULT_VOICE` hardcode removed; reader now uses `pickVoice()`
-  (published → ready → stale → any). No UI picker yet — add a dropdown so the user can
-  choose between available voices without leaving the reader
-- Frontend migration to new `/documents` API (handled by frontend session)
-
 ## Planned improvements
 
 ### Authoring
 
-### Static export
-- See [future-export.md](future-export.md) for full design
-- Audio cache: encode to MP3 at synthesis time (raw samples → encoder directly); ~10:1 size reduction (DONE)
-- Export command: reads document store + audio cache, writes static directory for GitHub Pages
-- Voice picker in the reader would be nice, let's see how it feels
-
-
-### Text content without fetching URL ###
+#### Text content without fetching URL ###
 - `PATCH /documents/:id` with stale voice transition (for content edits)
 - Snippets, upload, and paste input paths
 
-### Results from URL fetch are editable ###
+#### Static export
+- See [export.md](export.md) for current implementation & CLI usage
+- Export UI in authoring, consider warning for incomplete audio
+
+#### Results from URL fetch are editable ###
 so text can be adjusted if scraping is imperfect
   1. Markdown editor for content with preview option
   2. Outline view for editor 
@@ -125,6 +116,9 @@ so text can be adjusted if scraping is imperfect
 - Open button in Documents panel: navigate to reader (or editor?) for that document
 
 #### Open questions for authoring
+
+- voice picker in reader: wait for more experience with real authoring
+
 
 **Mutable text and audio cache invalidation**
 
