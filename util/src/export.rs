@@ -27,4 +27,10 @@ pub struct ManifestEntry {
     pub date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// True when all audio sentences are present in the export.
+    /// False means text-only (player stays disabled for this document).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub has_audio: bool,
 }

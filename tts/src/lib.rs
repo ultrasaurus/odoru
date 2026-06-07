@@ -32,6 +32,7 @@ pub mod chunk;
 pub mod backend;
 pub mod transcript;
 pub mod audio_cache;
+pub mod export;
 
 // Python integration (internal)
 pub(crate) mod python;

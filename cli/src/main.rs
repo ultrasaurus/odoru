@@ -363,26 +363,79 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
         let meta = full.export_meta();
         let slug = export_slug(meta.title.as_deref(), meta.date.as_deref());
 
-        if meta.voice_id.is_none() {
-            eprintln!(
-                "Warning: '{}' has no published voice — exporting text only",
-                meta.title.as_deref().unwrap_or(&slug)
-            );
-        }
+        // ── Attempt audio export ─────────────────────────────────────────
+        let has_audio = match &meta.voice_id {
+            None => {
+                eprintln!(
+                    "Warning: '{}' has no published voice — exporting text only",
+                    meta.title.as_deref().unwrap_or(&slug)
+                );
+                false
+            }
+            Some(voice_id) => {
+                match resolve_voice(voice_id) {
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: '{}' — could not load voice '{voice_id}': {e} — exporting text only",
+                            meta.title.as_deref().unwrap_or(&slug)
+                        );
+                        false
+                    }
+                    Ok(voice) => {
+                        let audio_entries = tts::export::export_audio(&full.plain_text, &voice);
+                        let miss = audio_entries.iter().find(|e| e.mp3.is_none());
+                        if let Some(m) = miss {
+                            eprintln!(
+                                "Warning: '{}' — audio cache miss for sentence {}: {:?} — exporting text only",
+                                meta.title.as_deref().unwrap_or(&slug),
+                                m.index,
+                                &m.text[..m.text.len().min(60)]
+                            );
+                            false
+                        } else {
+                            // Write MP3 files
+                            let audio_dir = out.join("documents").join(&slug).join("audio");
+                            std::fs::create_dir_all(&audio_dir)
+                                .with_context(|| format!("failed to create {}", audio_dir.display()))?;
+                            for entry in &audio_entries {
+                                let filename = format!("{:04}.mp3", entry.index);
+                                std::fs::write(audio_dir.join(&filename), entry.mp3.as_ref().unwrap())
+                                    .with_context(|| format!("failed to write {filename}"))?;
+                            }
+                            // Populate transcript timing
+                            let mut cursor = 0.0_f64;
+                            let timed: Vec<ExportTranscriptEntry> = audio_entries.iter().map(|e| {
+                                let start = cursor;
+                                let end = cursor + e.duration;
+                                cursor = end;
+                                ExportTranscriptEntry {
+                                    index: e.index,
+                                    text: e.text.clone(),
+                                    start,
+                                    end,
+                                    paragraph_end: e.paragraph_end,
+                                }
+                            }).collect();
+                            transcripts.insert(slug.clone(), timed);
+                            true
+                        }
+                    }
+                }
+            }
+        };
 
-        // Build transcript from sentence splitter (no timing yet — Stage 3).
-        let sentences = tts::splitter::split(&full.plain_text);
-        let entries: Vec<ExportTranscriptEntry> = sentences
-            .into_iter()
-            .enumerate()
-            .map(|(i, s)| ExportTranscriptEntry {
-                index: i,
-                text: s.text,
-                start: 0.0,
-                end: 0.0,
-                paragraph_end: s.paragraph_end,
-            })
-            .collect();
+        // Fall back to timing-less transcript if audio wasn't produced above
+        if !has_audio && !transcripts.contains_key(&slug) {
+            let entries: Vec<ExportTranscriptEntry> = tts::splitter::split(&full.plain_text)
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| ExportTranscriptEntry {
+                    index: i, text: s.text, start: 0.0, end: 0.0,
+                    paragraph_end: s.paragraph_end,
+                })
+                .collect();
+            transcripts.insert(slug.clone(), entries);
+        }
 
         manifest.push(ManifestEntry {
             slug: slug.clone(),
@@ -390,9 +443,13 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
             authors: meta.authors,
             date: meta.date,
             description: full.description.clone(),
+            source_url: meta.source_url.clone(),
+            has_audio,
         });
-        transcripts.insert(slug.clone(), entries);
-        doc_contents.insert(slug, serde_json::json!({ "content": full.content }));
+        doc_contents.insert(slug, serde_json::json!({
+            "content": full.content,
+            "plain_text": full.plain_text,
+        }));
     }
 
     // ── Serialize window.__ODORU__ payload ───────────────────────────────
@@ -632,6 +689,28 @@ fn extract_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
         return Some(&tag[start..end]);
     }
     None
+}
+
+/// Resolve a voice ID string (e.g. `"f5:sarah"`, `"kokoro:af_heart"`) to a
+/// `tts::Voice` suitable for audio cache key computation.
+fn resolve_voice(voice_id: &str) -> anyhow::Result<tts::Voice> {
+    if let Some(name) = voice_id.strip_prefix("kokoro:") {
+        return Ok(tts::Voice::kokoro(name));
+    }
+    if let Some(name) = voice_id.strip_prefix("f5:") {
+        let voices_dir = util::voice::voices_dir()
+            .map_err(|e| anyhow::anyhow!("cannot find voices directory: {e}"))?;
+        let def = util::voice::VoiceDef::load(&voices_dir.join(name))
+            .map_err(|e| anyhow::anyhow!("failed to load voice '{name}': {e}"))?;
+        return Ok(tts::Voice::F5Tts {
+            name: def.name,
+            voice_ref: def.voice_ref,
+            ref_text: def.ref_text,
+            speed: def.speed,
+            cfg_strength: def.cfg_strength,
+        });
+    }
+    anyhow::bail!("unrecognised voice ID format: {voice_id:?} (expected 'f5:NAME' or 'kokoro:NAME')")
 }
 
 /// Search for the built frontend dist directory.
