@@ -578,15 +578,16 @@ export function mount(onReader) {
             const suffix = wasDedup ? ' (previously fetched)' : '';
             fetchStatus.textContent = `✔ ${state.title ?? url}${suffix}`;
             fetchStatus.className = 'fetch-status success';
+            urlInput.disabled = true; // lock until "New" is pressed
             return true;
         }
         catch (e) {
             fetchStatus.textContent = e?.message ?? 'Fetch failed';
             fetchStatus.className = 'fetch-status error';
+            urlInput.disabled = false;
             return false;
         }
         finally {
-            urlInput.disabled = false;
             synthBtn.disabled = false;
         }
     }
@@ -655,6 +656,7 @@ export function mount(onReader) {
         player.stop();
         articleContent.innerHTML = '<div class="placeholder">Fetch a URL above to see the article.</div>';
         urlInput.value = '';
+        urlInput.disabled = false;
         fetchStatus.textContent = '';
         fetchStatus.className = 'fetch-status';
         synthProgress.textContent = '';
@@ -694,6 +696,10 @@ export function mount(onReader) {
         fetchedDocument = null;
         currentPendingSpans = [];
         currentHeadings = [];
+        urlInput.value = summary.source_url ?? '';
+        urlInput.disabled = true;
+        fetchStatus.textContent = '';
+        fetchStatus.className = 'fetch-status';
         try {
             const loaded = await Document.load(summary.id);
             if (loadSeq !== seq) {
