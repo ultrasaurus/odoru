@@ -842,5 +842,5 @@ export function mount(onReader: () => void): () => void {
     if (url) await fetchDocument(url)
   })
 
-  return () => { stopQueuePoll(); stopBgPoll() }
+  return () => { stopQueuePoll(); stopBgPoll(); player.stop() }
 }

@@ -786,5 +786,5 @@ export function mount(onReader) {
         if (url)
             await fetchDocument(url);
     });
-    return () => { stopQueuePoll(); stopBgPoll(); };
+    return () => { stopQueuePoll(); stopBgPoll(); player.stop(); };
 }
