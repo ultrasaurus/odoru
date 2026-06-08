@@ -19,6 +19,7 @@ export function mount(onReader: () => void): () => void {
   let currentPendingSpans: HTMLElement[] = []
   let currentHeadings: HeadingEntry[] = []
   let loadSeq = 0
+  let activeTab: 'url' | 'text' = 'url'
 
   app.innerHTML = `
     <div class="layout">
@@ -44,6 +45,11 @@ export function mount(onReader: () => void): () => void {
           </div>
 
           <div class="card">
+            <div class="input-tabs">
+              <button id="tab-url" class="input-tab active">URL</button>
+              <button id="tab-text" class="input-tab">Text</button>
+            </div>
+
             <div class="url-area">
               <input
                 id="url-input"
@@ -52,6 +58,20 @@ export function mount(onReader: () => void): () => void {
                 placeholder="Paste a URL and press Enter…"
               />
               <div id="fetch-status" class="fetch-status"></div>
+            </div>
+
+            <div id="text-area" class="text-area" style="display:none">
+              <input
+                id="text-title-input"
+                class="text-title-input"
+                type="text"
+                placeholder="Title (optional)"
+              />
+              <textarea
+                id="text-input"
+                class="text-input"
+                placeholder="Paste or type markdown here…"
+              ></textarea>
             </div>
 
             <div class="input-area">
@@ -204,7 +224,7 @@ export function mount(onReader: () => void): () => void {
       top.className = 'queue-row-top'
 
       const titleEl = document.createElement('span')
-      titleEl.textContent = doc.title ?? doc.source_url ?? doc.id
+      titleEl.textContent = doc.title ?? doc.source_url ?? 'Untitled'
       titleEl.className = 'queue-title queue-title-link'
       titleEl.addEventListener('click', () => loadAndListen(doc))
       top.appendChild(titleEl)
@@ -446,7 +466,7 @@ export function mount(onReader: () => void): () => void {
           editBtn.classList.remove('active')
           openMetaForms.delete(doc.id)
           // Update displayed title in this row immediately
-          titleEl.textContent = titleInput.value.trim() || (doc.source_url ?? doc.id)
+          titleEl.textContent = titleInput.value.trim() || (doc.source_url ?? 'Untitled')
           pollQueue()
         })
       }
@@ -513,6 +533,50 @@ export function mount(onReader: () => void): () => void {
   const editOutlineSection = document.getElementById('edit-outline-section')!
   const editOutlineList    = document.getElementById('edit-outline-list')!
   const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls()
+
+  const tabUrl       = document.getElementById('tab-url')         as HTMLButtonElement
+  const tabText      = document.getElementById('tab-text')        as HTMLButtonElement
+  const urlArea      = document.querySelector('.url-area')        as HTMLDivElement
+  const textArea     = document.getElementById('text-area')       as HTMLDivElement
+  const textTitleInput = document.getElementById('text-title-input') as HTMLInputElement
+  const textInput    = document.getElementById('text-input')      as HTMLTextAreaElement
+
+  function switchTab(tab: 'url' | 'text') {
+    activeTab = tab
+    tabUrl.classList.toggle('active', tab === 'url')
+    tabText.classList.toggle('active', tab === 'text')
+    urlArea.style.display  = tab === 'url'  ? '' : 'none'
+    textArea.style.display = tab === 'text' ? '' : 'none'
+    // Reset the inactive tab's state
+    if (tab === 'url') {
+      textInput.value = ''
+      textTitleInput.value = ''
+      textInput.disabled = false
+      textTitleInput.disabled = false
+    } else {
+      urlInput.value = ''
+      urlInput.disabled = false
+      fetchStatus.textContent = ''
+      fetchStatus.className = 'fetch-status'
+      fetchedDocument?.destroy()
+      fetchedDocument = null
+      currentPendingSpans = []
+      currentHeadings = []
+      articleContent.innerHTML = '<div class="placeholder">Fetch a URL above to see the article.</div>'
+    }
+    synthProgress.textContent = ''
+    timeEstimate.textContent = ''
+    synthBtn.style.display = ''
+    listenBtn.style.display = 'none'
+    newBtn.style.display = 'none'
+    player.stop()
+    updateEstimate(activeTab === 'text' ? textInput.value : '')
+  }
+
+  tabUrl.addEventListener('click', () => switchTab('url'))
+  tabText.addEventListener('click', () => switchTab('text'))
+
+  textInput.addEventListener('input', () => updateEstimate(textInput.value))
 
   const player   = new Player(articleContent)
   const editCore = new ReaderCore(articleContent, editOutlineList)
@@ -582,7 +646,7 @@ export function mount(onReader: () => void): () => void {
         selectVoice(preferred.id)
       }
       else renderVoices()
-      updateEstimate(fetchedDocument?.current.plain_text ?? '')
+      updateEstimate(activeTab === 'text' ? textInput.value : (fetchedDocument?.current.plain_text ?? ''))
     } catch {
       voiceList.innerHTML = '<div class="voice-loading">—</div>'
       showErrorBar('Could not reach server. Is it running?')
@@ -729,6 +793,10 @@ export function mount(onReader: () => void): () => void {
     urlInput.disabled = false
     fetchStatus.textContent = ''
     fetchStatus.className = 'fetch-status'
+    textInput.value = ''
+    textInput.disabled = false
+    textTitleInput.value = ''
+    textTitleInput.disabled = false
     synthProgress.textContent = ''
     timeEstimate.textContent = ''
     synthBtn.style.display = ''
@@ -751,6 +819,30 @@ export function mount(onReader: () => void): () => void {
   async function loadAndListen(summary: DocumentState) {
     const seq = ++loadSeq
     player.stop()
+
+    // Switch to the appropriate tab based on whether the doc has a source URL.
+    if (summary.source_url) {
+      activeTab = 'url'
+      tabUrl.classList.add('active')
+      tabText.classList.remove('active')
+      urlArea.style.display = ''
+      textArea.style.display = 'none'
+      textInput.value = ''
+      textInput.disabled = false
+      textTitleInput.value = ''
+      textTitleInput.disabled = false
+    } else {
+      activeTab = 'text'
+      tabText.classList.add('active')
+      tabUrl.classList.remove('active')
+      textArea.style.display = ''
+      urlArea.style.display = 'none'
+      textTitleInput.value = summary.title ?? ''
+      textTitleInput.disabled = true
+      textInput.value = ''
+      textInput.disabled = true
+    }
+
     playBtn.disabled = true
     playBtn.querySelector('.play-icon')!.textContent = '▶'
     downloadBtn.disabled = true
@@ -784,6 +876,10 @@ export function mount(onReader: () => void): () => void {
         return
       }
 
+      if (activeTab === 'text') {
+        textInput.value = data.content
+      }
+
       articleContent.innerHTML = ''
       const { pendingSpans, headings } = renderMarkdown(data.content, data.plain_text, articleContent)
       currentPendingSpans = pendingSpans
@@ -794,8 +890,12 @@ export function mount(onReader: () => void): () => void {
       const voice = pickVoice(data.voices)
       const voiceEntry = voice ? data.voices[voice] : undefined
       const audioReady = !!voiceEntry && voiceEntry.status !== 'error'
-      if (!audioReady) updateEstimate(data.plain_text)
-      else timeEstimate.textContent = ''
+      if (!audioReady) {
+        updateEstimate(data.plain_text)
+        synthBtn.style.display = ''
+      } else {
+        timeEstimate.textContent = ''
+      }
 
       showListenNew()
       startListen()
@@ -809,7 +909,75 @@ export function mount(onReader: () => void): () => void {
   listenBtn.addEventListener('click', startListen)
   newBtn.addEventListener('click', resetEdit)
 
+  async function synthesizeFromText() {
+    const raw = textInput.value.trim()
+    if (!raw) {
+      synthProgress.textContent = 'Enter some text first.'
+      return
+    }
+
+    synthBtn.disabled = true
+    synthProgress.textContent = 'Preparing…'
+
+    // Strip markdown annotations for TTS plain_text.
+    const { marked } = await import('marked')
+    const html = marked.parse(raw, { async: false }) as string
+    const plain = html.replace(/<[^>]*>/g, '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .trim()
+
+    const title = textTitleInput.value.trim() || undefined
+
+    let docId: string
+    try {
+      const res = await fetch('/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: raw, plain_text: plain, title }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        synthProgress.textContent = (err as any).error ?? 'Failed to create document'
+        synthBtn.disabled = false
+        return
+      }
+      const data = await res.json()
+      docId = data.id
+    } catch {
+      synthProgress.textContent = 'Could not reach server'
+      synthBtn.disabled = false
+      return
+    }
+
+    // Lock inputs and render markdown.
+    textInput.disabled = true
+    textTitleInput.disabled = true
+    articleContent.innerHTML = ''
+    const { pendingSpans, headings } = renderMarkdown(raw, plain, articleContent)
+    currentPendingSpans = pendingSpans
+    currentHeadings = headings
+    editCore.renderOutline(headings, _i => {})
+    editOutlineSection.style.display = headings.length ? '' : 'none'
+
+    // Load the document so Listen can work.
+    try {
+      fetchedDocument?.destroy()
+      fetchedDocument = await Document.load(docId)
+    } catch {
+      synthProgress.textContent = 'Could not load document'
+      synthBtn.disabled = false
+      return
+    }
+
+    await startBgJob(plain, docId)
+  }
+
   synthBtn.addEventListener('click', async () => {
+    if (activeTab === 'text') {
+      await synthesizeFromText()
+      return
+    }
+
     const url = urlInput.value.trim()
 
     if (!fetchedDocument && !url) {

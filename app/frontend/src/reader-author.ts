@@ -148,7 +148,7 @@ export function mount(onEdit: () => void): () => void {
     timeCurrent.textContent = '0:00'
     timeTotal.textContent = '0:00'
     transcriptContainer.innerHTML = '<div class="loading">Loading…</div>'
-    articleTitleEl.textContent = doc.title ?? doc.source_url ?? doc.id
+    articleTitleEl.textContent = doc.title ?? doc.source_url ?? 'Untitled'
     articleBylineEl.textContent = formatByline(doc.authors, doc.date)
     articleSourceUrlEl.innerHTML = ''
     if (doc.source_url) {
@@ -262,8 +262,8 @@ export function mount(onEdit: () => void): () => void {
     .then(res => res.json())
     .then((all: DocumentState[]) => {
       const docs = all.filter(d => d.publish)
-        .sort((a, b) => (a.title ?? a.source_url ?? a.id)
-          .localeCompare(b.title ?? b.source_url ?? b.id, undefined, { sensitivity: 'base' }))
+        .sort((a, b) => (a.title ?? a.source_url ?? 'Untitled')
+          .localeCompare(b.title ?? b.source_url ?? 'Untitled', undefined, { sensitivity: 'base' }))
       articleList.innerHTML = ''
       if (docs.length === 0) {
         articleList.innerHTML = '<div class="outline-loading">No documents.</div>'
@@ -275,7 +275,7 @@ export function mount(onEdit: () => void): () => void {
       docs.forEach((doc, i) => {
         const el = document.createElement('div')
         el.className = 'article-item' + (i === 0 ? ' selected' : '')
-        el.textContent = doc.title ?? doc.source_url ?? doc.id
+        el.textContent = doc.title ?? doc.source_url ?? 'Untitled'
         el.addEventListener('click', () => {
           itemEls.forEach(e => e.classList.remove('selected'))
           el.classList.add('selected')

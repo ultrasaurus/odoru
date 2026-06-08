@@ -40,7 +40,7 @@ See [frontend.md](frontend.md).
 - Files per document:
   - `document.md` — YAML frontmatter (`id`, `status`, `source_url`, `title`, `authors`, `date`, `description`, `cached_at`, `publish`, `content_hash`) + markdown body
   - `document.txt` — plain text for TTS
-  - `source.html` — originally fetched HTML (used for content hash; display deferred)
+  - `source.html` — originally fetched HTML (used for content hash; display deferred) — absent for text docs
   - `voices.json` — per-voice synthesis state (see below)
 - Identity is a UUID assigned at creation — decoupled from URL and content
 - `source_url` is provenance metadata, not an identity field
@@ -98,13 +98,6 @@ See [protocol.md](protocol.md).
 
 ### Authoring
 
-
-#### Text content without fetching URL ###
-- Pasted text is ephemeral and can be edited until Synthesize is pressed, then:
-  - text area becomes non-editable 
-  - the Document is created, job is started
-- future: upload
-
 ### Hints on how to pronounce words ###
 - Mispronounced words: no UI for `tts_overrides.txt` edits
 - will need to invalidate cache entries
@@ -121,6 +114,7 @@ so text can be adjusted if scraping is imperfect
 - pause/cancel/resume/delete jobs
 - Open button in Documents panel: navigate to reader (or editor?) for that document
 - Publish voice picker in queue row: show all voices (including in-progress), not just those with `duration`
+- upload text/markdown docs to synthesize
 
 #### Open questions for authoring
 

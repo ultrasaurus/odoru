@@ -60,14 +60,18 @@ server can jump to the requested sentence immediately. A jobs-only path would re
 all earlier sentences to be synthesized first, making mid-document seeks much slower.
 
 ## Edit view
-- URL fetch → markdown render → Synthesize (background job) → Listen / New buttons
-- After fetch, article renders immediately as formatted markdown with gray pending sentence spans
-- Synthesize starts a background job (`POST /jobs`); progress shown next to Synthesize button
+- Two input modes, selected via **URL | Text** tabs:
+  - **URL tab**: paste a URL, press Enter or Synthesize — fetches and extracts article via trafilatura
+  - **Text tab**: optional title field + textarea; paste or type markdown; Synthesize strips markdown to plain text for TTS (`marked` → strip HTML tags), then creates the document
+- After input, article renders as formatted markdown with gray pending sentence spans
+- Synthesize starts a background job (`POST /jobs`); progress shown next to Synthesize button; inputs lock on Synthesize
 - Listen: wires player to pre-rendered spans, opens WS synth session; play button enables on first segment
-- New: resets to blank state (clears article, URL input, player)
+- New: resets to blank state (clears article, active tab inputs, player)
 - `loadAndListen(summary)` — called when a doc title is clicked in the Documents panel; loads doc
   by ID via `Document.load(id)`, renders markdown, calls `startListen()` immediately; works whether
   audio is cached, in-progress, or not yet started (WS streams whatever is available)
+  - Switches to URL tab if doc has a `source_url`; Text tab otherwise (restores title + textarea content)
+  - Synthesize button hidden if audio already ready (shows Listen/New only)
 - Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
 - Voice picker ever-present in sidebar; user can synthesize the same doc with a second voice later
 - Documents panel: always visible; fetches `GET /documents` + `GET /jobs` in parallel, polls every 10s

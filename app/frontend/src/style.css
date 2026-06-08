@@ -656,6 +656,70 @@ html, body {
 }
 
 /* URL input area */
+/* Input mode tabs */
+.input-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.input-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  margin-bottom: -1px;
+  padding: 0.55rem 1.25rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.input-tab:hover {
+  color: var(--text);
+}
+
+.input-tab.active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Text input area */
+.text-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.5rem 2rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-title-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.65rem 1rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.text-title-input:focus {
+  border-color: var(--accent);
+}
+
+.text-title-input::placeholder {
+  color: var(--text-dim);
+}
+
+.text-title-input:disabled,
+.text-input:disabled {
+  opacity: 0.5;
+}
+
 .url-area {
   display: flex;
   flex-direction: column;

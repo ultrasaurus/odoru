@@ -298,7 +298,14 @@ async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 #[derive(Deserialize)]
 struct CreateDocumentRequest {
-    url: String,
+    /// Fetch from URL (mutually exclusive with content/plain_text).
+    url: Option<String>,
+    /// Raw markdown content (must be paired with plain_text).
+    content: Option<String>,
+    /// Plain text for TTS (must be paired with content).
+    plain_text: Option<String>,
+    /// Optional title for text documents.
+    title: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -310,29 +317,59 @@ async fn create_document(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateDocumentRequest>,
 ) -> impl IntoResponse {
-    if !body.url.starts_with("http://") && !body.url.starts_with("https://") {
+    // ── Text path (content + plain_text, no URL fetch) ──────────────────────
+    if body.url.is_none() {
+        let (content, plain_text) = match (&body.content, &body.plain_text) {
+            (Some(c), Some(p)) => (c.clone(), p.clone()),
+            _ => return (StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "provide url, or both content and plain_text" }))
+            ).into_response(),
+        };
+
+        let content_hash = html_content_hash(&plain_text);
+
+        // Dedup by content_hash.
+        if let Some(id) = state.doc_index.get_by_content_hash(&content_hash).await {
+            return Json(CreateDocumentResponse { id }).into_response();
+        }
+
+        let title = body.title.as_deref().filter(|s| !s.trim().is_empty());
+        let id = match documents::create_ready(title, &content, &plain_text, &content_hash) {
+            Ok(id) => id,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        };
+
+        state.doc_index.insert(&id, None, Some(&content_hash)).await;
+        info!("[documents] ready (text): {id}");
+        return Json(CreateDocumentResponse { id }).into_response();
+    }
+
+    // ── URL fetch path ───────────────────────────────────────────────────────
+    let url = body.url.unwrap();
+    if !url.starts_with("http://") && !url.starts_with("https://") {
         return (StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "url must start with http:// or https://" }))
         ).into_response();
     }
 
     // Check source_url index first (fast path).
-    if let Some(id) = state.doc_index.get_by_source_url(&body.url).await {
+    if let Some(id) = state.doc_index.get_by_source_url(&url).await {
         return Json(CreateDocumentResponse { id }).into_response();
     }
 
     // Create a fetching record immediately so the client has an ID to poll.
-    let id = match documents::create_fetching(Some(&body.url)) {
+    let id = match documents::create_fetching(Some(&url)) {
         Ok(id) => id,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
     };
 
     // Insert into source_url index now so concurrent requests dedup correctly.
-    state.doc_index.insert(&id, Some(&body.url), None).await;
+    state.doc_index.insert(&id, Some(&url), None).await;
 
     // Spawn blocking fetch task.
-    let url = body.url.clone();
+    let url = url.clone();
     let doc_id = id.clone();
     let doc_index = state.doc_index.clone();
     let doc_events = state.doc_events.clone();

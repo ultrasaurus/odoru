@@ -5,6 +5,7 @@
 GET  /voices               → { voices: [{id, name, backend, description}] }
 
 POST /documents            ← { url } → { id }   (returns immediately; fetch runs async)
+                         | ← { content, plain_text, title? } → { id }   (text doc; returns immediately, status already ready)
 GET  /documents            → [{ id, status, source_url?, title?, authors, date?,
                                 description?, cached_at?, publish, voices }]
 GET  /documents/:id        → { id, status, source_url?, title?, authors, date?,
@@ -46,9 +47,14 @@ DELETE /jobs/:id           → cancel job
 - `publish` in document frontmatter: document-level intent; `false` overrides any `published` voice
 
 ### Deduplication on `POST /documents`
+URL path:
 1. Check `source_url` index (fast path — same URL)
 2. Check `content_hash` index (catches redirects — same content from different URL)
 3. On miss: create `fetching` record, return `{ id }`, spawn async fetch
+
+Text path:
+1. Check `content_hash` index (SHA-256 of `plain_text`)
+2. On miss: create `ready` record synchronously, return `{ id }`
 
 ## WebSocket
 

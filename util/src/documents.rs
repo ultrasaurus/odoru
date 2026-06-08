@@ -208,6 +208,57 @@ pub fn create_fetching_in(base: &PathBuf, source_url: Option<&str>) -> Result<St
 }
 
 // ---------------------------------------------------------------------------
+// Create ready (direct text — no URL fetch)
+// ---------------------------------------------------------------------------
+
+/// Create a document directly from content without fetching a URL. Returns the UUID.
+pub fn create_ready(
+    title: Option<&str>,
+    content: &str,
+    plain_text: &str,
+    content_hash: &str,
+) -> Result<String> {
+    create_ready_in(&documents_dir()?, title, content, plain_text, content_hash)
+}
+
+pub fn create_ready_in(
+    base: &PathBuf,
+    title: Option<&str>,
+    content: &str,
+    plain_text: &str,
+    content_hash: &str,
+) -> Result<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let dir = doc_dir(base, &id);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create document dir {}", dir.display()))?;
+
+    let fm = DocumentFrontmatter {
+        id: id.clone(),
+        status: FetchStatus::Ready,
+        source_url: None,
+        title: title.map(str::to_string),
+        authors: vec![],
+        date: None,
+        description: None,
+        cached_at: Some(Utc::now().to_rfc3339()),
+        publish: false,
+        content_hash: Some(content_hash.to_string()),
+    };
+    write_frontmatter(&dir, &fm, content)?;
+
+    let txt_path = dir.join("document.txt");
+    std::fs::write(&txt_path, plain_text)
+        .with_context(|| format!("failed to write {}", txt_path.display()))?;
+
+    let voices_path = dir.join("voices.json");
+    std::fs::write(&voices_path, "{}")
+        .with_context(|| format!("failed to write {}", voices_path.display()))?;
+
+    Ok(id)
+}
+
+// ---------------------------------------------------------------------------
 // Store ready (fetch completed)
 // ---------------------------------------------------------------------------
 
