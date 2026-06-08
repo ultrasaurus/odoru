@@ -15,7 +15,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
-        'export-reader': resolve(__dirname, 'export-reader.html'),
+        'reader-export': resolve(__dirname, 'reader-export.html'),
       },
     },
   },

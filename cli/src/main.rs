@@ -461,16 +461,16 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
 
     // ── Build self-contained index.html ──────────────────────────────────
     let dist = find_frontend_dist()?;
-    let reader_html_path = dist.join("export-reader.html");
+    let reader_html_path = dist.join("reader-export.html");
     if !reader_html_path.exists() {
         anyhow::bail!(
-            "export-reader.html not found in {}.\nRun: cd app/frontend && npm run build",
+            "reader-export.html not found in {}.\nRun: cd app/frontend && npm run build",
             dist.display()
         );
     }
 
     let mut html = inline_assets(&reader_html_path, &dist)
-        .context("failed to inline assets into export-reader.html")?;
+        .context("failed to inline assets into reader-export.html")?;
 
     // Inject window.__ODORU__ before </head>.
     let injection = format!("<script>window.__ODORU__ = {};</script>\n</head>", odoru_json);

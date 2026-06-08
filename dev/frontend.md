@@ -4,15 +4,22 @@ Frontend files are in `app/frontend/src/` (`*.ts` and `*.css`)
 
 The logic is tightly coupled across these files:
 
-- `app/frontend/src/main.ts` — view logic, DOM construction, player wiring
+- `app/frontend/src/main.ts` — boot: mounts reader or edit view, owns the cleanup handoff
+- `app/frontend/src/edit.ts` — edit/synthesize view; exports `mount(onReader) → cleanup`
+- `app/frontend/src/reader-author.ts` — authoring reader view; exports `mount(onEdit) → cleanup`
+- `app/frontend/src/reader-core.ts` — outline rendering, shared between authoring reader and export SPA
+- `app/frontend/src/reader-export.ts` — export SPA entry point
+- `app/frontend/src/ui.ts` — shared types (`VoiceInfo`, `JobInfo`), helpers (`fmt`, `wireControls`, etc.)
 - `app/frontend/src/player.ts` — AudioContext, seek/highlight logic
 - `app/frontend/src/ws.ts` — WebSocket connection, `sendSynth` / `cancelSynth`
 - `app/frontend/src/document.ts` — `Document` class: fetch by URL, load by ID, WS status watch
 - `app/frontend/src/markdown.ts` — markdown rendering, sentence span weaving
-- `app/frontend/src/reader-core.ts` — outline rendering, shared between reader and export SPA
-- `app/frontend/src/export-reader.ts` — export SPA entry point
 - `app/frontend/src/types.ts` — shared TypeScript interfaces
 - `app/frontend/src/style.css` — all styles; class names are shared across the above
+
+View navigation uses a `mount() → cleanup` pattern: each view module exports a `mount` function
+that sets up the DOM and returns a cleanup function. `main.ts` calls cleanup before mounting the
+next view, so timers and audio always stop on navigation.
 
 Built with Vite + TypeScript, output to `app/frontend/dist/`.
 
@@ -29,7 +36,7 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - "Synthesize in background" button shown when audio not cached and no active job exists
 - Job progress shown in header; polls `GET /jobs/:id` every 4s while running
 - Auto-scroll checkbox (default off) — when on, active sentence scrolls into view
-- `viewCleanup` stops poll timers when navigating to Edit view
+- `cleanup()` (returned by `mount`) stops poll timers and audio when navigating to Edit view
 
 ## Edit view
 - URL fetch → markdown render → Synthesize (background job) → Listen / New buttons
@@ -48,7 +55,7 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
   - Active jobs: progress bar + % + cancel button
   - Publish controls: checkbox + voice picker (voices with duration); changes fire `PATCH /documents/:id`
   - Metadata edit form (pencil button): title, author, date fields; toggled per-row
-- `viewCleanup` stops all timers when navigating to Reader view
+- `cleanup()` (returned by `mount`) stops all timers and audio when navigating to Reader view
 - Download enabled on `onSynthDone` (synthesis stream complete), not on playback end
 - `downloadFilename()` evaluated at click time (lazy), not at view init
 
