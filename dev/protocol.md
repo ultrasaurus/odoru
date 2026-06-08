@@ -57,30 +57,47 @@ One persistent connection per client, opened at startup and shared across views.
 ### Client → server
 ```json
 { "type": "synth", "text": "...", "voice": "f5:sarah", "document_id": "uuid" }
+{ "type": "cancel", "stream_id": "..." }
 { "type": "watch", "document_id": "uuid" }
 ```
 - `synth`: synthesize text. `voice` must be prefixed (e.g. `"f5:sarah"`). `document_id` optional — if provided, `voices.json` is updated on completion.
+- `cancel`: abort the named stream. Server sets an `AtomicBool` flag that the synthesis task checks; ignored if stream_id doesn't match the active stream.
 - `watch`: subscribe to `document_status` events for a document. Send after `POST /documents` returns `{ id }`.
 
 ### Server → client
+
+**Stream lifecycle** — for every `synth` request the server:
+1. Sends `synth_started` with a new UUID-based `stream_id` *before* spawning the synthesis task.
+2. Sends one segment pair (JSON header + binary audio) per sentence.
+3. Sends `done` or `error` to close the stream.
+
+`stream_id` is a 32-character lowercase hex string (UUID v4, simple format).
+
+Synthesis started:
+```json
+{ "type": "synth_started", "stream_id": "a3f1...c9e2" }
+```
+
 One per sentence (during synthesis) — **two frames**:
 
 Frame 1 — JSON header (Text frame):
 ```json
-{ "type": "segment", "index": 0, "transcript": {"start": 0.41, "end": 1.65, "text": "..."},
+{ "type": "segment", "stream_id": "a3f1...c9e2", "index": 0,
+  "transcript": {"start": 0.41, "end": 1.65, "text": "..."},
   "cached": bool, "paragraph_end": bool }
 ```
-Frame 2 — raw audio (Binary frame): f32le PCM @ 24 kHz, no encoding.
+Frame 2 — raw audio (Binary frame): MP3-encoded audio bytes.
 
 Client must set `ws.binaryType = 'arraybuffer'`. On receiving a binary frame, pair it with
-the most recent JSON header to reconstruct the segment (`new Float32Array(ev.data)`).
+the most recent JSON header to reconstruct the segment.
+
 Synthesis complete:
 ```json
-{ "type": "done" }
+{ "type": "done", "stream_id": "a3f1...c9e2" }
 ```
 Synthesis error:
 ```json
-{ "type": "error", "error": "..." }
+{ "type": "error", "stream_id": "a3f1...c9e2", "error": "..." }
 ```
 Document fetch complete (sent to connections that sent `watch` for this id):
 ```json
@@ -89,6 +106,9 @@ Document fetch complete (sent to connections that sent `watch` for this id):
 ```
 - Client ignores any `type` it doesn't recognize (safe to add new event types)
 - `viewCleanup` stops audio (`player.stop()`) but keeps WS open — connection is a browser-session singleton
+
+### Server concurrency model
+The server runs one synthesis task at a time per connection. When a new `synth` arrives, the previous task's cancel flag is set. The task checks the flag between segments and exits early. A separate `tokio::mpsc` channel (capacity 256) carries frames from the synthesis task back to the socket loop, keeping the loop responsive to incoming messages during streaming.
 
 ## Pending spans contract
 

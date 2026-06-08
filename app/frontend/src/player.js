@@ -74,6 +74,15 @@ export class Player {
     // Index to seek to once that segment arrives, or -1 if no pending seek.
     pendingSeekIndex = -1;
     pendingSeekWasPlaying = false;
+    // Incremented by reset(). Captured at the start of each synthesize() call and
+    // checked after every decodeAudioData() await. If the user switches documents
+    // while a decode is in flight, reset() fires and bumps the generation before
+    // the await resolves — the callback detects the mismatch and discards the
+    // decoded samples rather than enqueuing them into the new session's AudioQueue.
+    // Note: stream_id filtering in ws.ts stops *new* WS frames from reaching
+    // onSegment after cancel, but frames that already entered the decodeChain
+    // before cancel are still in flight — this guard is what catches those.
+    generation = 0;
     constructor(container) {
         this.container = container;
         this.queue = new AudioQueue();
@@ -87,6 +96,7 @@ export class Player {
         if (this.pendingSpans.length === 0) {
             this.container.innerHTML = '<div class="loading">Synthesizing…</div>';
         }
+        const gen = this.generation;
         let receivedCount = 0;
         Ws.sendSynth(text, voice ?? '', documentId, {
             onSegment: (msg) => {
@@ -100,6 +110,14 @@ export class Player {
                 }
                 this.decodeChain = this.decodeChain.then(async () => {
                     const samples = await this.queue.decodeAudioData(msg.audioData);
+                    // Guard: reset() increments generation, so a mismatch here means the
+                    // user switched away while this decode was in flight. Discard the
+                    // result — enqueuing stale audio into the new session's AudioQueue
+                    // would corrupt it. (Stream_id filtering in ws.ts already stopped new
+                    // frames from arriving; this catches frames that entered the chain
+                    // before cancel fired.)
+                    if (this.generation !== gen)
+                        return;
                     const duration = samples.length / 24000;
                     const prev = this.segments[this.segments.length - 1];
                     const startTime = prev ? prev.endTime : 0;
@@ -239,6 +257,7 @@ export class Player {
     // Private
     // ---------------------------------------------------------------------------
     reset() {
+        ++this.generation;
         Ws.cancelSynth();
         this.stopTracking();
         this.queue.reset();

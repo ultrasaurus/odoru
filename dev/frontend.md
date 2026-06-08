@@ -59,3 +59,61 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - `onEnded` fires when `done === true` AND playback position >= last segment end
 - Seek: click transcript sentence → jump to that segment's start time; auto-resumes if playing
 - `ws.onclose` handler: non-clean close fires `onError` so UI surfaces server crash
+
+## Stale-audio defence (two-layer)
+
+Switching documents while audio is streaming requires stopping both the server-side stream
+and any in-flight async work already queued in the player. Two guards work together:
+
+**Layer 1 — `stream_id` filtering in `ws.ts`**
+- Every `synth` request the server acknowledges with `synth_started { stream_id }` before
+  sending any segments. The client stores `currentStreamId`.
+- `sendSynth()` sends `cancel { stream_id }` to abort the previous server task, then clears
+  `currentStreamId` (it will be set again when the new `synth_started` arrives).
+- All incoming segment / done / error frames are dropped unless `msg.stream_id === currentStreamId`.
+- This stops *new* frames from reaching the player after a document switch.
+
+**Layer 2 — generation counter in `player.ts`**
+- `player.reset()` increments `this.generation`. Each `synthesize()` call captures the value
+  in `gen = this.generation`.
+- After every `await decodeAudioData()` inside the decode chain, the code checks
+  `this.generation !== gen` and discards the result if they differ.
+- This catches segments that were already queued in `decodeChain` *before* `cancel` was sent —
+  stream_id filtering stops frames at the WS boundary but can't reach work already in flight.
+
+**Why both are needed**: stream_id covers the wire; the generation counter covers the async
+decode gap. Remove either layer and a document switch can corrupt the new session's AudioQueue.
+
+## `decodeChain` — serial segment processing
+
+Segments are decoded in order via a Promise chain (`this.decodeChain`):
+```ts
+this.decodeChain = this.decodeChain.then(async () => {
+  const samples = await decodeAudioData(...)
+  if (this.generation !== gen) return  // stale — discard
+  this.queue.enqueue(samples)
+})
+```
+- Each `.then()` appends to the previous promise, so decodes are serial even when segments
+  arrive out of order or faster than decode completes.
+- **Do not parallelise**: audio must be enqueued in arrival order or playback corrupts.
+- The generation check *must* be after the await, not before, because `reset()` can fire
+  while `decodeAudioData` is running.
+
+## `loadAndListen` and `loadSeq`
+
+`loadAndListen(summary)` in the listen view is async (fetches full doc). Rapid document
+switches can create races where a slow load completes after a newer one. `loadSeq` is a
+module-level counter; each call captures `++loadSeq`. After `await Document.load()`, the
+function returns early if `loadSeq` has since incremented. This prevents a stale doc from
+overwriting the current one.
+
+## Play button icon state
+
+The play icon (`▶` / `⏸`) is updated in three places:
+1. `loadAndListen` — resets to `▶` immediately so the icon is correct before audio arrives.
+2. `onTimeUpdate` callback — updates on every animation frame while audio is playing.
+3. `playBtn` click handler — updates after `player.toggle()` resolves.
+
+If only (2) and (3) were present, switching documents while playing would leave a stale `⏸`
+until the first `timeUpdate` fires for the new stream.

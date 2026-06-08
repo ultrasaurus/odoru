@@ -98,13 +98,16 @@ See [protocol.md](protocol.md).
 
 ### Authoring
 
-#### Document creation and synthesis
-
+#### Document creation and synthesis (DONE)
 - remove "Synthesize in Background" checkbox — background job should always be the path
 - Fetching a URL creates a Document immediately (done); "Synthesize" button starts a job with the selected voice
 - Voice picker is ever-present in Edit view
 - User can listen during synthesis (WS streaming in reader) or stay in Edit view watching Documents panel job progress
 - User can synthesize the same document with a second voice later
+
+#### background job should always be the path 
+not fully resolved — there are still two distinct paths: background job (POST /jobs) for pre-synthesis, and WS streaming (player.synthesize()) for listen-now. Whether that's the right architecture or needs consolidating is an open design question.
+
 
 #### Text content without fetching URL ###
 - Pasted text is ephemeral and can be edited until Synthesize is pressed, then:

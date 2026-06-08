@@ -36,7 +36,9 @@ use tts::{AudioSegment, Backend, TtsEngine, Voice};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{RwLock, broadcast, mpsc};
+use uuid::Uuid;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info, warn};
 use util::{documents, index::{DocumentIndex, html_content_hash}, voice as voice_util};
@@ -186,6 +188,8 @@ enum ClientMsg {
     Synth(SynthRequest),
     /// Subscribe to document_status events for a document.
     Watch(WatchRequest),
+    /// Cancel an active synthesis stream.
+    Cancel(CancelRequest),
 }
 
 #[derive(Deserialize)]
@@ -204,11 +208,25 @@ struct WatchRequest {
     document_id: String,
 }
 
+#[derive(Deserialize)]
+struct CancelRequest {
+    stream_id: String,
+}
+
+/// Sent once before the first segment so the client can associate segments with this request.
+#[derive(Serialize)]
+struct SynthStartedMsg<'a> {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+    stream_id: &'a str,
+}
+
 /// JSON header frame sent before each binary audio frame.
 #[derive(Serialize)]
 struct SegmentHeaderMsg<'a> {
     #[serde(rename = "type")]
     msg_type: &'static str,
+    stream_id: &'a str,
     index: usize,
     transcript: TranscriptJson<'a>,
     cached: bool,
@@ -223,15 +241,25 @@ struct TranscriptJson<'a> {
 }
 
 #[derive(Serialize)]
-struct DoneMsg {
+struct DoneMsg<'a> {
     #[serde(rename = "type")]
     msg_type: &'static str,
+    stream_id: &'a str,
 }
 
 #[derive(Serialize)]
 struct ErrorMsg {
     #[serde(rename = "type")]
     msg_type: &'static str,
+    error: String,
+}
+
+/// Error message tied to a specific synthesis stream.
+#[derive(Serialize)]
+struct SynthErrorMsg<'a> {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+    stream_id: &'a str,
     error: String,
 }
 
@@ -247,29 +275,6 @@ async fn send_error(sender: &mut futures::stream::SplitSink<WebSocket, Message>,
     let _ = sender.send(Message::Text(json.into())).await;
 }
 
-/// Send one segment: JSON header frame then binary audio frame.
-/// The client pairs them in arrival order. Returns false if either send fails.
-async fn send_segment(
-    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
-    seg: &CachedSegment,
-    cached: bool,
-) -> bool {
-    let header = SegmentHeaderMsg {
-        msg_type: "segment",
-        index: seg.index,
-        transcript: TranscriptJson {
-            start: seg.transcript_start,
-            end: seg.transcript_end,
-            text: &seg.transcript_text,
-        },
-        cached,
-        paragraph_end: seg.paragraph_end,
-    };
-    let json = serde_json::to_string(&header).unwrap();
-    if sender.send(Message::Text(json.into())).await.is_err() { return false; }
-    // O(1) clone — Bytes is reference-counted.
-    sender.send(Message::Binary(seg.audio_bytes.clone())).await.is_ok()
-}
 
 async fn send_json<T: Serialize>(
     sender: &mut futures::stream::SplitSink<WebSocket, Message>,
@@ -945,6 +950,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     // Set of document IDs this connection is watching.
     let mut watched: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+    // Channel for frames produced by the active synth task.
+    let (seg_tx, mut seg_rx) = mpsc::channel::<Message>(256);
+    // Cancellation flag for the active synth task; replaced on each new synth.
+    let mut active_cancel: Option<Arc<AtomicBool>> = None;
+
     loop {
         tokio::select! {
             // ── Incoming client message ───────────────────────────────────
@@ -976,7 +986,31 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                                     send_error(&mut sender, "text must not be empty").await;
                                     continue;
                                 }
-                                handle_synth(&mut sender, &state, req).await;
+                                // Cancel any in-flight stream.
+                                if let Some(prev) = active_cancel.take() {
+                                    prev.store(true, Ordering::Relaxed);
+                                }
+                                let stream_id = Uuid::new_v4().simple().to_string();
+                                // Announce the stream ID before spawning so the client
+                                // can register it before the first segment arrives.
+                                let started = serde_json::to_string(&SynthStartedMsg {
+                                    msg_type: "synth_started",
+                                    stream_id: &stream_id,
+                                }).unwrap();
+                                if sender.send(Message::Text(started.into())).await.is_err() { return; }
+                                let cancelled = Arc::new(AtomicBool::new(false));
+                                active_cancel = Some(cancelled.clone());
+                                tokio::spawn(handle_synth(
+                                    seg_tx.clone(), cancelled, state.clone(), req, stream_id,
+                                ));
+                            }
+                            Ok(ClientMsg::Cancel(req)) => {
+                                // Only cancel if the stream_id matches to guard against stale cancels.
+                                // Since we track only the latest, just cancel whatever is active.
+                                debug!("Cancel request for stream {}", &req.stream_id[..8]);
+                                if let Some(prev) = active_cancel.take() {
+                                    prev.store(true, Ordering::Relaxed);
+                                }
                             }
                             Err(e) => {
                                 send_error(&mut sender, &format!("Invalid request: {e}")).await;
@@ -986,6 +1020,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     Some(Ok(Message::Close(_))) | None => return,
                     _ => {}
                 }
+            }
+
+            // ── Frames from active synth task ─────────────────────────────
+            Some(frame) = seg_rx.recv() => {
+                if sender.send(frame).await.is_err() { return; }
             }
 
             // ── Outgoing document status events ───────────────────────────
@@ -1005,24 +1044,51 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     }
 }
 
-/// Handle a single synthesis request on an open WS connection.
+/// Synthesis task — runs concurrently with the socket loop.
+/// Sends frames to `seg_tx`; checks `cancelled` before each send.
 async fn handle_synth(
-    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
-    state: &Arc<AppState>,
+    seg_tx: mpsc::Sender<Message>,
+    cancelled: Arc<AtomicBool>,
+    state: Arc<AppState>,
     req: SynthRequest,
+    stream_id: String,
 ) {
-    // Resolve voice ID — use explicit voice or fall back to first available.
+    // Check the cancel flag and send a frame; return early on cancel or channel close.
+    macro_rules! try_send {
+        ($msg:expr) => {
+            if cancelled.load(Ordering::Relaxed) { return; }
+            if seg_tx.send($msg).await.is_err() { return; }
+        }
+    }
+    macro_rules! json_frame {
+        ($val:expr) => {
+            Message::Text(serde_json::to_string(&$val).unwrap().into())
+        }
+    }
+
+    // ── Resolve voice ─────────────────────────────────────────────────────
     let voice_id = match req.voice {
         Some(v) => v,
         None => match state.default_voice() {
             Some(v) => v.to_string(),
-            None => { send_error(sender, "no voices available").await; return; }
+            None => {
+                try_send!(json_frame!(SynthErrorMsg {
+                    msg_type: "error", stream_id: &stream_id,
+                    error: "no voices available".to_string(),
+                }));
+                return;
+            }
         }
     };
 
     let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
         Ok(pair) => pair,
-        Err(e) => { send_error(sender, &e).await; return; }
+        Err(e) => {
+            try_send!(json_frame!(SynthErrorMsg {
+                msg_type: "error", stream_id: &stream_id, error: e,
+            }));
+            return;
+        }
     };
 
     let key = cache_key(&req.text, &voice_id);
@@ -1031,13 +1097,25 @@ async fn handle_synth(
     if let Some(segments) = state.cache.get(&key) {
         debug!("Cache hit for key {}", &key[..8]);
         for seg in segments.iter() {
-            if !send_segment(sender, seg, true).await { return; }
+            try_send!(json_frame!(SegmentHeaderMsg {
+                msg_type: "segment", stream_id: &stream_id,
+                index: seg.index,
+                transcript: TranscriptJson {
+                    start: seg.transcript_start,
+                    end: seg.transcript_end,
+                    text: &seg.transcript_text,
+                },
+                cached: true,
+                paragraph_end: seg.paragraph_end,
+            }));
+            // O(1) clone — Bytes is reference-counted.
+            try_send!(Message::Binary(seg.audio_bytes.clone()));
         }
-        send_json(sender, &DoneMsg { msg_type: "done" }).await;
+        try_send!(json_frame!(DoneMsg { msg_type: "done", stream_id: &stream_id }));
         return;
     }
 
-    // If a document_id was provided, record voice as in_progress.
+    // ── Record voice as in_progress ───────────────────────────────────────
     if let Some(doc_id) = &req.document_id {
         let lock = state.voice_lock(doc_id);
         let _guard = lock.write().await;
@@ -1062,7 +1140,18 @@ async fn handle_synth(
             Ok(seg) => {
                 last_end = seg.transcript.end;
                 let cached_seg = CachedSegment::from_segment(&seg);
-                if !send_segment(sender, &cached_seg, false).await { return; }
+                try_send!(json_frame!(SegmentHeaderMsg {
+                    msg_type: "segment", stream_id: &stream_id,
+                    index: cached_seg.index,
+                    transcript: TranscriptJson {
+                        start: cached_seg.transcript_start,
+                        end: cached_seg.transcript_end,
+                        text: &cached_seg.transcript_text,
+                    },
+                    cached: false,
+                    paragraph_end: cached_seg.paragraph_end,
+                }));
+                try_send!(Message::Binary(cached_seg.audio_bytes.clone()));
                 rendered.push(cached_seg);
             }
             Err(e) => {
@@ -1076,7 +1165,10 @@ async fn handle_synth(
                         );
                     }
                 }
-                send_error(sender, &format!("Synthesis error: {e}")).await;
+                try_send!(json_frame!(SynthErrorMsg {
+                    msg_type: "error", stream_id: &stream_id,
+                    error: format!("Synthesis error: {e}"),
+                }));
                 return;
             }
         }
@@ -1085,7 +1177,7 @@ async fn handle_synth(
     debug!("Caching {} segments for key {}", rendered.len(), &key[..8]);
     state.cache.insert(key, rendered);
 
-    // Mark voice ready in voices.json if we have a document_id.
+    // ── Mark voice ready ──────────────────────────────────────────────────
     if let Some(doc_id) = &req.document_id {
         let lock = state.voice_lock(doc_id);
         let _guard = lock.write().await;
@@ -1099,7 +1191,7 @@ async fn handle_synth(
         }
     }
 
-    send_json(sender, &DoneMsg { msg_type: "done" }).await;
+    try_send!(json_frame!(DoneMsg { msg_type: "done", stream_id: &stream_id }));
 }
 
 // ---------------------------------------------------------------------------

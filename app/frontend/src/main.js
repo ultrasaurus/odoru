@@ -408,6 +408,7 @@ function showEdit() {
     let fetchedDocument = null;
     let currentPendingSpans = [];
     let currentHeadings = [];
+    let loadSeq = 0;
     app.innerHTML = `
     <div class="layout">
       <div id="error-bar" class="error-bar" style="display:none">
@@ -1104,8 +1105,10 @@ function showEdit() {
         pollQueue();
     }
     async function loadAndListen(summary) {
+        const seq = ++loadSeq;
         player.stop();
         playBtn.disabled = true;
+        playBtn.querySelector('.play-icon').textContent = '▶';
         downloadBtn.disabled = true;
         progressFill.style.width = '0%';
         timeCurrent.textContent = '0:00';
@@ -1121,7 +1124,12 @@ function showEdit() {
         currentPendingSpans = [];
         currentHeadings = [];
         try {
-            fetchedDocument = await Document.load(summary.id);
+            const loaded = await Document.load(summary.id);
+            if (loadSeq !== seq) {
+                loaded.destroy();
+                return;
+            }
+            fetchedDocument = loaded;
             const data = fetchedDocument.current;
             if (!data.content || !data.plain_text) {
                 articleContent.innerHTML = '<div class="error">Content not available.</div>';
@@ -1133,7 +1141,13 @@ function showEdit() {
             currentHeadings = headings;
             editCore.renderOutline(headings, _i => { });
             editOutlineSection.style.display = headings.length ? '' : 'none';
-            updateEstimate(data.plain_text);
+            const voice = pickVoice(data.voices);
+            const voiceEntry = voice ? data.voices[voice] : undefined;
+            const audioReady = !!voiceEntry && voiceEntry.status !== 'error';
+            if (!audioReady)
+                updateEstimate(data.plain_text);
+            else
+                timeEstimate.textContent = '';
             showListenNew();
             startListen();
         }

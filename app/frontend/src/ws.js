@@ -6,6 +6,13 @@
 let ws = null;
 let connecting = false;
 let currentSynth = null;
+// stream_id assigned by the server for the current synthesis; null between
+// sendSynth() and the synth_started acknowledgement. All incoming segment,
+// done, and error frames are dropped unless their stream_id matches this value,
+// preventing frames from a superseded server-side stream from reaching the
+// player. Frames that already entered the player's decodeChain before cancel
+// fired are handled by the generation counter in player.ts.
+let currentStreamId = null;
 const statusHandlers = new Map();
 // Messages to send once connected (e.g. synth queued before open)
 const sendQueue = [];
@@ -25,17 +32,23 @@ function connect() {
         for (const id of statusHandlers.keys()) {
             ws.send(JSON.stringify({ type: 'watch', document_id: id }));
         }
-        // Flush any queued messages
+        // Flush any queued messages (may include a synth request)
         for (const msg of sendQueue.splice(0)) {
             ws.send(msg);
         }
     };
     ws.onmessage = (ev) => {
-        // Binary frame: audio payload for the preceding JSON header.
+        // Binary frame: audio payload for the preceding JSON segment header.
         if (ev.data instanceof ArrayBuffer) {
             if (pendingSegmentHeader) {
-                currentSynth?.onSegment({ ...pendingSegmentHeader, audioData: ev.data });
+                const header = pendingSegmentHeader;
                 pendingSegmentHeader = null;
+                if (header.stream_id === currentStreamId) {
+                    currentSynth?.onSegment({ ...header, audioData: ev.data });
+                }
+                else {
+                    console.log(`[ws] drop binary for stale stream ${header.stream_id?.slice(0, 8)} (current=${currentStreamId?.slice(0, 8)})`);
+                }
             }
             return;
         }
@@ -52,17 +65,37 @@ function connect() {
             return;
         }
         switch (type) {
+            case 'synth_started':
+                currentStreamId = msg.stream_id;
+                break;
             case 'segment':
+                if (msg.stream_id !== currentStreamId) {
+                    console.log(`[ws] drop segment idx=${msg.index} stream=${msg.stream_id?.slice(0, 8)} (current=${currentStreamId?.slice(0, 8)})`);
+                    // Still need to consume the pending binary frame that follows.
+                    // Store with a dummy handler so the binary arm can clear it cleanly.
+                    pendingSegmentHeader = msg;
+                    break;
+                }
                 // Save header; audio arrives in the next binary frame.
                 pendingSegmentHeader = msg;
                 break;
             case 'done':
+                if (msg.stream_id !== currentStreamId) {
+                    console.log(`[ws] drop done for stale stream ${msg.stream_id?.slice(0, 8)}`);
+                    break;
+                }
                 currentSynth?.onDone();
                 currentSynth = null;
+                currentStreamId = null;
                 break;
             case 'error':
+                if (msg.stream_id !== undefined && msg.stream_id !== currentStreamId) {
+                    console.log(`[ws] drop error for stale stream ${msg.stream_id?.slice(0, 8)}`);
+                    break;
+                }
                 currentSynth?.onError(msg.error ?? 'Unknown error');
                 currentSynth = null;
+                currentStreamId = null;
                 break;
             case 'document_status':
                 statusHandlers.get(msg.id)?.(msg);
@@ -75,6 +108,7 @@ function connect() {
         connecting = false;
         ws = null;
         pendingSegmentHeader = null;
+        currentStreamId = null;
         if (currentSynth) {
             currentSynth.onError('Connection lost — server may have restarted');
             currentSynth = null;
@@ -95,17 +129,28 @@ function send(msg) {
     }
 }
 // ── Public API ────────────────────────────────────────────────────────────────
-/** Start a synthesis stream. Replaces any in-progress synthesis. */
+/** Start a synthesis stream. Cancels any in-progress stream on the server first. */
 export function sendSynth(text, voice, documentId, handlers) {
+    // Cancel previous stream on the server so it stops sending.
+    if (currentStreamId) {
+        send({ type: 'cancel', stream_id: currentStreamId });
+    }
     currentSynth = handlers;
+    currentStreamId = null; // will be set when synth_started arrives
+    pendingSegmentHeader = null;
     const msg = { type: 'synth', text, voice };
     if (documentId)
         msg.document_id = documentId;
     send(msg);
 }
-/** Cancel the current synthesis handler without closing the connection. */
+/** Cancel the current synthesis stream. */
 export function cancelSynth() {
+    if (currentStreamId) {
+        send({ type: 'cancel', stream_id: currentStreamId });
+    }
     currentSynth = null;
+    currentStreamId = null;
+    pendingSegmentHeader = null;
 }
 /** Subscribe to document_status events for a given document id. */
 export function watch(documentId, handler) {
