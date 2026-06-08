@@ -39,6 +39,26 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - Auto-scroll checkbox (default on) — when on, active sentence scrolls into view
 - `cleanup()` (returned by `mount`) stops poll timers and audio when navigating to Edit view
 
+## Two synthesis paths
+
+The app intentionally keeps two separate synthesis paths, each suited to a different use case:
+
+**WS streaming (`synth` message → segment frames)** — used by the Listen button and `loadAndListen`.
+- Synthesizes sentences on demand; client can seek to any sentence and hear it within seconds.
+- Server starts from the requested position, so seeking to sentence 80 doesn't wait for 1–79.
+- Ephemeral: if the tab closes, the stream is lost. No persistence across sessions.
+- Single synthesis slot per WS connection — starting a new stream cancels the previous one.
+
+**Background job (`POST /jobs` → poll `GET /jobs/:id`)** — used by the Synthesize button.
+- Synthesizes the full document in order, storing every segment in the audio cache.
+- Survives tab close / server restart; progress is queryable at any time via REST.
+- Once complete, all audio is cached — subsequent Listen sessions get instant cache hits.
+- Multiple voices can be synthesized concurrently (separate jobs, one progress bar each).
+
+**Why not consolidate?** Seeking into a not-yet-synthesized doc works well over WS because the
+server can jump to the requested sentence immediately. A jobs-only path would require waiting for
+all earlier sentences to be synthesized first, making mid-document seeks much slower.
+
 ## Edit view
 - URL fetch → markdown render → Synthesize (background job) → Listen / New buttons
 - After fetch, article renders immediately as formatted markdown with gray pending sentence spans

@@ -98,25 +98,19 @@ See [protocol.md](protocol.md).
 
 ### Authoring
 
-#### Document creation and synthesis (DONE)
-- remove "Synthesize in Background" checkbox — background job should always be the path
-- Fetching a URL creates a Document immediately (done); "Synthesize" button starts a job with the selected voice
-- Voice picker is ever-present in Edit view
-- User can listen during synthesis (WS streaming in reader) or stay in Edit view watching Documents panel job progress
-- User can synthesize the same document with a second voice later
-
-#### background job should always be the path 
-not fully resolved — there are still two distinct paths: background job (POST /jobs) for pre-synthesis, and WS streaming (player.synthesize()) for listen-now. Whether that's the right architecture or needs consolidating is an open design question.
-
 
 #### Text content without fetching URL ###
 - Pasted text is ephemeral and can be edited until Synthesize is pressed, then:
   - text area becomes non-editable 
   - the Document is created, job is started
-- `PATCH /documents/:id` with stale voice transition (for content edits)
-- Snippets: direct text entry or paste input paths
 - future: upload
 
+### Hints on how to pronounce words ###
+- Mispronounced words: no UI for `tts_overrides.txt` edits
+- will need to invalidate cache entries
+
+#### Documents are editable ###
+- `PATCH /documents/:id` with stale voice transition (for content edits)
 
 #### Results from URL fetch are editable ###
 so text can be adjusted if scraping is imperfect
@@ -151,7 +145,6 @@ The future versioning vision (retaining original document) may change what
 - Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
 
 #### TTS improvements
-- Mispronounced words: no UI for `tts_overrides.txt` edits
 - Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
 - Roman numeral / outline-style headers (`I.`, `II.`, `A.`, `B.`) cause sentence splitting
   mismatch between server (`unicode_segmentation`) and client (`Intl.Segmenter`) — server splits
