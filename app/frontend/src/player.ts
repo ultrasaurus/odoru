@@ -114,8 +114,18 @@ export class Player {
       this.container.innerHTML = '<div class="loading">Synthesizing…</div>'
     }
 
+    let receivedCount = 0
     Ws.sendSynth(text, voice ?? '', documentId, {
       onSegment: (msg) => {
+        // Activate pre-rendered pending span immediately as segment arrives,
+        // before the decode chain — so cached audio lights up spans fast.
+        const arrivedIndex = receivedCount++
+        const pending = this.pendingSpans[arrivedIndex]
+        if (pending) {
+          pending.classList.remove('pending')
+          pending.addEventListener('click', () => this.seekTo(arrivedIndex))
+        }
+
         this.decodeChain = this.decodeChain.then(async () => {
           const samples = await this.queue.decodeAudioData(msg.audioData)
           const duration = samples.length / 24000
@@ -126,7 +136,13 @@ export class Player {
           this.queue.enqueue(samples)
           const newIndex = this.segments.length
           this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end })
-          this.renderSegment(msg.transcript, newIndex)
+
+          if (pending) {
+            // Span already brightened; just register it for highlight tracking.
+            this.segmentEls.push(pending)
+          } else {
+            this.renderSegment(msg.transcript, newIndex)
+          }
 
           if (newIndex === 0) this.onReadyCb?.()
 

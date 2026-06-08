@@ -98,9 +98,21 @@ See [protocol.md](protocol.md).
 
 ### Authoring
 
+#### Document creation and synthesis
+
+- remove "Synthesize in Background" checkbox — background job should always be the path
+- Fetching a URL creates a Document immediately (done); "Synthesize" button starts a job with the selected voice
+- Voice picker is ever-present in Edit view
+- User can listen during synthesis (WS streaming in reader) or stay in Edit view watching Documents panel job progress
+- User can synthesize the same document with a second voice later
+
 #### Text content without fetching URL ###
+- Pasted text is ephemeral and can be edited until Synthesize is pressed, then:
+  - text area becomes non-editable 
+  - the Document is created, job is started
 - `PATCH /documents/:id` with stale voice transition (for content edits)
-- Snippets, upload, and paste input paths
+- Snippets: direct text entry or paste input paths
+- future: upload
 
 
 #### Results from URL fetch are editable ###
@@ -129,9 +141,7 @@ The future versioning vision (retaining original document) may change what
 
 
 ### Polish / small bugs
-- Error bar: currently only in New view; should be in a shared layout wrapper
-- Paste URL → Synthesize → then check "Synth in Background" → no job created; checkbox must be
-  checked before clicking Synthesize to queue a background job
+- Error bar: currently only in Edit view; should be in a shared layout wrapper
 - pause/play icons — easy to see state + what action will happen
 - Synthesis time display: ~2161m 45s should be H:MM:SS
 - Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy

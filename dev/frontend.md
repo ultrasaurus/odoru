@@ -25,12 +25,12 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - "Synthesize in background" button shown when audio not cached and no active job exists
 - Job progress shown in header; polls `GET /jobs/:id` every 4s while running
 - Auto-scroll checkbox (default off) — when on, active sentence scrolls into view
-- `viewCleanup` stops poll timers when navigating to New view
+- `viewCleanup` stops poll timers when navigating to Edit view
 
-## New view
-- URL fetch + text area + voice picker + "Synthesize in background" checkbox
-- Checkbox unchecked: live streaming WS synthesis
-- Checkbox checked: `POST /jobs`, progress shown in transcript area, polls every 4s
+## Edit view
+- URL fetch + text area + voice picker (ever-present) + Synthesize button
+- Synthesize starts a background job (`POST /jobs`); "Synthesize in background" checkbox to be removed
+- User can stay in Edit view watching Documents panel progress, or navigate to reader for live streaming
 - Documents panel below card: always visible; fetches `GET /articles` + `GET /jobs` in parallel,
   polls every 10s; one row per article with job status overlaid where `article_url` matches
   - Job matching restricted to `ARTICLE_VOICE` (reader hardcoded to f5:sarah for now)

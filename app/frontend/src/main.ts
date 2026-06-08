@@ -1,6 +1,6 @@
 import './style.css'
 import { Player } from './player'
-import { renderMarkdown } from './markdown'
+import { renderMarkdown, type HeadingEntry } from './markdown'
 import { Document, type DocumentState, type VoiceEntry } from './document'
 import { ReaderCore, formatByline } from './reader-core'
 
@@ -474,7 +474,7 @@ function showReader() {
     })
 }
 
-// ── New view ──────────────────────────────────────────────────────────────────
+// ── Edit view ─────────────────────────────────────────────────────────────────
 
 function showEdit() {
   viewCleanup?.()
@@ -483,6 +483,8 @@ function showEdit() {
   let selectedVoice: string | null = null  // stores prefixed id, e.g. "f5:sarah"
   let synthStart = 0
   let fetchedDocument: Document | null = null
+  let currentPendingSpans: HTMLElement[] = []
+  let currentHeadings: HeadingEntry[] = []
 
   app.innerHTML = `
     <div class="layout">
@@ -516,25 +518,24 @@ function showEdit() {
             </div>
 
             <div class="input-area">
-              <textarea
-                id="text-input"
-                class="text-input"
-                placeholder="Fetched text will appear here…"
-                rows="4"
-                readonly
-              ></textarea>
+              <div class="article-area">
+                <div id="edit-outline-section" class="edit-outline-panel" style="display:none">
+                  <div class="sidebar-label">Outline</div>
+                  <div id="edit-outline-list" class="outline-list"></div>
+                </div>
+                <div id="article-content" class="article-content">
+                  <div class="placeholder">Fetch a URL above to see the article.</div>
+                </div>
+              </div>
               <div class="synth-row">
                 <div id="time-estimate" class="time-estimate"></div>
-                <label class="bg-synth-label">
-                  <input type="checkbox" id="bg-synth-cb" class="bg-synth-cb">
-                  Synthesize in background
-                </label>
-                <button id="synth-btn" class="synth-btn">Synthesize</button>
+                <span id="synth-progress" class="synth-progress"></span>
+                <div class="synth-buttons">
+                  <button id="listen-btn" class="listen-btn" style="display:none">Listen</button>
+                  <button id="reset-btn" class="reset-btn" style="display:none">New</button>
+                  <button id="synth-btn" class="synth-btn">Synthesize</button>
+                </div>
               </div>
-            </div>
-
-            <div id="transcript-container" class="transcript-container">
-              <div class="placeholder">Fetch a URL above, then press Synthesize.</div>
             </div>
 
             ${controlsHtml()}
@@ -930,20 +931,24 @@ function showEdit() {
   errorBarRetry.addEventListener('click', () => loadVoices())
 
   const synthBtn     = document.getElementById('synth-btn')    as HTMLButtonElement
-  const bgSynthCb    = document.getElementById('bg-synth-cb')  as HTMLInputElement
-  const textInput    = document.getElementById('text-input')   as HTMLTextAreaElement
+  const listenBtn    = document.getElementById('listen-btn')   as HTMLButtonElement
+  const newBtn       = document.getElementById('reset-btn')    as HTMLButtonElement
+  const articleContent  = document.getElementById('article-content')!
+  const synthProgress   = document.getElementById('synth-progress') as HTMLSpanElement
   const timeEstimate = document.getElementById('time-estimate') as HTMLDivElement
   const urlInput     = document.getElementById('url-input')    as HTMLInputElement
   const fetchStatus  = document.getElementById('fetch-status') as HTMLDivElement
   const voiceList        = document.getElementById('voice-list')        as HTMLDivElement
   const voiceDescription = document.getElementById('voice-description') as HTMLDivElement
-  const transcriptContainer = document.getElementById('transcript-container')!
+  const editOutlineSection = document.getElementById('edit-outline-section')!
+  const editOutlineList    = document.getElementById('edit-outline-list')!
   const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls()
 
-  const player = new Player(transcriptContainer)
+  const player   = new Player(articleContent)
+  const editCore = new ReaderCore(articleContent, editOutlineList)
 
   player.onError(msg => {
-    setError(transcriptContainer, `Error: ${msg}`)
+    synthProgress.textContent = `Error: ${msg}`
     synthBtn.disabled = false
     playBtn.disabled = true
   })
@@ -1007,7 +1012,7 @@ function showEdit() {
         selectVoice(preferred.id)
       }
       else renderVoices()
-      updateEstimate(textInput.value)
+      updateEstimate(fetchedDocument?.current.plain_text ?? '')
     } catch {
       voiceList.innerHTML = '<div class="voice-loading">—</div>'
       showErrorBar('Could not reach server. Is it running?')
@@ -1056,14 +1061,21 @@ function showEdit() {
     synthBtn.disabled = true
     fetchedDocument?.destroy()
     fetchedDocument = null
-    textInput.value = ''
+    currentPendingSpans = []
+    currentHeadings = []
+    articleContent.innerHTML = '<div class="placeholder">Fetch a URL above to see the article.</div>'
 
     try {
       const doc = await Document.fetch(url)
       const state = doc.current
       const wasDedup = !state.cached_at || Date.now() - new Date(state.cached_at).getTime() > 5000
       fetchedDocument = doc
-      textInput.value = state.plain_text ?? ''
+      articleContent.innerHTML = ''
+      const { pendingSpans, headings } = renderMarkdown(state.content ?? '', state.plain_text ?? '', articleContent)
+      currentPendingSpans = pendingSpans
+      currentHeadings = headings
+      editCore.renderOutline(headings, _i => { /* seek wired in startListen */ })
+      editOutlineSection.style.display = headings.length ? '' : 'none'
       updateEstimate(state.plain_text ?? '')
       const suffix = wasDedup ? ' (previously fetched)' : ''
       fetchStatus.textContent = `✔ ${state.title ?? url}${suffix}`
@@ -1079,18 +1091,14 @@ function showEdit() {
     }
   }
 
-  function startSynth(text: string) {
-    synthBtn.disabled = true
-    playBtn.disabled = true
-    downloadBtn.disabled = true
-    progressFill.style.width = '0%'
-    timeCurrent.textContent = '0:00'
-    timeTotal.textContent = '0:00'
-    synthStart = Date.now()
-    player.synthesize(text, selectedVoice ?? undefined, undefined, fetchedDocument?.current.id)
-  }
-
   // ── Background job ─────────────────────────────────────────────────────────
+
+  function showListenNew() {
+    synthBtn.style.display = 'none'
+    listenBtn.style.display = ''
+    newBtn.style.display = ''
+    synthBtn.disabled = false
+  }
 
   function pollBgJob(jobId: string, total: number) {
     stopBgPoll()
@@ -1098,29 +1106,25 @@ function showEdit() {
       try {
         const res = await fetch(`/jobs/${jobId}`)
         if (!res.ok) {
-          setError(transcriptContainer, `Job not found (${res.status}) — server may have restarted`)
-          synthBtn.disabled = false
+          synthProgress.textContent = `Job not found (${res.status}) — server may have restarted`
           return
         }
         const job: JobInfo = await res.json()
         if (job.status === 'done') {
-          transcriptContainer.innerHTML = '<div class="loading">✓ Background synthesis complete — press Synthesize to play</div>'
-          synthBtn.disabled = false
+          synthProgress.textContent = '✓ Synthesis complete'
           return
         }
         if (job.status === 'error') {
-          setError(transcriptContainer, `Synthesis error: ${job.error ?? ''}`)
-          synthBtn.disabled = false
+          synthProgress.textContent = `Synthesis error: ${job.error ?? ''}`
           return
         }
         if (job.status === 'cancelled') {
-          transcriptContainer.innerHTML = '<div class="loading">Job cancelled.</div>'
-          synthBtn.disabled = false
+          synthProgress.textContent = 'Job cancelled.'
           return
         }
         const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0
-        transcriptContainer.innerHTML =
-          `<div class="loading">Background synthesis: ${job.completed_sentences}/${total} sentences (${pct}%)</div>`
+        synthProgress.textContent =
+          `${job.completed_sentences}/${total} sentences (${pct}%)`
         pollBgJob(jobId, total)
       } catch {
         pollBgJob(jobId, total) // retry silently on network blip
@@ -1131,7 +1135,7 @@ function showEdit() {
   async function startBgJob(text: string, documentId?: string) {
     stopBgPoll()
     synthBtn.disabled = true
-    transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>'
+    synthProgress.textContent = 'Queuing…'
     try {
       const body: Record<string, string> = { text }
       if (selectedVoice) body.voice = selectedVoice
@@ -1143,45 +1147,83 @@ function showEdit() {
       })
       const job: JobInfo = await res.json()
       if (!res.ok) {
-        setError(transcriptContainer, job.error ?? 'Failed to queue job')
+        synthProgress.textContent = job.error ?? 'Failed to queue job'
         synthBtn.disabled = false
         return
       }
       if (job.status === 'done') {
-        // Audio already cached — play it directly via the live synthesis path.
-        synthBtn.disabled = false
-        startSynth(text)
-        return
+        synthProgress.textContent = '✓ Synthesis complete'
+      } else {
+        synthProgress.textContent = `0/${job.total_sentences} sentences (0%)`
+        pollBgJob(job.id, job.total_sentences)
       }
-      transcriptContainer.innerHTML =
-        `<div class="loading">Background synthesis: 0/${job.total_sentences} sentences (0%)</div>`
-      pollBgJob(job.id, job.total_sentences)
+      showListenNew()
       pollQueue()
     } catch {
-      transcriptContainer.innerHTML = '<div class="error">Could not reach server</div>'
+      synthProgress.textContent = 'Could not reach server'
       synthBtn.disabled = false
     }
   }
 
-  synthBtn.addEventListener('click', async () => {
-    const text = textInput.value.trim()
-    const url  = urlInput.value.trim()
+  function startListen() {
+    if (!fetchedDocument?.current) return
+    const doc = fetchedDocument.current
+    listenBtn.disabled = true
+    player.setPendingSpans(currentPendingSpans)
+    editCore.renderOutline(currentHeadings, i => player.seekTo(i))
+    synthStart = Date.now()
+    player.synthesize(doc.plain_text!, selectedVoice ?? undefined, currentPendingSpans, doc.id)
+  }
 
-    if (!text && !url) {
+  function resetEdit() {
+    stopQueuePoll()
+    stopBgPoll()
+    player.stop()
+    articleContent.innerHTML = '<div class="placeholder">Fetch a URL above to see the article.</div>'
+    urlInput.value = ''
+    fetchStatus.textContent = ''
+    fetchStatus.className = 'fetch-status'
+    synthProgress.textContent = ''
+    timeEstimate.textContent = ''
+    synthBtn.style.display = ''
+    listenBtn.style.display = 'none'
+    listenBtn.disabled = false
+    newBtn.style.display = 'none'
+    editOutlineSection.style.display = 'none'
+    playBtn.disabled = true
+    downloadBtn.disabled = true
+    progressFill.style.width = '0%'
+    timeCurrent.textContent = '0:00'
+    timeTotal.textContent = '0:00'
+    fetchedDocument?.destroy()
+    fetchedDocument = null
+    currentPendingSpans = []
+    currentHeadings = []
+    pollQueue()
+  }
+
+  listenBtn.addEventListener('click', startListen)
+  newBtn.addEventListener('click', resetEdit)
+
+  synthBtn.addEventListener('click', async () => {
+    const url = urlInput.value.trim()
+
+    if (!fetchedDocument && !url) {
       fetchStatus.textContent = 'Paste a URL first.'
       fetchStatus.className = 'fetch-status error'
       return
     }
 
-    // If text area is empty, fetch the URL first
-    const resolvedText = text || (await fetchDocument(url) ? textInput.value.trim() : '')
-    if (!resolvedText) return
-
-    if (bgSynthCb.checked) {
-      await startBgJob(resolvedText, fetchedDocument?.current.id)
-    } else {
-      startSynth(resolvedText)
+    // Fetch if we don't have a document yet
+    if (!fetchedDocument) {
+      const ok = await fetchDocument(url)
+      if (!ok) return
     }
+
+    const text = fetchedDocument?.current.plain_text
+    if (!text) return
+
+    await startBgJob(text, fetchedDocument?.current.id)
   })
 
   urlInput.addEventListener('keydown', async (e: KeyboardEvent) => {

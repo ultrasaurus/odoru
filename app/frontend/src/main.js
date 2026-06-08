@@ -399,13 +399,15 @@ function showReader() {
         articleTitleEl.textContent = '';
     });
 }
-// ── New view ──────────────────────────────────────────────────────────────────
+// ── Edit view ─────────────────────────────────────────────────────────────────
 function showEdit() {
     viewCleanup?.();
     let voices = [];
     let selectedVoice = null; // stores prefixed id, e.g. "f5:sarah"
     let synthStart = 0;
     let fetchedDocument = null;
+    let currentPendingSpans = [];
+    let currentHeadings = [];
     app.innerHTML = `
     <div class="layout">
       <div id="error-bar" class="error-bar" style="display:none">
@@ -438,25 +440,24 @@ function showEdit() {
             </div>
 
             <div class="input-area">
-              <textarea
-                id="text-input"
-                class="text-input"
-                placeholder="Fetched text will appear here…"
-                rows="4"
-                readonly
-              ></textarea>
+              <div class="article-area">
+                <div id="edit-outline-section" class="edit-outline-panel" style="display:none">
+                  <div class="sidebar-label">Outline</div>
+                  <div id="edit-outline-list" class="outline-list"></div>
+                </div>
+                <div id="article-content" class="article-content">
+                  <div class="placeholder">Fetch a URL above to see the article.</div>
+                </div>
+              </div>
               <div class="synth-row">
                 <div id="time-estimate" class="time-estimate"></div>
-                <label class="bg-synth-label">
-                  <input type="checkbox" id="bg-synth-cb" class="bg-synth-cb">
-                  Synthesize in background
-                </label>
-                <button id="synth-btn" class="synth-btn">Synthesize</button>
+                <span id="synth-progress" class="synth-progress"></span>
+                <div class="synth-buttons">
+                  <button id="listen-btn" class="listen-btn" style="display:none">Listen</button>
+                  <button id="reset-btn" class="reset-btn" style="display:none">New</button>
+                  <button id="synth-btn" class="synth-btn">Synthesize</button>
+                </div>
               </div>
-            </div>
-
-            <div id="transcript-container" class="transcript-container">
-              <div class="placeholder">Fetch a URL above, then press Synthesize.</div>
             </div>
 
             ${controlsHtml()}
@@ -812,18 +813,22 @@ function showEdit() {
     }
     errorBarRetry.addEventListener('click', () => loadVoices());
     const synthBtn = document.getElementById('synth-btn');
-    const bgSynthCb = document.getElementById('bg-synth-cb');
-    const textInput = document.getElementById('text-input');
+    const listenBtn = document.getElementById('listen-btn');
+    const newBtn = document.getElementById('reset-btn');
+    const articleContent = document.getElementById('article-content');
+    const synthProgress = document.getElementById('synth-progress');
     const timeEstimate = document.getElementById('time-estimate');
     const urlInput = document.getElementById('url-input');
     const fetchStatus = document.getElementById('fetch-status');
     const voiceList = document.getElementById('voice-list');
     const voiceDescription = document.getElementById('voice-description');
-    const transcriptContainer = document.getElementById('transcript-container');
+    const editOutlineSection = document.getElementById('edit-outline-section');
+    const editOutlineList = document.getElementById('edit-outline-list');
     const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls();
-    const player = new Player(transcriptContainer);
+    const player = new Player(articleContent);
+    const editCore = new ReaderCore(articleContent, editOutlineList);
     player.onError(msg => {
-        setError(transcriptContainer, `Error: ${msg}`);
+        synthProgress.textContent = `Error: ${msg}`;
         synthBtn.disabled = false;
         playBtn.disabled = true;
     });
@@ -883,7 +888,7 @@ function showEdit() {
             }
             else
                 renderVoices();
-            updateEstimate(textInput.value);
+            updateEstimate(fetchedDocument?.current.plain_text ?? '');
         }
         catch {
             voiceList.innerHTML = '<div class="voice-loading">—</div>';
@@ -934,13 +939,20 @@ function showEdit() {
         synthBtn.disabled = true;
         fetchedDocument?.destroy();
         fetchedDocument = null;
-        textInput.value = '';
+        currentPendingSpans = [];
+        currentHeadings = [];
+        articleContent.innerHTML = '<div class="placeholder">Fetch a URL above to see the article.</div>';
         try {
             const doc = await Document.fetch(url);
             const state = doc.current;
             const wasDedup = !state.cached_at || Date.now() - new Date(state.cached_at).getTime() > 5000;
             fetchedDocument = doc;
-            textInput.value = state.plain_text ?? '';
+            articleContent.innerHTML = '';
+            const { pendingSpans, headings } = renderMarkdown(state.content ?? '', state.plain_text ?? '', articleContent);
+            currentPendingSpans = pendingSpans;
+            currentHeadings = headings;
+            editCore.renderOutline(headings, _i => { });
+            editOutlineSection.style.display = headings.length ? '' : 'none';
             updateEstimate(state.plain_text ?? '');
             const suffix = wasDedup ? ' (previously fetched)' : '';
             fetchStatus.textContent = `✔ ${state.title ?? url}${suffix}`;
@@ -957,46 +969,38 @@ function showEdit() {
             synthBtn.disabled = false;
         }
     }
-    function startSynth(text) {
-        synthBtn.disabled = true;
-        playBtn.disabled = true;
-        downloadBtn.disabled = true;
-        progressFill.style.width = '0%';
-        timeCurrent.textContent = '0:00';
-        timeTotal.textContent = '0:00';
-        synthStart = Date.now();
-        player.synthesize(text, selectedVoice ?? undefined, undefined, fetchedDocument?.current.id);
-    }
     // ── Background job ─────────────────────────────────────────────────────────
+    function showListenNew() {
+        synthBtn.style.display = 'none';
+        listenBtn.style.display = '';
+        newBtn.style.display = '';
+        synthBtn.disabled = false;
+    }
     function pollBgJob(jobId, total) {
         stopBgPoll();
         bgPollTimer = setTimeout(async () => {
             try {
                 const res = await fetch(`/jobs/${jobId}`);
                 if (!res.ok) {
-                    setError(transcriptContainer, `Job not found (${res.status}) — server may have restarted`);
-                    synthBtn.disabled = false;
+                    synthProgress.textContent = `Job not found (${res.status}) — server may have restarted`;
                     return;
                 }
                 const job = await res.json();
                 if (job.status === 'done') {
-                    transcriptContainer.innerHTML = '<div class="loading">✓ Background synthesis complete — press Synthesize to play</div>';
-                    synthBtn.disabled = false;
+                    synthProgress.textContent = '✓ Synthesis complete';
                     return;
                 }
                 if (job.status === 'error') {
-                    setError(transcriptContainer, `Synthesis error: ${job.error ?? ''}`);
-                    synthBtn.disabled = false;
+                    synthProgress.textContent = `Synthesis error: ${job.error ?? ''}`;
                     return;
                 }
                 if (job.status === 'cancelled') {
-                    transcriptContainer.innerHTML = '<div class="loading">Job cancelled.</div>';
-                    synthBtn.disabled = false;
+                    synthProgress.textContent = 'Job cancelled.';
                     return;
                 }
                 const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;
-                transcriptContainer.innerHTML =
-                    `<div class="loading">Background synthesis: ${job.completed_sentences}/${total} sentences (${pct}%)</div>`;
+                synthProgress.textContent =
+                    `${job.completed_sentences}/${total} sentences (${pct}%)`;
                 pollBgJob(jobId, total);
             }
             catch {
@@ -1007,7 +1011,7 @@ function showEdit() {
     async function startBgJob(text, documentId) {
         stopBgPoll();
         synthBtn.disabled = true;
-        transcriptContainer.innerHTML = '<div class="loading">Queuing background job…</div>';
+        synthProgress.textContent = 'Queuing…';
         try {
             const body = { text };
             if (selectedVoice)
@@ -1021,44 +1025,80 @@ function showEdit() {
             });
             const job = await res.json();
             if (!res.ok) {
-                setError(transcriptContainer, job.error ?? 'Failed to queue job');
+                synthProgress.textContent = job.error ?? 'Failed to queue job';
                 synthBtn.disabled = false;
                 return;
             }
             if (job.status === 'done') {
-                // Audio already cached — play it directly via the live synthesis path.
-                synthBtn.disabled = false;
-                startSynth(text);
-                return;
+                synthProgress.textContent = '✓ Synthesis complete';
             }
-            transcriptContainer.innerHTML =
-                `<div class="loading">Background synthesis: 0/${job.total_sentences} sentences (0%)</div>`;
-            pollBgJob(job.id, job.total_sentences);
+            else {
+                synthProgress.textContent = `0/${job.total_sentences} sentences (0%)`;
+                pollBgJob(job.id, job.total_sentences);
+            }
+            showListenNew();
             pollQueue();
         }
         catch {
-            transcriptContainer.innerHTML = '<div class="error">Could not reach server</div>';
+            synthProgress.textContent = 'Could not reach server';
             synthBtn.disabled = false;
         }
     }
+    function startListen() {
+        if (!fetchedDocument?.current)
+            return;
+        const doc = fetchedDocument.current;
+        listenBtn.disabled = true;
+        player.setPendingSpans(currentPendingSpans);
+        editCore.renderOutline(currentHeadings, i => player.seekTo(i));
+        synthStart = Date.now();
+        player.synthesize(doc.plain_text, selectedVoice ?? undefined, currentPendingSpans, doc.id);
+    }
+    function resetEdit() {
+        stopQueuePoll();
+        stopBgPoll();
+        player.stop();
+        articleContent.innerHTML = '<div class="placeholder">Fetch a URL above to see the article.</div>';
+        urlInput.value = '';
+        fetchStatus.textContent = '';
+        fetchStatus.className = 'fetch-status';
+        synthProgress.textContent = '';
+        timeEstimate.textContent = '';
+        synthBtn.style.display = '';
+        listenBtn.style.display = 'none';
+        listenBtn.disabled = false;
+        newBtn.style.display = 'none';
+        editOutlineSection.style.display = 'none';
+        playBtn.disabled = true;
+        downloadBtn.disabled = true;
+        progressFill.style.width = '0%';
+        timeCurrent.textContent = '0:00';
+        timeTotal.textContent = '0:00';
+        fetchedDocument?.destroy();
+        fetchedDocument = null;
+        currentPendingSpans = [];
+        currentHeadings = [];
+        pollQueue();
+    }
+    listenBtn.addEventListener('click', startListen);
+    newBtn.addEventListener('click', resetEdit);
     synthBtn.addEventListener('click', async () => {
-        const text = textInput.value.trim();
         const url = urlInput.value.trim();
-        if (!text && !url) {
+        if (!fetchedDocument && !url) {
             fetchStatus.textContent = 'Paste a URL first.';
             fetchStatus.className = 'fetch-status error';
             return;
         }
-        // If text area is empty, fetch the URL first
-        const resolvedText = text || (await fetchDocument(url) ? textInput.value.trim() : '');
-        if (!resolvedText)
+        // Fetch if we don't have a document yet
+        if (!fetchedDocument) {
+            const ok = await fetchDocument(url);
+            if (!ok)
+                return;
+        }
+        const text = fetchedDocument?.current.plain_text;
+        if (!text)
             return;
-        if (bgSynthCb.checked) {
-            await startBgJob(resolvedText, fetchedDocument?.current.id);
-        }
-        else {
-            startSynth(resolvedText);
-        }
+        await startBgJob(text, fetchedDocument?.current.id);
     });
     urlInput.addEventListener('keydown', async (e) => {
         if (e.key !== 'Enter')

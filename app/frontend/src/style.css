@@ -107,7 +107,9 @@ html, body {
 .sidebar {
   flex-shrink: 0;
   width: 180px;
+  position: relative;
 }
+
 
 .sidebar-section {
   display: flex;
@@ -674,7 +676,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  padding: 1.5rem 2rem;
+  padding: 1.5rem 2rem 1.5rem 1.5rem;
   border-bottom: 1px solid var(--border);
 }
 
@@ -730,24 +732,7 @@ html, body {
 .synth-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
-}
-
-.bg-synth-label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  cursor: pointer;
-  user-select: none;
-}
-
-.bg-synth-cb {
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 
 .time-estimate {
@@ -755,6 +740,90 @@ html, body {
   font-size: 0.75rem;
   color: var(--text-dim);
   flex: 1;
+}
+
+.synth-progress {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.listen-btn {
+  align-self: flex-end;
+  background: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  color: var(--bg);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 1.25rem;
+  text-transform: uppercase;
+  transition: opacity 0.15s;
+}
+
+.listen-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.listen-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reset-btn {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 1.25rem;
+  text-transform: uppercase;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.reset-btn:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
+.article-area {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  min-height: 200px;
+  max-height: 60vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.edit-outline-panel {
+  flex-shrink: 0;
+  width: 140px;
+  padding-top: 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.article-content {
+  flex: 1;
+  min-width: 0;
+  padding: 2.5rem 2rem 2.5rem 1rem;
+}
+
+.synth-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .download-btn {
@@ -1113,46 +1182,47 @@ html, body {
 }
 
 /* ── Markdown rendering ────────────────────────────────────────────────────── */
+/* Applies to both reader (.transcript-container) and edit (.article-content) */
 
-.transcript-container .md-heading,
-.transcript-container .md-paragraph,
-.transcript-container .md-blockquote,
-.transcript-container .md-list,
-.transcript-container .md-code {
+:is(.transcript-container, .article-content) .md-heading,
+:is(.transcript-container, .article-content) .md-paragraph,
+:is(.transcript-container, .article-content) .md-blockquote,
+:is(.transcript-container, .article-content) .md-list,
+:is(.transcript-container, .article-content) .md-code {
   margin-bottom: 1.25em;
 }
 
-.transcript-container .md-heading:last-child,
-.transcript-container .md-paragraph:last-child,
-.transcript-container .md-blockquote:last-child,
-.transcript-container .md-list:last-child,
-.transcript-container .md-code:last-child {
+:is(.transcript-container, .article-content) .md-heading:last-child,
+:is(.transcript-container, .article-content) .md-paragraph:last-child,
+:is(.transcript-container, .article-content) .md-blockquote:last-child,
+:is(.transcript-container, .article-content) .md-list:last-child,
+:is(.transcript-container, .article-content) .md-code:last-child {
   margin-bottom: 0;
 }
 
 /* Headings */
-.transcript-container h1.md-heading { font-size: 1.6rem; font-weight: 600; margin-top: 1.5em; color: var(--text); line-height: 1.25; }
-.transcript-container h2.md-heading { font-size: 1.3rem; font-weight: 500; margin-top: 1.25em; color: var(--text); line-height: 1.3; }
-.transcript-container h3.md-heading { font-size: 1.1rem; font-weight: 500; margin-top: 1.1em; color: var(--text); line-height: 1.35; }
-.transcript-container h4.md-heading,
-.transcript-container h5.md-heading,
-.transcript-container h6.md-heading { font-size: 1rem; font-weight: 500; margin-top: 1em; color: var(--text-dim); line-height: 1.4; }
+:is(.transcript-container, .article-content) h1.md-heading { font-size: 1.6rem; font-weight: 600; margin-top: 1.5em; color: var(--text); line-height: 1.25; }
+:is(.transcript-container, .article-content) h2.md-heading { font-size: 1.3rem; font-weight: 500; margin-top: 1.25em; color: var(--text); line-height: 1.3; }
+:is(.transcript-container, .article-content) h3.md-heading { font-size: 1.1rem; font-weight: 500; margin-top: 1.1em; color: var(--text); line-height: 1.35; }
+:is(.transcript-container, .article-content) h4.md-heading,
+:is(.transcript-container, .article-content) h5.md-heading,
+:is(.transcript-container, .article-content) h6.md-heading { font-size: 1rem; font-weight: 500; margin-top: 1em; color: var(--text-dim); line-height: 1.4; }
 
-.transcript-container h1.md-heading:first-child,
-.transcript-container h2.md-heading:first-child,
-.transcript-container h3.md-heading:first-child { margin-top: 0; }
+:is(.transcript-container, .article-content) h1.md-heading:first-child,
+:is(.transcript-container, .article-content) h2.md-heading:first-child,
+:is(.transcript-container, .article-content) h3.md-heading:first-child { margin-top: 0; }
 
 /* Paragraphs */
-.transcript-container .md-paragraph {
+:is(.transcript-container, .article-content) .md-paragraph {
   font-size: 1.1rem;
   line-height: 1.85;
   color: var(--text);
 }
 
 /* Inline formatting within spans */
-.transcript-container .segment strong { font-weight: 600; }
-.transcript-container .segment em     { font-style: italic; }
-.transcript-container .segment code   {
+:is(.transcript-container, .article-content) .segment strong { font-weight: 600; }
+:is(.transcript-container, .article-content) .segment em     { font-style: italic; }
+:is(.transcript-container, .article-content) .segment code   {
   font-family: var(--font-mono);
   font-size: 0.88em;
   background: rgba(255,255,255,0.06);
@@ -1161,7 +1231,7 @@ html, body {
 }
 
 /* Blockquotes */
-.transcript-container .md-blockquote {
+:is(.transcript-container, .article-content) .md-blockquote {
   border-left: 3px solid var(--accent);
   padding-left: 1.25rem;
   margin-left: 0;
@@ -1169,19 +1239,19 @@ html, body {
 }
 
 /* Lists */
-.transcript-container .md-list {
+:is(.transcript-container, .article-content) .md-list {
   padding-left: 1.5rem;
   font-size: 1.05rem;
   line-height: 1.8;
   color: var(--text);
 }
 
-.transcript-container .md-list-item {
+:is(.transcript-container, .article-content) .md-list-item {
   margin-bottom: 0.25em;
 }
 
 /* Code blocks */
-.transcript-container .md-code {
+:is(.transcript-container, .article-content) .md-code {
   font-family: var(--font-mono);
   font-size: 0.82rem;
   background: rgba(255,255,255,0.04);
