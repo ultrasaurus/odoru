@@ -121,7 +121,8 @@ export function mount(onReader) {
             queueList.appendChild(empty);
             return;
         }
-        // Build document_id → best job map (prefer active > done > others, then newest)
+        const jobRank = (s) => s === 'in_progress' ? 0 : s === 'pending' ? 1 : s === 'done' ? 2 : 3;
+        // Build document_id → best job map (for sorting rows)
         const jobMap = new Map();
         for (const job of jobs) {
             if (!job.document_id)
@@ -131,11 +132,21 @@ export function mount(onReader) {
                 jobMap.set(job.document_id, job);
                 continue;
             }
-            const rank = (s) => s === 'in_progress' ? 0 : s === 'pending' ? 1 : s === 'done' ? 2 : 3;
-            const better = rank(job.status) < rank(existing.status) ||
-                (rank(job.status) === rank(existing.status) && job.created_at > existing.created_at);
+            const better = jobRank(job.status) < jobRank(existing.status) ||
+                (jobRank(job.status) === jobRank(existing.status) && job.created_at > existing.created_at);
             if (better)
                 jobMap.set(job.document_id, job);
+        }
+        // Build document_id → all active jobs (for rendering one bar per job)
+        const activeJobsMap = new Map();
+        for (const job of jobs) {
+            if (!job.document_id)
+                continue;
+            if (job.status !== 'in_progress' && job.status !== 'pending')
+                continue;
+            const list = activeJobsMap.get(job.document_id) ?? [];
+            list.push(job);
+            activeJobsMap.set(job.document_id, list);
         }
         // Check if any voice is ready in a document's voices map
         const hasReadyVoice = (doc) => Object.values(doc.voices).some(v => !!v.duration);
@@ -160,19 +171,18 @@ export function mount(onReader) {
         });
         for (const doc of sorted) {
             const job = jobMap.get(doc.id);
-            const active = job?.status === 'pending' || job?.status === 'in_progress';
-            const pct = job && job.total_sentences > 0
-                ? Math.round((job.completed_sentences / job.total_sentences) * 100) : 0;
-            // Determine status label + voice name for display
+            const activeJobs = activeJobsMap.get(doc.id) ?? [];
+            const anyActive = activeJobs.length > 0;
+            // Status badge: show active count, otherwise fall back to best job or ready
             let statusText = '';
             let statusClass = '';
-            let displayVoiceName = '';
-            if (job) {
+            if (anyActive) {
+                statusText = activeJobs.length > 1 ? `⚙ Running (${activeJobs.length})` : jobStatusLabel(activeJobs[0].status);
+                statusClass = 'in_progress';
+            }
+            else if (job) {
                 statusText = jobStatusLabel(job.status);
                 statusClass = job.status;
-                // Show voice name in meta line only while active — picker handles it when ready
-                if (active)
-                    displayVoiceName = voices.find(v => v.id === job.voice)?.name ?? job.voice;
             }
             else if (hasReadyVoice(doc)) {
                 statusText = '✓ Ready';
@@ -229,43 +239,46 @@ export function mount(onReader) {
             confirmEl.append(confirmLabel, confirmYes, confirmNo);
             top.appendChild(deleteBtn);
             row.appendChild(top);
-            // Bottom line: voice + progress (only if there's something to show)
-            if (displayVoiceName || active) {
+            // One progress row per active job
+            for (const activeJob of activeJobs) {
+                const pct = activeJob.total_sentences > 0
+                    ? Math.round((activeJob.completed_sentences / activeJob.total_sentences) * 100) : 0;
+                const voiceName = voices.find(v => v.id === activeJob.voice)?.name ?? activeJob.voice;
                 const meta = document.createElement('div');
                 meta.className = 'queue-row-meta';
-                if (displayVoiceName) {
-                    const voiceEl = document.createElement('span');
-                    voiceEl.className = 'queue-voice';
-                    voiceEl.textContent = displayVoiceName;
-                    meta.appendChild(voiceEl);
-                }
-                if (active && job) {
-                    const bar = document.createElement('div');
-                    bar.className = 'queue-progress-bar';
-                    const fill = document.createElement('div');
-                    fill.className = 'queue-progress-fill';
-                    fill.style.width = `${pct}%`;
-                    bar.appendChild(fill);
-                    meta.appendChild(bar);
-                    const pctEl = document.createElement('span');
-                    pctEl.className = 'queue-progress';
-                    pctEl.textContent = `${pct}%`;
-                    meta.appendChild(pctEl);
-                    const cancelBtn = document.createElement('button');
-                    cancelBtn.className = 'queue-cancel-btn';
-                    cancelBtn.textContent = '✕';
-                    cancelBtn.addEventListener('click', async () => {
-                        await fetch(`/jobs/${job.id}`, { method: 'DELETE' });
-                        pollQueue();
-                    });
-                    meta.appendChild(cancelBtn);
-                }
-                else if (job?.status === 'done') {
-                    const countEl = document.createElement('span');
-                    countEl.className = 'queue-progress';
-                    countEl.textContent = `${job.total_sentences} sentences`;
-                    meta.appendChild(countEl);
-                }
+                const voiceEl = document.createElement('span');
+                voiceEl.className = 'queue-voice';
+                voiceEl.textContent = voiceName;
+                meta.appendChild(voiceEl);
+                const bar = document.createElement('div');
+                bar.className = 'queue-progress-bar';
+                const fill = document.createElement('div');
+                fill.className = 'queue-progress-fill';
+                fill.style.width = `${pct}%`;
+                bar.appendChild(fill);
+                meta.appendChild(bar);
+                const pctEl = document.createElement('span');
+                pctEl.className = 'queue-progress';
+                pctEl.textContent = `${pct}%`;
+                meta.appendChild(pctEl);
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'queue-cancel-btn';
+                cancelBtn.textContent = '✕';
+                cancelBtn.addEventListener('click', async () => {
+                    await fetch(`/jobs/${activeJob.id}`, { method: 'DELETE' });
+                    pollQueue();
+                });
+                meta.appendChild(cancelBtn);
+                row.appendChild(meta);
+            }
+            // When no active jobs, show sentence count from the best completed job
+            if (!anyActive && job?.status === 'done') {
+                const meta = document.createElement('div');
+                meta.className = 'queue-row-meta';
+                const countEl = document.createElement('span');
+                countEl.className = 'queue-progress';
+                countEl.textContent = `${job.total_sentences} sentences`;
+                meta.appendChild(countEl);
                 row.appendChild(meta);
             }
             // Publish controls — shown for any fetched document (status: ready)
