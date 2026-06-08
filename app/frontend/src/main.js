@@ -424,7 +424,10 @@ function showEdit() {
         <div class="workspace">
           <div class="card-column">
           <div id="queue-section" class="queue-section">
-            <div class="queue-header">Documents</div>
+            <div class="queue-header">
+              Documents
+              <button id="queue-collapse-btn" class="queue-collapse-btn">hide ready</button>
+            </div>
             <div id="queue-list" class="queue-list"></div>
           </div>
 
@@ -479,6 +482,12 @@ function showEdit() {
   `;
     document.getElementById('back-link').addEventListener('click', showReader);
     const queueList = document.getElementById('queue-list');
+    const collapseBtn = document.getElementById('queue-collapse-btn');
+    let hideReady = false;
+    collapseBtn.addEventListener('click', () => {
+        hideReady = !hideReady;
+        pollQueue();
+    });
     // ── Documents panel ────────────────────────────────────────────────────────
     let queuePollTimer = null;
     let bgPollTimer = null;
@@ -577,8 +586,9 @@ function showEdit() {
             const top = document.createElement('div');
             top.className = 'queue-row-top';
             const titleEl = document.createElement('span');
-            titleEl.className = 'queue-title';
             titleEl.textContent = doc.title ?? doc.source_url ?? doc.id;
+            titleEl.className = 'queue-title queue-title-link';
+            titleEl.addEventListener('click', () => loadAndListen(doc));
             top.appendChild(titleEl);
             if (statusText) {
                 const statusEl = document.createElement('span');
@@ -793,7 +803,20 @@ function showEdit() {
             ]);
             if (docsRes.ok && jobsRes.ok && openMetaForms.size === 0) {
                 const allDocs = await docsRes.json();
-                renderQueue(allDocs.filter(d => d.status !== 'error'), await jobsRes.json());
+                const jobs = await jobsRes.json();
+                let docs = allDocs.filter(d => d.status !== 'error');
+                if (hideReady) {
+                    const activeDocIds = new Set(jobs
+                        .filter(j => j.document_id && (j.status === 'in_progress' || j.status === 'pending'))
+                        .map(j => j.document_id));
+                    const hiddenCount = docs.filter(d => !activeDocIds.has(d.id)).length;
+                    docs = docs.filter(d => activeDocIds.has(d.id));
+                    collapseBtn.textContent = hiddenCount > 0 ? `show all (${hiddenCount} ready)` : 'show all';
+                }
+                else {
+                    collapseBtn.textContent = 'hide ready';
+                }
+                renderQueue(docs, jobs);
             }
         }
         catch { /* silent */ }
@@ -1079,6 +1102,46 @@ function showEdit() {
         currentPendingSpans = [];
         currentHeadings = [];
         pollQueue();
+    }
+    async function loadAndListen(summary) {
+        player.stop();
+        playBtn.disabled = true;
+        downloadBtn.disabled = true;
+        progressFill.style.width = '0%';
+        timeCurrent.textContent = '0:00';
+        timeTotal.textContent = '0:00';
+        synthProgress.textContent = '';
+        synthBtn.style.display = 'none';
+        listenBtn.style.display = 'none';
+        newBtn.style.display = 'none';
+        editOutlineSection.style.display = 'none';
+        articleContent.innerHTML = '<div class="loading">Loading…</div>';
+        fetchedDocument?.destroy();
+        fetchedDocument = null;
+        currentPendingSpans = [];
+        currentHeadings = [];
+        try {
+            fetchedDocument = await Document.load(summary.id);
+            const data = fetchedDocument.current;
+            if (!data.content || !data.plain_text) {
+                articleContent.innerHTML = '<div class="error">Content not available.</div>';
+                return;
+            }
+            articleContent.innerHTML = '';
+            const { pendingSpans, headings } = renderMarkdown(data.content, data.plain_text, articleContent);
+            currentPendingSpans = pendingSpans;
+            currentHeadings = headings;
+            editCore.renderOutline(headings, _i => { });
+            editOutlineSection.style.display = headings.length ? '' : 'none';
+            updateEstimate(data.plain_text);
+            showListenNew();
+            startListen();
+        }
+        catch {
+            articleContent.innerHTML = '<div class="error">Could not load document.</div>';
+            fetchedDocument?.destroy();
+            fetchedDocument = null;
+        }
     }
     listenBtn.addEventListener('click', startListen);
     newBtn.addEventListener('click', resetEdit);

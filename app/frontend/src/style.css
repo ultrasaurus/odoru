@@ -207,12 +207,32 @@ html, body {
 }
 
 .queue-header {
+  display: flex;
+  align-items: center;
   font-family: var(--font-mono);
   font-size: 0.72rem;
   color: var(--text-dim);
   letter-spacing: 0.06em;
   padding: 0.75rem 1.25rem 0.4rem;
   border-bottom: 1px solid var(--border);
+}
+
+.queue-collapse-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  margin-left: auto;
+  padding: 0.1rem 0.4rem;
+  opacity: 0.7;
+}
+
+.queue-collapse-btn:hover {
+  opacity: 1;
 }
 
 .queue-list {
@@ -367,6 +387,16 @@ html, body {
 
 .queue-delete-btn:hover {
   opacity: 1;
+}
+
+.queue-title-link {
+  cursor: pointer;
+  transition: color 0.12s;
+}
+
+.queue-title-link:hover {
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(200, 169, 110, 0.5);
 }
 
 .queue-delete-confirm {

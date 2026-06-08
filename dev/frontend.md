@@ -5,8 +5,12 @@ Frontend files are in `app/frontend/src/` (`*.ts` and `*.css`)
 The logic is tightly coupled across these files:
 
 - `app/frontend/src/main.ts` — view logic, DOM construction, player wiring
-- `app/frontend/src/player.ts` — AudioContext, WebSocket, seek/highlight logic
+- `app/frontend/src/player.ts` — AudioContext, seek/highlight logic
+- `app/frontend/src/ws.ts` — WebSocket connection, `sendSynth` / `cancelSynth`
+- `app/frontend/src/document.ts` — `Document` class: fetch by URL, load by ID, WS status watch
 - `app/frontend/src/markdown.ts` — markdown rendering, sentence span weaving
+- `app/frontend/src/reader-core.ts` — outline rendering, shared between reader and export SPA
+- `app/frontend/src/export-reader.ts` — export SPA entry point
 - `app/frontend/src/types.ts` — shared TypeScript interfaces
 - `app/frontend/src/style.css` — all styles; class names are shared across the above
 
@@ -28,16 +32,22 @@ Built with Vite + TypeScript, output to `app/frontend/dist/`.
 - `viewCleanup` stops poll timers when navigating to Edit view
 
 ## Edit view
-- URL fetch + text area + voice picker (ever-present) + Synthesize button
-- Synthesize starts a background job (`POST /jobs`); "Synthesize in background" checkbox to be removed
-- User can stay in Edit view watching Documents panel progress, or navigate to reader for live streaming
-- Documents panel below card: always visible; fetches `GET /articles` + `GET /jobs` in parallel,
-  polls every 10s; one row per article with job status overlaid where `article_url` matches
-  - Job matching restricted to `ARTICLE_VOICE` (reader hardcoded to f5:sarah for now)
-  - Status: running → pending → job-done → synthesized-only → unsynthesized; newest `cached_at` first
-  - Active jobs: progress bar + % + cancel button; ready: sentence count
-  - Publish controls shown when `synthesized_voices` non-empty: checkbox + voice picker;
-    changes fire `PATCH /doc?url=` immediately
+- URL fetch → markdown render → Synthesize (background job) → Listen / New buttons
+- After fetch, article renders immediately as formatted markdown with gray pending sentence spans
+- Synthesize starts a background job (`POST /jobs`); progress shown next to Synthesize button
+- Listen: wires player to pre-rendered spans, opens WS synth session; play button enables on first segment
+- New: resets to blank state (clears article, URL input, player)
+- `loadAndListen(summary)` — called when a doc title is clicked in the Documents panel; loads doc
+  by ID via `Document.load(id)`, renders markdown, calls `startListen()` immediately; works whether
+  audio is cached, in-progress, or not yet started (WS streams whatever is available)
+- Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
+- Voice picker ever-present in sidebar; user can synthesize the same doc with a second voice later
+- Documents panel: always visible; fetches `GET /documents` + `GET /jobs` in parallel, polls every 10s
+  - "hide ready" toggle in panel header collapses rows with no active/pending job; shows hidden count
+  - One row per document; title click opens doc; status badge, progress bar, cancel, publish controls
+  - Active jobs: progress bar + % + cancel button
+  - Publish controls: checkbox + voice picker (voices with duration); changes fire `PATCH /documents/:id`
+  - Metadata edit form (pencil button): title, author, date fields; toggled per-row
 - `viewCleanup` stops all timers when navigating to Reader view
 - Download enabled on `onSynthDone` (synthesis stream complete), not on playback end
 - `downloadFilename()` evaluated at click time (lazy), not at view init

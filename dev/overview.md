@@ -123,6 +123,7 @@ so text can be adjusted if scraping is imperfect
 ### Small authoring bugs / improvements
 - pause/cancel/resume/delete jobs
 - Open button in Documents panel: navigate to reader (or editor?) for that document
+- Publish voice picker in queue row: show all voices (including in-progress), not just those with `duration`
 
 #### Open questions for authoring
 
