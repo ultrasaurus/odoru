@@ -3,6 +3,7 @@ import { renderMarkdown } from './markdown';
 import { Document } from './document';
 import { ReaderCore } from './reader-core';
 import { SECS_PER_WORD, pickVoice, wireControls, controlsHtml, grabControlEls, } from './ui';
+import { pollJob } from './jobs';
 export function mount(onReader) {
     const app = document.getElementById('app');
     let voices = [];
@@ -94,18 +95,12 @@ export function mount(onReader) {
     });
     // ── Documents panel ────────────────────────────────────────────────────────
     let queuePollTimer = null;
-    let bgPollTimer = null;
+    let stopBgPoll = () => { };
     const openMetaForms = new Set(); // doc IDs with metadata form expanded
     function stopQueuePoll() {
         if (queuePollTimer !== null) {
             clearTimeout(queuePollTimer);
             queuePollTimer = null;
-        }
-    }
-    function stopBgPoll() {
-        if (bgPollTimer !== null) {
-            clearTimeout(bgPollTimer);
-            bgPollTimer = null;
         }
     }
     function jobStatusLabel(status) {
@@ -602,38 +597,6 @@ export function mount(onReader) {
         newBtn.style.display = '';
         synthBtn.disabled = false;
     }
-    function pollBgJob(jobId, total) {
-        stopBgPoll();
-        bgPollTimer = setTimeout(async () => {
-            try {
-                const res = await fetch(`/jobs/${jobId}`);
-                if (!res.ok) {
-                    synthProgress.textContent = `Job not found (${res.status}) — server may have restarted`;
-                    return;
-                }
-                const job = await res.json();
-                if (job.status === 'done') {
-                    synthProgress.textContent = '✓ Synthesis complete';
-                    return;
-                }
-                if (job.status === 'error') {
-                    synthProgress.textContent = `Synthesis error: ${job.error ?? ''}`;
-                    return;
-                }
-                if (job.status === 'cancelled') {
-                    synthProgress.textContent = 'Job cancelled.';
-                    return;
-                }
-                const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;
-                synthProgress.textContent =
-                    `${job.completed_sentences}/${total} sentences (${pct}%)`;
-                pollBgJob(jobId, total);
-            }
-            catch {
-                pollBgJob(jobId, total); // retry silently on network blip
-            }
-        }, 4000);
-    }
     async function startBgJob(text, documentId) {
         stopBgPoll();
         synthBtn.disabled = true;
@@ -660,7 +623,13 @@ export function mount(onReader) {
             }
             else {
                 synthProgress.textContent = `0/${job.total_sentences} sentences (0%)`;
-                pollBgJob(job.id, job.total_sentences);
+                stopBgPoll = pollJob(job.id, job.total_sentences, {
+                    onProgress: (completed, total, pct) => {
+                        synthProgress.textContent = `${completed}/${total} sentences (${pct}%)`;
+                    },
+                    onDone: () => { synthProgress.textContent = '✓ Synthesis complete'; },
+                    onError: msg => { synthProgress.textContent = msg; },
+                });
             }
             showListenNew();
             pollQueue();

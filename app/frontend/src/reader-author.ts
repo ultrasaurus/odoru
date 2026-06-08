@@ -7,6 +7,7 @@ import {
   pickVoice, setError, setStatus, fmt,
   wireControls, controlsHtml, grabControlEls,
 } from './ui'
+import { pollJob } from './jobs'
 
 export function mount(onEdit: () => void): () => void {
   const app = document.getElementById('app')!
@@ -104,39 +105,7 @@ export function mount(onEdit: () => void): () => void {
     () => (currentDoc?.title ?? currentDoc?.source_url ?? 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav')
 
   // ── Job polling ────────────────────────────────────────────────────────────
-  let pollTimer: ReturnType<typeof setTimeout> | null = null
-
-  function stopPolling() {
-    if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null }
-  }
-
-  function pollJob(jobId: string, total: number, onDone?: () => void) {
-    stopPolling()
-    pollTimer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/jobs/${jobId}`)
-        if (!res.ok) {
-          setStatus(jobArea, 'job-status error', 'Job not found — server may have restarted')
-          return
-        }
-        const job: JobInfo = await res.json()
-        if (job.status === 'done') {
-          setStatus(jobArea, 'job-status done', '✓ Audio ready')
-          onDone?.()
-          return
-        }
-        if (job.status === 'error') {
-          setStatus(jobArea, 'job-status error', `Synthesis error: ${job.error ?? ''}`)
-          return
-        }
-        const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0
-        setStatus(jobArea, 'job-status running', `Synthesizing… ${job.completed_sentences}/${total} (${pct}%)`)
-        pollJob(jobId, total, onDone)
-      } catch {
-        pollJob(jobId, total, onDone) // retry silently on network blip
-      }
-    }, 4000)
-  }
+  let stopPolling = () => {}
 
   async function startJob(plainText: string, documentId: string, voice: string) {
     setStatus(jobArea, 'job-status running', 'Queuing…')
@@ -155,7 +124,12 @@ export function mount(onEdit: () => void): () => void {
         setStatus(jobArea, 'job-status done', '✓ Audio ready')
         return
       }
-      pollJob(job.id, job.total_sentences)
+      stopPolling = pollJob(job.id, job.total_sentences, {
+        onProgress: (completed, total, pct) =>
+          setStatus(jobArea, 'job-status running', `Synthesizing… ${completed}/${total} (${pct}%)`),
+        onDone: () => setStatus(jobArea, 'job-status done', '✓ Audio ready'),
+        onError: msg => setStatus(jobArea, 'job-status error', msg),
+      })
     } catch {
       setStatus(jobArea, 'job-status error', 'Could not reach server')
     }
@@ -264,7 +238,12 @@ export function mount(onEdit: () => void): () => void {
                   ? Math.round((active.completed_sentences / active.total_sentences) * 100) : 0
                 setStatus(jobArea, 'job-status running',
                   `Synthesizing… ${active.completed_sentences}/${active.total_sentences} (${pct}%)`)
-                pollJob(active.id, active.total_sentences, synthesizeNow)
+                stopPolling = pollJob(active.id, active.total_sentences, {
+                  onProgress: (completed, total, pct) =>
+                    setStatus(jobArea, 'job-status running', `Synthesizing… ${completed}/${total} (${pct}%)`),
+                  onDone: () => { setStatus(jobArea, 'job-status done', '✓ Audio ready'); synthesizeNow() },
+                  onError: msg => setStatus(jobArea, 'job-status error', msg),
+                })
               } else {
                 showSynthButton()
               }
@@ -313,5 +292,5 @@ export function mount(onEdit: () => void): () => void {
       articleTitleEl.textContent = ''
     })
 
-  return () => { stopPolling(); player.stop() }
+  return () => { stopPolling(); player.stop() }  // stopPolling always points to the latest poll
 }
