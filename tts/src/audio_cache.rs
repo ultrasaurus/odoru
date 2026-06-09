@@ -24,6 +24,10 @@ use serde::{Deserialize, Serialize};
 struct Meta {
     text: String,
     duration: f64,
+    #[serde(default)]
+    invalid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invalid_reason: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +78,10 @@ fn lookup_in(dir: &PathBuf, key: &str) -> Option<(Vec<u8>, f64)> {
         serde_json::from_str(&s).ok()?
     };
 
+    if meta.invalid {
+        return None;
+    }
+
     let mp3_bytes = std::fs::read(&mp3_path).ok()?;
     Some((mp3_bytes, meta.duration))
 }
@@ -103,7 +111,7 @@ fn store_in(dir: &PathBuf, key: &str, text: &str, mp3_bytes: &[u8], duration: f6
     }
 
     let json_path = dir.join(format!("{key}.json"));
-    let meta = Meta { text: text.to_string(), duration };
+    let meta = Meta { text: text.to_string(), duration, invalid: false, invalid_reason: None };
     if let Ok(json) = serde_json::to_string(&meta) {
         if let Err(e) = std::fs::write(&json_path, json) {
             error!("audio cache: failed to write metadata: {e}");
@@ -115,6 +123,42 @@ fn store_in(dir: &PathBuf, key: &str, text: &str, mp3_bytes: &[u8], duration: f6
 pub fn cache_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(PathBuf::from(home).join(".odoru").join("audio"))
+}
+
+/// Mark all cache entries whose stored text contains `word` (case-insensitive) as invalid.
+/// Returns the number of entries marked.
+pub fn invalidate_word(word: &str) -> usize {
+    let Some(dir) = cache_dir() else { return 0; };
+    invalidate_word_in(&dir, word)
+}
+
+fn invalidate_word_in(dir: &PathBuf, word: &str) -> usize {
+    let word_lower = word.to_lowercase();
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0; };
+    let mut count = 0;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(s) = std::fs::read_to_string(&path) else { continue; };
+        let Ok(mut meta) = serde_json::from_str::<Meta>(&s) else { continue; };
+
+        if meta.invalid || !meta.text.to_lowercase().contains(&word_lower) {
+            continue;
+        }
+
+        meta.invalid = true;
+        meta.invalid_reason = Some("override".to_string());
+        if let Ok(json) = serde_json::to_string(&meta) {
+            if std::fs::write(&path, json).is_ok() {
+                count += 1;
+            }
+        }
+    }
+
+    count
 }
 
 #[cfg(test)]

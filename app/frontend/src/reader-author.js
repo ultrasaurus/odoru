@@ -71,6 +71,93 @@ export function mount(onEdit) {
     autoscrollCb.checked = true;
     player.autoScroll = true;
     autoscrollCb.addEventListener('change', () => { player.autoScroll = autoscrollCb.checked; });
+    // ── Pronunciation popover ──────────────────────────────────────────────────
+    const popover = document.createElement('div');
+    popover.className = 'pronunciation-popover';
+    popover.style.display = 'none';
+    popover.innerHTML = `
+    <label class="popover-word-label">Pronounce "<span class="popover-word"></span>" as:</label>
+    <input type="text" class="popover-replacement" placeholder="phonetic spelling" />
+    <div class="pronunciation-popover-buttons">
+      <button class="cancel-btn">Cancel</button>
+      <button class="save-btn">Save</button>
+    </div>
+  `;
+    document.body.appendChild(popover);
+    const popoverWordEl = popover.querySelector('.popover-word');
+    const popoverInput = popover.querySelector('.popover-replacement');
+    const popoverSaveBtn = popover.querySelector('.save-btn');
+    const popoverCancelBtn = popover.querySelector('.cancel-btn');
+    let popoverWord = '';
+    function showPopover(word, anchorRect) {
+        popoverWord = word;
+        popoverWordEl.textContent = word;
+        popoverInput.value = '';
+        popover.style.display = '';
+        // Position below the selection, clamp to viewport
+        const top = Math.min(anchorRect.bottom + 8, window.innerHeight - 160);
+        const left = Math.min(anchorRect.left, window.innerWidth - 280);
+        popover.style.top = `${top}px`;
+        popover.style.left = `${left}px`;
+        popoverInput.focus();
+    }
+    function hidePopover() {
+        popover.style.display = 'none';
+        popoverWord = '';
+    }
+    transcriptContainer.addEventListener('mouseup', () => {
+        const sel = window.getSelection();
+        const word = sel?.toString().trim() ?? '';
+        if (!word || !sel || sel.rangeCount === 0) {
+            hidePopover();
+            return;
+        }
+        const rect = sel.getRangeAt(0).getBoundingClientRect();
+        showPopover(word, rect);
+    });
+    async function saveOverride() {
+        const replacement = popoverInput.value.trim();
+        if (!replacement) {
+            popoverInput.focus();
+            return;
+        }
+        popoverSaveBtn.disabled = true;
+        popoverSaveBtn.textContent = 'Saving…';
+        try {
+            const res = await fetch('/overrides', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ word: popoverWord, replacement }),
+            });
+            if (!res.ok)
+                throw new Error(`${res.status}`);
+            hidePopover();
+            window.getSelection()?.removeAllRanges();
+            if (currentDoc) {
+                pendingScrollRestore = transcriptContainer.scrollTop;
+                loadDocument(currentDoc);
+            }
+        }
+        catch {
+            popoverSaveBtn.textContent = 'Error — retry?';
+            popoverSaveBtn.disabled = false;
+        }
+    }
+    popoverSaveBtn.addEventListener('click', saveOverride);
+    popoverCancelBtn.addEventListener('click', () => { hidePopover(); window.getSelection()?.removeAllRanges(); });
+    popoverInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter')
+            saveOverride();
+        if (e.key === 'Escape') {
+            hidePopover();
+            window.getSelection()?.removeAllRanges();
+        }
+    });
+    document.addEventListener('mousedown', e => {
+        if (popover.style.display !== 'none' && !popover.contains(e.target)) {
+            hidePopover();
+        }
+    });
     player.onError(msg => {
         setError(transcriptContainer, `Error: ${msg}`);
         playBtn.disabled = true;
@@ -84,6 +171,7 @@ export function mount(onEdit) {
         seekStatus.style.display = 'none';
     });
     let currentDoc = null;
+    let pendingScrollRestore = null;
     wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal, () => (currentDoc?.title ?? currentDoc?.source_url ?? 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav');
     // ── Job polling ────────────────────────────────────────────────────────────
     let stopPolling = () => { };
@@ -167,6 +255,10 @@ export function mount(onEdit) {
             // Always render transcript (used for reading even without audio).
             transcriptContainer.innerHTML = '';
             const { pendingSpans, headings: hs } = renderMarkdown(data.content, data.plain_text, transcriptContainer);
+            if (pendingScrollRestore !== null) {
+                transcriptContainer.scrollTop = pendingScrollRestore;
+                pendingScrollRestore = null;
+            }
             core.renderOutline(hs, i => {
                 player.seekTo(i, false);
                 const icon = playBtn.querySelector('.play-icon');

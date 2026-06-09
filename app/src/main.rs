@@ -27,7 +27,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{delete, get},
     Json, Router,
 };
 use dashmap::DashMap;
@@ -969,6 +969,86 @@ fn restart_pending_jobs(state: Arc<AppState>) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /overrides  — list all pronunciation overrides
+// POST /overrides — add or update an override
+// DELETE /overrides/:word — remove an override
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct OverridesResponse {
+    overrides: Vec<OverrideEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OverrideEntry {
+    word: String,
+    replacement: String,
+}
+
+#[derive(Deserialize)]
+struct AddOverrideRequest {
+    word: String,
+    replacement: String,
+}
+
+async fn get_overrides() -> impl IntoResponse {
+    let pairs = tts::f5::normalizer::list_overrides();
+    let overrides = pairs.into_iter()
+        .map(|(word, replacement)| OverrideEntry { word, replacement })
+        .collect();
+    Json(OverridesResponse { overrides })
+}
+
+async fn add_override(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<AddOverrideRequest>,
+) -> impl IntoResponse {
+    let word = body.word.trim().to_string();
+    let replacement = body.replacement.trim().to_string();
+
+    if word.is_empty() || replacement.is_empty() {
+        return StatusCode::UNPROCESSABLE_ENTITY;
+    }
+
+    tts::f5::normalizer::add_override(&word, &replacement);
+
+    let invalidated = tokio::task::spawn_blocking({
+        let word = word.clone();
+        move || tts::audio_cache::invalidate_word(&word)
+    }).await.unwrap_or(0);
+
+    state.cache.clear();
+
+    if invalidated > 0 {
+        info!("override added: {word:?} → {replacement:?}; invalidated {invalidated} disk cache entries");
+    } else {
+        info!("override added: {word:?} → {replacement:?}");
+    }
+
+    StatusCode::NO_CONTENT
+}
+
+async fn remove_override(
+    State(state): State<Arc<AppState>>,
+    Path(word): Path<String>,
+) -> impl IntoResponse {
+    let existed = tts::f5::normalizer::remove_override(&word);
+
+    if existed {
+        let invalidated = tokio::task::spawn_blocking({
+            let word = word.clone();
+            move || tts::audio_cache::invalidate_word(&word)
+        }).await.unwrap_or(0);
+
+        state.cache.clear();
+        info!("override removed: {word:?}; invalidated {invalidated} disk cache entries");
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket handler
 // ---------------------------------------------------------------------------
 
@@ -1398,6 +1478,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/:id", get(get_job).delete(cancel_job))
+        .route("/overrides", get(get_overrides).post(add_override))
+        .route("/overrides/:word", delete(remove_override))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

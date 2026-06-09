@@ -80,6 +80,7 @@ See [protocol.md](protocol.md).
 - In-memory segment cache: SHA-256(voice_id + "|" + text) → Vec<CachedSegment>
 - `doc_index`: in-memory `DocumentIndex`
 - `voice_locks`: per-document `RwLock` for `voices.json` writes, keyed by UUID
+- Pronunciation overrides: live-reloadable `RwLock<HashMap>` (see below)
 
 ## Background jobs (`app/src/jobs.rs`)
 - Location: `~/.odoru/jobs/<id>.json`
@@ -97,10 +98,6 @@ See [protocol.md](protocol.md).
 ## Planned improvements
 
 ### Authoring
-
-### Hints on how to pronounce words ###
-- Mispronounced words: no UI for `tts_overrides.txt` edits
-- will need to invalidate cache entries
 
 #### Documents are editable ###
 - `PATCH /documents/:id` with stale voice transition (for content edits)
@@ -121,6 +118,31 @@ so text can be adjusted if scraping is imperfect
 - voice picker in reader: wait for more experience with real authoring
 
 
+**Pronunciation overrides**
+
+`tts_overrides.txt` at the workspace root defines per-token pronunciation fixes for the F5
+normalizer (two-column: `match  replacement`, case-insensitive, `#` comments).
+
+The override table is held in a process-global `Arc<RwLock<HashMap>>` (in
+`tts/src/f5/normalizer.rs`) initialized once from disk and live-reloadable — no server restart
+needed. `normalize()` acquires a read lock; `add_override` / `remove_override` acquire a write
+lock and rewrite `tts_overrides.txt` immediately.
+
+On override change (`POST /overrides` or `DELETE /overrides/:word`):
+1. Normalizer map updated in-memory and written to disk.
+2. All `~/.odoru/audio/*.json` sidecar files whose stored `text` contains the word are marked
+   `invalid: true, invalid_reason: "override"` (the entry is skipped on next cache lookup).
+3. The in-memory `SegmentCache` (`DashMap` in `AppState`) is cleared entirely.
+
+The reader's "Fix pronunciation" popover (author path only): select a word in the transcript,
+type the phonetic replacement, Save. The server updates the override and the client reloads the
+document, triggering re-synthesis of affected sentences (from the F5 model) while unaffected
+sentences resolve from disk cache.
+
+**Future:** a mark-and-sweep GC pass should scan `~/.odoru/audio/` for `invalid: true` entries
+(and optionally entries older than a TTL) and delete the `.mp3` + `.json` pair. The `invalid_reason`
+field leaves room for additional invalidation sources (`"manual"`, `"ttl"`).
+
 **Mutable text and audio cache invalidation**
 
 If the user edits a sentence, the cached audio for that sentence is stale.
@@ -136,7 +158,7 @@ The future versioning vision (retaining original document) may change what
 - Error bar: currently only in Edit view; should be in a shared layout wrapper
 - pause/play icons — easy to see state + what action will happen
 - Synthesis time display: ~2161m 45s should be H:MM:SS
-- Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy
+- Audio disk cache: no eviction — grows unbounded; needs a cleanup strategy (mark-and-sweep; entries already support `invalid: bool` / `invalid_reason` fields for this)
 
 #### TTS improvements
 - Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter

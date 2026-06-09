@@ -1344,6 +1344,69 @@ html, body {
   margin-bottom: 0.25em;
 }
 
+/* Pronunciation popover */
+.pronunciation-popover {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 260px;
+}
+
+.pronunciation-popover label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.pronunciation-popover input[type="text"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  padding: 0.35rem 0.5rem;
+  width: 100%;
+}
+
+.pronunciation-popover input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pronunciation-popover-buttons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.pronunciation-popover-buttons button {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.pronunciation-popover-buttons .save-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+  font-weight: 600;
+}
+
+.pronunciation-popover-buttons .cancel-btn {
+  background: transparent;
+  color: var(--text-dim);
+}
+
 /* Code blocks */
 :is(.transcript-container, .article-content) .md-code {
   font-family: var(--font-mono);

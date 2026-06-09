@@ -11,35 +11,38 @@
 ///      d. Insert spaces in alphanumeric tokens: 1a → 1 a, 4c2 → 4 c 2.
 ///   5. Replace remaining hyphens with spaces.
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock, RwLock};
+use tracing::error;
 
 // ---------------------------------------------------------------------------
 // Override table
 // ---------------------------------------------------------------------------
 
-static OVERRIDES: OnceLock<HashMap<String, String>> = OnceLock::new();
+struct Overrides {
+    map: Arc<RwLock<HashMap<String, String>>>,
+    /// Path to `tts_overrides.txt` that was loaded, and will be written back to.
+    path: PathBuf,
+}
 
-fn load_overrides() -> HashMap<String, String> {
-    // 1. Next to the binary (installed / cargo run release)
+static OVERRIDES: OnceLock<Overrides> = OnceLock::new();
+
+fn find_overrides_path() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let exe_path = exe.parent().unwrap_or(std::path::Path::new("."))
         .join("tts_overrides.txt");
-
-    // 2. Workspace root baked in at compile time (cargo run / cargo test)
-    let workspace_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let workspace_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../tts_overrides.txt");
+    let cwd_path = PathBuf::from("tts_overrides.txt");
 
-    // 3. Current working directory fallback
-    let cwd_path = std::path::Path::new("tts_overrides.txt").to_path_buf();
-
-    let path = [exe_path, workspace_path, cwd_path]
+    [exe_path, workspace_path, cwd_path]
         .into_iter()
         .find(|p| p.exists())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
+fn parse_overrides(contents: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    let Ok(contents) = std::fs::read_to_string(&path) else { return map; };
-
     for line in contents.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') { continue; }
@@ -54,8 +57,59 @@ fn load_overrides() -> HashMap<String, String> {
     map
 }
 
-fn overrides() -> &'static HashMap<String, String> {
-    OVERRIDES.get_or_init(load_overrides)
+fn init_overrides() -> Overrides {
+    let path = find_overrides_path();
+    let map = std::fs::read_to_string(&path)
+        .map(|s| parse_overrides(&s))
+        .unwrap_or_default();
+    Overrides { map: Arc::new(RwLock::new(map)), path }
+}
+
+fn state() -> &'static Overrides {
+    OVERRIDES.get_or_init(init_overrides)
+}
+
+fn read_map() -> std::sync::RwLockReadGuard<'static, HashMap<String, String>> {
+    state().map.read().expect("overrides lock poisoned")
+}
+
+/// Save the current in-memory map back to `tts_overrides.txt`.
+fn save_map(map: &HashMap<String, String>) {
+    let mut lines: Vec<String> = map.iter()
+        .map(|(k, v)| format!("{k}\t{v}"))
+        .collect();
+    lines.sort();
+    let contents = lines.join("\n") + "\n";
+    if let Err(e) = std::fs::write(&state().path, &contents) {
+        error!("failed to write tts_overrides.txt: {e}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public override management API
+// ---------------------------------------------------------------------------
+
+/// Add or update a pronunciation override and persist to disk.
+pub fn add_override(word: &str, replacement: &str) {
+    let mut map = state().map.write().expect("overrides lock poisoned");
+    map.insert(word.to_lowercase(), replacement.to_owned());
+    save_map(&map);
+}
+
+/// Remove a pronunciation override and persist to disk. Returns true if it existed.
+pub fn remove_override(word: &str) -> bool {
+    let mut map = state().map.write().expect("overrides lock poisoned");
+    let existed = map.remove(&word.to_lowercase()).is_some();
+    if existed { save_map(&map); }
+    existed
+}
+
+/// Return all current overrides as a sorted vec of (word, replacement) pairs.
+pub fn list_overrides() -> Vec<(String, String)> {
+    let map = read_map();
+    let mut pairs: Vec<_> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    pairs
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +118,7 @@ fn overrides() -> &'static HashMap<String, String> {
 
 /// Normalize `text` for TTS pronunciation.
 pub fn normalize(text: &str) -> String {
-    let overrides = overrides();
+    let overrides = read_map();
 
     // Pass 1: expand <Tag-N> markers.
     let text = expand_tags(text);
@@ -73,7 +127,7 @@ pub fn normalize(text: &str) -> String {
     let text = expand_year_ranges(&text);
 
     // Pass 3: apply punctuated overrides (those containing '.' or '-').
-    let text = apply_punctuated_overrides(&text, overrides);
+    let text = apply_punctuated_overrides(&text, &*overrides);
 
     // Pass 4: tokenize and process word/alphanumeric tokens.
     let mut out = String::with_capacity(text.len());
@@ -81,7 +135,7 @@ pub fn normalize(text: &str) -> String {
 
     let flush_token = |buf: &mut String, out: &mut String| {
         if buf.is_empty() { return; }
-        out.push_str(&process_token(buf, overrides));
+        out.push_str(&process_token(buf, &*overrides));
         buf.clear();
     };
 

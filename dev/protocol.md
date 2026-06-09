@@ -21,6 +21,10 @@ POST /jobs                 ← { text, voice, document_id? } → job (deduplicat
 GET  /jobs                 → [job, ...]
 GET  /jobs/:id             → job
 DELETE /jobs/:id           → cancel job
+
+GET    /overrides          → { overrides: [{word, replacement}] }  (sorted alphabetically)
+POST   /overrides          ← { word, replacement } → 204
+DELETE /overrides/:word    → 204 (404 if not found)
 ```
 
 ### PATCH /documents/:id fields

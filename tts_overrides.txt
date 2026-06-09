@@ -1,45 +1,23 @@
-# tts_overrides.txt — pronunciation overrides for TTS normalization.
-#
-# Two whitespace-separated columns:
-#   <match>   <replacement>
-#
-# Match is case-insensitive. The replacement is used exactly as written.
-# Lines starting with # are comments.
-#
-# Entries containing '.' are applied as full-text find-and-replace before
-# tokenization (handles abbreviations like e.g. that span punctuation).
-# All other entries are matched per token during tokenization.
-
-# ---------------------------------------------------------------------------
-# Acronyms to preserve (would otherwise be lowercased by the >3 char rule)
-# ---------------------------------------------------------------------------
-HTTP    HTTP
-HTTPS   HTTPS
-HTML    HTML
-
-# ---------------------------------------------------------------------------
-# Specify how word is spoken
-# ---------------------------------------------------------------------------
-Tymshare    timeshare
-TYMESHARE   timeshare
-YAML        yamel
-JSON        jason
-ARPANET     arpa net
-TYMNET      Time net
-delete      deeleet
-move        moove
-
-# ---------------------------------------------------------------------------
-# Expansions — abbreviations spoken as full words
-# ---------------------------------------------------------------------------
-etc     et cetera
-e.g.    for example
-i.e.    that is
-Dr      Doctor
-Mr      Mister
-Mrs     Missus
-St      Saint
-Ave     Avenue
-Blvd    Boulevard
-Tbsp    tablespoon
-Tsp     teaspoon
+arpanet	arpa net
+ave	Avenue
+blvd	Boulevard
+delete	deeleet
+dr	Doctor
+e.g.	for example
+etc	et cetera
+html	HTML
+http	HTTP
+https	HTTPS
+i.e.	that is
+json	jason
+move	moove
+mr	Mister
+mrs	Missus
+st	Saint
+tbsp	tablespoon
+tsp	teaspoon
+tymeshare	timeshare
+tymnet	Time net
+tymshare	timeshare
+wysiwyg	wizzy wig
+yaml	yamel
