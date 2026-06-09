@@ -126,7 +126,7 @@ export function mount(onEdit: () => void): () => void {
   transcriptContainer.addEventListener('mouseup', () => {
     const sel = window.getSelection()
     const word = sel?.toString().trim() ?? ''
-    if (!word || !sel || sel.rangeCount === 0) { hidePopover(); return }
+    if (!word || !sel || sel.rangeCount === 0 || word.includes(' ')) { hidePopover(); return }
     const rect = sel.getRangeAt(0).getBoundingClientRect()
     showPopover(word, rect)
   })

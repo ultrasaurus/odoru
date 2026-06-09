@@ -108,7 +108,7 @@ export function mount(onEdit) {
     transcriptContainer.addEventListener('mouseup', () => {
         const sel = window.getSelection();
         const word = sel?.toString().trim() ?? '';
-        if (!word || !sel || sel.rangeCount === 0) {
+        if (!word || !sel || sel.rangeCount === 0 || word.includes(' ')) {
             hidePopover();
             return;
         }
