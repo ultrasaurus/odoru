@@ -105,7 +105,7 @@ function splitLines(text: string): string[] {
       })
     }
   }
-  return mergeOutlineLabels(sentences)
+  return mergeOutlineLabels(sentences).filter(s => /[a-zA-Z]/.test(s))
 }
 
 // ---------------------------------------------------------------------------

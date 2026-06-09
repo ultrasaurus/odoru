@@ -118,6 +118,29 @@ so text can be adjusted if scraping is imperfect
 - voice picker in reader: wait for more experience with real authoring
 
 
+**Sentence splitting (`tts/src/splitter.rs` + `app/frontend/src/markdown.ts`)**
+
+Paragraphs split on `\n\n`; within each paragraph, single newlines are hard breaks and
+`unicode_sentences()` / `Intl.Segmenter` find sentence boundaries. Both sides apply the
+same two post-processing rules to keep indices in sync:
+
+- **Outline label merge** — a short all-caps or all-lowercase-Roman-numeral label
+  (`I.`, `XIV.`, `ii.`, `A.`) is merged with the sentence that follows it.
+  Fixes the UAX #29 behaviour where `"I. Introduction"` splits into `["I.", "Introduction"]`.
+- **No-alpha filter** — sentences with no alphabetic characters are dropped (see below).
+
+The client maps incoming audio segments to `pendingSpans` by **arrival order** (`receivedCount++`
+in `player.ts`), not by `msg.index`. Any sentence skipped server-side must be skipped client-side
+too, or highlighting drifts. When adding a new server-side filter, add the matching filter in
+`splitLines` in `markdown.ts`.
+
+**Sentence filtering**
+
+The engine and the client both skip sentences with no alphabetic content. This handles
+footnote markers (`*1*`, `[12]`) that trafilatura includes in `plain_text` as standalone
+sentences after Unicode sentence splitting. Skipping symmetrically on both sides keeps
+segment indices in sync.
+
 **Pronunciation overrides**
 
 `tts_overrides.txt` at the workspace root defines per-token pronunciation fixes for the F5
@@ -162,10 +185,6 @@ The future versioning vision (retaining original document) may change what
 
 #### TTS improvements
 - Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
-- Roman numeral / outline-style headers (`I.`, `II.`, `A.`, `B.`) cause sentence splitting
-  mismatch between server (`unicode_segmentation`) and client (`Intl.Segmenter`) — server splits
-  `"I. INTRODUCTION"` as two sentences, client may produce one; causes spans to activate out of
-  sync with audio. Affects "Augmenting Human Intellect" and similar structured documents.
 
 ## Known issues
 - Segfault on CLI exit when `--audio` is used (PyO3/tokio shutdown ordering)

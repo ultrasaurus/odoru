@@ -231,6 +231,36 @@ async fn tts_engine_segment_timestamps_are_monotonic() {
     }
 }
 
+// ── No-alpha sentence filtering ───────────────────────────────────────────
+
+#[tokio::test]
+#[ignore]
+async fn engine_skips_no_alpha_sentences() {
+    let _lock = lock();
+    let Some(engine) = try_build_engine() else { return; };
+    // "*1*" has no alphabetic chars — should be silently skipped.
+    let mut stream = engine.synthesize("Hello world. *1* How are you?", "mock");
+    let mut segments = vec![];
+    while let Some(result) = stream.next().await {
+        segments.push(result.expect("segment failed"));
+    }
+    assert_eq!(segments.len(), 2, "expected 2 segments (no-alpha sentence skipped)");
+}
+
+#[tokio::test]
+#[ignore]
+async fn engine_skips_bracket_reference_sentences() {
+    let _lock = lock();
+    let Some(engine) = try_build_engine() else { return; };
+    // "[12]" has no alphabetic chars — should be silently skipped.
+    let mut stream = engine.synthesize("First sentence. [12] Second sentence.", "mock");
+    let mut segments = vec![];
+    while let Some(result) = stream.next().await {
+        segments.push(result.expect("segment failed"));
+    }
+    assert_eq!(segments.len(), 2, "expected 2 segments (reference marker skipped)");
+}
+
 // ── F5-TTS backend ────────────────────────────────────────────────────────
 
 /// Build an F5 engine from `voices/sarah` at the workspace root,

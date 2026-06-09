@@ -141,6 +141,9 @@ async fn run_synthesis_loop(
         if sentence.text.trim().is_empty() {
             continue;
         }
+        if sentence.text.chars().filter(|c| c.is_alphabetic()).count() == 0 {
+            continue;
+        }
 
         let paragraph_end = sentence.paragraph_end;
         let sentence_text = sentence.text.clone();

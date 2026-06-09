@@ -302,6 +302,27 @@ mod tests {
         assert_eq!(texts(result), vec!["Wait.", "Are you sure?"]);
     }
 
+    // ── footnote / reference markers ─────────────────────────────────────
+
+    #[test]
+    fn footnote_marker_splits_into_no_alpha_sentence() {
+        // "*1*" splits off as its own sentence in both spaced and unspaced forms.
+        let result = split("seem promising.*1*");
+        let ts = texts(result);
+        assert!(ts.iter().any(|s| s == "seem promising."));
+        let no_alpha: Vec<_> = ts.iter().filter(|s| !s.chars().any(|c| c.is_alphabetic())).collect();
+        assert_eq!(no_alpha.len(), 1, "expected one no-alpha sentence for the marker");
+    }
+
+    #[test]
+    fn bracket_reference_splits_into_no_alpha_sentence() {
+        let result = split("Next sentence. [12]");
+        let ts = texts(result);
+        assert!(ts.iter().any(|s| s == "Next sentence."));
+        let no_alpha: Vec<_> = ts.iter().filter(|s| !s.chars().any(|c| c.is_alphabetic())).collect();
+        assert_eq!(no_alpha.len(), 1);
+    }
+
     // ── ellipsis ──────────────────────────────────────────────────────────
 
     #[test]

@@ -95,7 +95,7 @@ inserted between runs, so section labels are read character by character.
 | `4C2` | `4 C 2` |
 | `12ab34` | `12 ab 34` |
 
-**c. All-caps, short (≤ 3 letters)** — spelled out letter by letter. F5-TTS
+**c. All-caps, short (≤ 3 letters, not a Roman numeral)** — spelled out letter by letter. F5-TTS
 tends to mispronounce or clip short acronyms when presented as a unit.
 
 | Input | Output |
@@ -108,7 +108,21 @@ To override: add to `tts_overrides.txt`. For example, to keep `PIN` as a
 spelled-out word rather than "pin": `PIN    P I N`. To keep `HTTP` as a word
 rather than `H T T P`: `HTTP    HTTP`.
 
-**d. All-caps, long (> 3 letters)** — lowercased so F5-TTS reads them as
+**d. Roman numerals** — detected before the all-caps/all-lowercase rules and
+expanded to words. Uppercase Roman numerals (any length) and lowercase Roman
+numerals up to C (100) are recognized using the `roman` crate's canonical
+re-encoding check. The cap on lowercase prevents false positives like `mix`
+(MIX = 1009).
+
+| Input | Output |
+|-------|--------|
+| `II` | `two` |
+| `VIII` | `eight` |
+| `XIV` | `fourteen` |
+| `iv` | `four` |
+| `xii` | `twelve` |
+
+**e. All-caps, long (> 3 letters)** — lowercased so F5-TTS reads them as
 normal words.
 
 | Input | Output |

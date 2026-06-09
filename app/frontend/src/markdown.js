@@ -100,7 +100,7 @@ function splitLines(text) {
             });
         }
     }
-    return mergeOutlineLabels(sentences);
+    return mergeOutlineLabels(sentences).filter(s => /[a-zA-Z]/.test(s));
 }
 export function renderMarkdown(content, plainText, container) {
     // Split plain_text into sentences — ground truth that matches the server.
