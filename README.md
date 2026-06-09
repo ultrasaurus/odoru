@@ -5,6 +5,18 @@ The name means dance, leap or take a journey in Japanese depending on context an
 
 ## Setup
 
+### Frontend
+
+in `app/frontend` see `.nvmrc` for version of node
+```
+cd app/frontend
+nvm use
+npx tsc
+npx vite build
+```
+
+Run `tsc` separately before `vite build` — Vite bundles the compiled `.js` files in `src/`, not the `.ts` sources directly. If `tsc` fails, Vite silently uses stale `.js` files and produces a build that looks successful but doesn't reflect your changes.
+
 ### Python environment
 
 Create and activate a virtual environment, then install dependencies:

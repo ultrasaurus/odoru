@@ -686,16 +686,18 @@ html, body {
 }
 
 /* Text input area */
-.text-area {
+.doc-fields {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  padding: 1.5rem 2rem 0.75rem;
+  padding: 0.75rem 2rem;
   border-bottom: 1px solid var(--border);
 }
 
-.text-title-input {
+.doc-title-input,
+.doc-source-url-input {
   width: 100%;
+  box-sizing: border-box;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -707,17 +709,30 @@ html, body {
   transition: border-color 0.15s;
 }
 
-.text-title-input:focus {
+.doc-title-input:focus,
+.doc-source-url-input:focus {
   border-color: var(--accent);
 }
 
-.text-title-input::placeholder {
+.doc-title-input::placeholder,
+.doc-source-url-input::placeholder {
   color: var(--text-dim);
 }
 
-.text-title-input:disabled,
-.text-input:disabled {
-  opacity: 0.5;
+.edit-area {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 2rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.doc-id-display {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  padding: 0.4rem 0.5rem 0;
+  user-select: all;
+  cursor: text;
 }
 
 .url-area {
@@ -797,7 +812,8 @@ html, body {
   color: var(--text-dim);
 }
 
-.synth-btn {
+.synth-btn,
+.edit-toggle-btn {
   align-self: flex-end;
   background: transparent;
   border: 1.5px solid var(--accent);

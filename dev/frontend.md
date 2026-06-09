@@ -1,28 +1,41 @@
 # Frontend
 
-Frontend files are in `app/frontend/src/` (`*.ts` and `*.css`)
+All source files are in `app/frontend/src/`. Built with Vite + TypeScript; output to `app/frontend/dist/`.
 
-The logic is tightly coupled across these files:
+Module layering — `main.ts` mounts one of the two views, both of which share a services
+layer; `ws.ts` is isolated beneath it, reached only via `document.ts` and `player.ts`:
 
-- `app/frontend/src/main.ts` — boot: mounts reader or edit view, owns the cleanup handoff
-- `app/frontend/src/edit.ts` — edit/synthesize view; exports `mount(onReader) → cleanup`
-- `app/frontend/src/reader-author.ts` — authoring reader view; exports `mount(onEdit) → cleanup`
-- `app/frontend/src/reader-core.ts` — outline rendering, shared between authoring reader and export SPA
-- `app/frontend/src/reader-export.ts` — export SPA entry point
-- `app/frontend/src/ui.ts` — shared types (`VoiceInfo`, `JobInfo`), helpers (`fmt`, `wireControls`, etc.)
-- `app/frontend/src/jobs.ts` — `pollJob(jobId, total, callbacks) → stop`: polls `GET /jobs/:id` every 4s, calls onProgress/onDone/onError, retries silently on network error
-- `app/frontend/src/player.ts` — AudioContext, seek/highlight logic
-- `app/frontend/src/ws.ts` — WebSocket connection, `sendSynth` / `cancelSynth`
-- `app/frontend/src/document.ts` — `Document` class: fetch by URL, load by ID, WS status watch
-- `app/frontend/src/markdown.ts` — markdown rendering, sentence span weaving
-- `app/frontend/src/types.ts` — shared TypeScript interfaces
-- `app/frontend/src/style.css` — all styles; class names are shared across the above
+```
+                main.ts
+                /     \
+       reader-author.ts  edit.ts
+                \     /
+        ┌────────┼────────┬─────────┐
+        │        │        │         │
+   document.ts player.ts jobs.ts markdown.ts
+        \         /
+          ws.ts
+```
+
+Files:
+
+- `main.ts` — boot: mounts reader or edit view, owns the cleanup handoff
+- `edit.ts` — edit/synthesize view; exports `mount(onReader) → cleanup`
+- `reader-author.ts` — authoring reader view; exports `mount(onEdit) → cleanup`
+- `reader-core.ts` — outline rendering, shared between authoring reader and export SPA
+- `reader-export.ts` — export SPA entry point
+- `ui.ts` — shared types (`VoiceInfo`, `JobInfo`), helpers (`fmt`, `wireControls`, etc.)
+- `jobs.ts` — `pollJob(jobId, total, callbacks) → stop`: polls `GET /jobs/:id` every 4s, calls onProgress/onDone/onError, retries silently on network error
+- `player.ts` — AudioContext, seek/highlight logic
+- `ws.ts` — WebSocket connection, `sendSynth` / `cancelSynth`
+- `document.ts` — `Document` class: fetch by URL, load by ID, WS status watch
+- `markdown.ts` — markdown rendering, sentence span weaving
+- `types.ts` — shared TypeScript interfaces
+- `style.css` — all styles; class names are shared across the above
 
 View navigation uses a `mount() → cleanup` pattern: each view module exports a `mount` function
 that sets up the DOM and returns a cleanup function. `main.ts` calls cleanup before mounting the
 next view, so timers and audio always stop on navigation.
-
-Built with Vite + TypeScript, output to `app/frontend/dist/`.
 
 ## Reader view
 - Pre-renders all sentences as gray `segment pending` spans immediately after doc fetch
@@ -61,17 +74,23 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
 
 ## Edit view
 - Two input modes, selected via **URL | Text** tabs:
-  - **URL tab**: paste a URL, press Enter or Synthesize — fetches and extracts article via trafilatura
-  - **Text tab**: optional title field + textarea; paste or type markdown; Synthesize strips markdown to plain text for TTS (`marked` → strip HTML tags), then creates the document
-- After input, article renders as formatted markdown with gray pending sentence spans
-- Synthesize starts a background job (`POST /jobs`); progress shown next to Synthesize button; inputs lock on Synthesize
-- Listen: wires player to pre-rendered spans, opens WS synth session; play button enables on first segment
-- New: resets to blank state (clears article, active tab inputs, player)
+  - **URL tab**: paste a URL, press Enter — fetches and extracts article via trafilatura; starts in Preview + Listen mode
+  - **Text tab**: textarea for markdown; starts in Edit mode for new docs; existing docs start in Preview + Listen
+- Always-visible fields below the tabs (both modes): **Title**, **Source URL**, **UUID** (selectable, shown once doc is created)
+  - Title and Source URL auto-save via 4s debounce (`PATCH /documents/:id`, metadata only, no re-synth)
+- **Edit / Preview toggle** (shown once a doc is loaded, replaces Synthesize):
+  - **Edit**: textarea visible, article hidden, player stops
+  - **Preview**: article visible with rendered spans; if content changed since last render, triggers re-synth (see below)
+  - Clicking the Text tab while a doc is loaded also enters Edit mode
+- **Auto-save** while in Edit mode: PATCH content only (no job) — on sentence-ending punctuation (`.?!`) or 4s debounce
+- **Preview re-synth** (only when content changed): cancel active jobs → PATCH content → WS stream → `POST /jobs`; see [editing.md](editing.md)
+- `lastRenderedContent` guard: Edit → Preview with unchanged content keeps existing live spans and audio intact
+- **Synthesize** button (shown for new text docs before first save): calls `setEditMode(false)`, triggering the same Preview re-synth flow
+- New: resets to blank state (clears all fields, article, player)
 - `loadAndListen(summary)` — called when a doc title is clicked in the Documents panel; loads doc
-  by ID via `Document.load(id)`, renders markdown, calls `startListen()` immediately; works whether
-  audio is cached, in-progress, or not yet started (WS streams whatever is available)
-  - Switches to URL tab if doc has a `source_url`; Text tab otherwise (restores title + textarea content)
-  - Synthesize button hidden if audio already ready (shows Listen/New only)
+  by ID via `Document.load(id)`, renders markdown, populates title/source URL/textarea, calls `startListen()` immediately
+  - Switches to URL tab if doc has a `source_url`; Text tab otherwise
+  - Always starts in Preview mode; Edit/Listen/New buttons shown
 - Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
 - Voice picker ever-present in sidebar; user can synthesize the same doc with a second voice later
 - Documents panel: always visible; fetches `GET /documents` + `GET /jobs` in parallel, polls every 10s

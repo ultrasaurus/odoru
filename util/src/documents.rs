@@ -214,16 +214,18 @@ pub fn create_fetching_in(base: &PathBuf, source_url: Option<&str>) -> Result<St
 /// Create a document directly from content without fetching a URL. Returns the UUID.
 pub fn create_ready(
     title: Option<&str>,
+    source_url: Option<&str>,
     content: &str,
     plain_text: &str,
     content_hash: &str,
 ) -> Result<String> {
-    create_ready_in(&documents_dir()?, title, content, plain_text, content_hash)
+    create_ready_in(&documents_dir()?, title, source_url, content, plain_text, content_hash)
 }
 
 pub fn create_ready_in(
     base: &PathBuf,
     title: Option<&str>,
+    source_url: Option<&str>,
     content: &str,
     plain_text: &str,
     content_hash: &str,
@@ -236,7 +238,7 @@ pub fn create_ready_in(
     let fm = DocumentFrontmatter {
         id: id.clone(),
         status: FetchStatus::Ready,
-        source_url: None,
+        source_url: source_url.map(str::to_string),
         title: title.map(str::to_string),
         authors: vec![],
         date: None,
@@ -516,14 +518,15 @@ pub fn update_publish_in(
 // ---------------------------------------------------------------------------
 
 /// Update a document's title, authors, and date fields.
-pub fn update_metadata(id: &str, title: Option<&str>, authors: &[String], date: Option<&str>) -> Result<()> {
-    update_metadata_in(&documents_dir()?, id, title, authors, date)
+pub fn update_metadata(id: &str, title: Option<&str>, source_url: Option<&str>, authors: &[String], date: Option<&str>) -> Result<()> {
+    update_metadata_in(&documents_dir()?, id, title, source_url, authors, date)
 }
 
 pub fn update_metadata_in(
     base: &PathBuf,
     id: &str,
     title: Option<&str>,
+    source_url: Option<&str>,
     authors: &[String],
     date: Option<&str>,
 ) -> Result<()> {
@@ -537,6 +540,7 @@ pub fn update_metadata_in(
         .with_context(|| format!("failed to parse {}", md_path.display()))?;
 
     fm.title = title.map(str::to_string);
+    if let Some(u) = source_url { fm.source_url = Some(u.to_string()); }
     fm.authors = authors.to_vec();
     fm.date = date.map(str::to_string);
     write_frontmatter(&dir, &fm, body)

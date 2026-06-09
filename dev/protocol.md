@@ -5,7 +5,7 @@
 GET  /voices               → { voices: [{id, name, backend, description}] }
 
 POST /documents            ← { url } → { id }   (returns immediately; fetch runs async)
-                         | ← { content, plain_text, title? } → { id }   (text doc; returns immediately, status already ready)
+                         | ← { content, plain_text, title?, source_url? } → { id }   (text doc; returns immediately, status already ready)
 GET  /documents            → [{ id, status, source_url?, title?, authors, date?,
                                 description?, cached_at?, publish, voices }]
 GET  /documents/:id        → { id, status, source_url?, title?, authors, date?,
@@ -13,7 +13,8 @@ GET  /documents/:id        → { id, status, source_url?, title?, authors, date?
                                 publish, voices, error? }
 PATCH /documents/:id       ← { publish?: bool, published_voice?: string,
                                content?: string, plain_text?: string,
-                               title?: string, authors?: string[], date?: string } → 204
+                               title?: string, source_url?: string,
+                               authors?: string[], date?: string } → 204
 DELETE /documents/:id      → 204   (cancels in-progress jobs first, then removes directory)
 
 GET  /ws                   → WebSocket upgrade
@@ -30,7 +31,7 @@ DELETE /overrides/:word    → 204 (404 if not found)
 ### PATCH /documents/:id fields
 - `publish` + `published_voice`: set document publish intent and which voice is published
 - `content` + `plain_text`: update document body; both must be provided together; marks all `ready`/`in_progress` voices `stale` (old audio remains playable with warning badge)
-- `title`, `authors`, `date`: update metadata; any subset may be provided; `authors` is an array of strings
+- `title`, `source_url`, `authors`, `date`: update metadata; any subset may be provided; `authors` is an array of strings; `source_url` is set but never cleared (omit to leave unchanged)
 
 ### Document status (`GET /documents/:id`)
 - `status: "fetching"` — fetch in progress; `content`, `plain_text`, `source_url` are `null`

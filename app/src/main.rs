@@ -306,6 +306,8 @@ struct CreateDocumentRequest {
     plain_text: Option<String>,
     /// Optional title for text documents.
     title: Option<String>,
+    /// Optional source URL for text documents (provenance metadata).
+    source_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -334,7 +336,8 @@ async fn create_document(
         }
 
         let title = body.title.as_deref().filter(|s| !s.trim().is_empty());
-        let id = match documents::create_ready(title, &content, &plain_text, &content_hash) {
+        let source_url = body.source_url.as_deref().filter(|s| !s.trim().is_empty());
+        let id = match documents::create_ready(title, source_url, &content, &plain_text, &content_hash) {
             Ok(id) => id,
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
@@ -599,6 +602,7 @@ struct PatchDocumentBody {
     plain_text: Option<String>,
     /// Metadata fields — any subset may be provided.
     title: Option<String>,
+    source_url: Option<String>,
     authors: Option<Vec<String>>,
     date: Option<String>,
 }
@@ -654,9 +658,10 @@ async fn patch_document(
         }
     }
 
-    // Metadata edit path — title, authors, date.
-    if body.title.is_some() || body.authors.is_some() || body.date.is_some() {
+    // Metadata edit path — title, source_url, authors, date.
+    if body.title.is_some() || body.source_url.is_some() || body.authors.is_some() || body.date.is_some() {
         let title = body.title.clone();
+        let source_url = body.source_url.clone();
         let authors = body.authors.clone().unwrap_or_default();
         let date = body.date.clone();
         let doc_id = id.clone();
@@ -664,6 +669,7 @@ async fn patch_document(
             documents::update_metadata(
                 &doc_id,
                 title.as_deref(),
+                source_url.as_deref(),
                 &authors,
                 date.as_deref(),
             )

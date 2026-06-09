@@ -99,13 +99,15 @@ See [protocol.md](protocol.md).
 
 ### Authoring
 
-#### Documents are editable ###
-- `PATCH /documents/:id` with stale voice transition (for content edits)
+#### Done
+- Documents are editable — textarea editor with Edit/Preview toggle; auto-save on debounce; re-synth on Preview; see [editing.md](editing.md)
+- URL-fetched docs are editable (correct imperfect scraping)
+- Title and source URL editable for all docs
+- `PATCH /documents/:id` supports `content`, `plain_text`, `title`, `source_url`, `authors`, `date`
 
-#### Results from URL fetch are editable ###
-so text can be adjusted if scraping is imperfect
-  1. Markdown editor for content with preview option
-  2. Outline view for editor 
+#### Deferred
+- Outline view for editor
+- Transclusion authoring (paste-as-transclusion, refs.json resolution) — see [transclusion.md](transclusion.md)
 
 ### Small authoring bugs / improvements
 - pause/cancel/resume/delete jobs
@@ -176,6 +178,9 @@ playable with a warning badge. Per-sentence dirty state is more precise but comp
 The future versioning vision (retaining original document) may change what
 "invalidation" means entirely. Not needed for now — defer.
 
+
+### Open questions / future work
+- WS streaming doesn't persist to the audio disk cache (segments are in-memory only). Originally fine when WS was for short snippets, but now authors can seek into long documents via Preview and synthesize large spans that vanish on server restart if the bg job hasn't reached them yet. Consider having WS-synthesized segments also write to the disk cache.
 
 ### Polish / small bugs
 - Error bar: currently only in Edit view; should be in a shared layout wrapper
