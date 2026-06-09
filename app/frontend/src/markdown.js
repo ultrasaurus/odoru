@@ -46,6 +46,38 @@ function stripInline(text) {
 // in splitter.rs: single newlines are hard breaks, Unicode sentence
 // boundaries are found within each line, abbreviations are protected.
 // ---------------------------------------------------------------------------
+// Mirrors merge_outline_labels in splitter.rs.
+// Merges a short all-caps label (e.g. "I.", "XIV.", "A.") with the sentence that follows.
+// Lowercase Roman numeral chars only, max 4 chars (covers i–xvii).
+const LOWERCASE_ROMAN_RE = /^[ivxlcdm]{1,4}$/;
+function mergeOutlineLabels(sentences) {
+    const isLabel = (s) => {
+        const stem = s.trim().replace(/\.$/, '');
+        if (!stem)
+            return false;
+        if (/^[A-Z0-9]+$/.test(stem)) {
+            const alpha = stem.replace(/[^A-Za-z]/g, '');
+            return alpha.length <= 4;
+        }
+        if (/^[a-z]+$/.test(stem)) {
+            return LOWERCASE_ROMAN_RE.test(stem);
+        }
+        return false;
+    };
+    const out = [];
+    let i = 0;
+    while (i < sentences.length) {
+        if (isLabel(sentences[i]) && i + 1 < sentences.length) {
+            out.push(sentences[i].trimEnd() + ' ' + sentences[i + 1].trimStart());
+            i += 2;
+        }
+        else {
+            out.push(sentences[i]);
+            i++;
+        }
+    }
+    return out;
+}
 function splitLines(text) {
     const sentences = [];
     for (const line of text.split('\n')) {
@@ -68,7 +100,7 @@ function splitLines(text) {
             });
         }
     }
-    return sentences;
+    return mergeOutlineLabels(sentences);
 }
 export function renderMarkdown(content, plainText, container) {
     // Split plain_text into sentences — ground truth that matches the server.

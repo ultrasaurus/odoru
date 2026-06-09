@@ -165,6 +165,25 @@ async fn run_synthesis_loop(
             _ => None,
         };
 
+        // Short-sentence guard: F5 takes 1-2 minutes on inputs with very few
+        // alphabetic characters (e.g. "I.", "A." from outline headers after splitting).
+        // Emit a short silence instead of synthesizing.
+        if let Some((_, ref normalized)) = cache_entry {
+            if matches!(&voice, crate::backend::Voice::F5Tts { .. }) {
+                let alpha_count = normalized.chars().filter(|c| c.is_alphabetic()).count();
+                if alpha_count < 3 {
+                    let silence_duration = sentence_silence_secs;
+                    let silence_samples = vec![0f32; (24_000.0 * silence_duration) as usize];
+                    let mp3_bytes = audio_cache::encode_mp3(&silence_samples, 24_000);
+                    let seg = make_segment(index, mp3_bytes, silence_duration, &sentence, time_offset);
+                    time_offset = advance_offset(time_offset, silence_duration, index, sentence_count, paragraph_end, sentence_silence_secs, paragraph_silence_secs);
+                    debug!("[engine] skipping short F5 sentence {index}: {:?} ({alpha_count} alpha chars)", normalized);
+                    if tx.send(Ok(seg)).await.is_err() { return; }
+                    continue;
+                }
+            }
+        }
+
         if let Some((ref key, _)) = cache_entry {
             // Fast path: check before acquiring the lock.
             let key2 = key.clone();

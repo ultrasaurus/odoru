@@ -1784,6 +1784,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "roman"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c78d795ff349dea7ef07d4004a2e1181ec0d4a7e00193098dcd6c96a61c1503"
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2493,6 +2499,7 @@ dependencies = [
  "mp3lame-encoder",
  "ort",
  "pyo3",
+ "roman",
  "serde",
  "serde_json",
  "sha2",

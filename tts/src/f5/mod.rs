@@ -25,7 +25,7 @@ use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use crate::backend::Voice;
 use crate::engine::TtsBackend;
 use crate::error::TtsError;
@@ -136,6 +136,7 @@ impl TtsBackend for F5Backend {
         index: usize,
     ) -> Result<(Vec<f32>, u32, f64), TtsError> {
         let text = normalizer::normalize(text);
+        debug!("[normalizer] sentence {index}: {:?}", text);
 
         let (voice_ref, ref_text, speed, cfg_strength) = match voice {
             Voice::F5Tts { voice_ref, ref_text, speed, cfg_strength, .. } => (

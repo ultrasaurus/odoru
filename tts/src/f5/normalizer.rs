@@ -307,6 +307,36 @@ fn split_alphanumeric(token: &str) -> String {
     out
 }
 
+fn number_to_words(n: u32) -> String {
+    const ONES: &[&str] = &[
+        "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+        "seventeen", "eighteen", "nineteen",
+    ];
+    const TENS: &[&str] = &["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+    let mut parts: Vec<String> = Vec::new();
+    let mut n = n;
+
+    if n >= 1000 {
+        parts.push(format!("{} thousand", ONES[(n / 1000) as usize]));
+        n %= 1000;
+    }
+    if n >= 100 {
+        parts.push(format!("{} hundred", ONES[(n / 100) as usize]));
+        n %= 100;
+    }
+    if n >= 20 {
+        let t = TENS[(n / 10) as usize];
+        let o = ONES[(n % 10) as usize];
+        parts.push(if o.is_empty() { t.to_string() } else { format!("{t} {o}") });
+    } else if n > 0 {
+        parts.push(ONES[n as usize].to_string());
+    }
+
+    parts.join(" ")
+}
+
 fn process_alpha_token(token: &str) -> String {
     let (stem, suffix) = if let Some(s) = token.strip_suffix("'s")
         .or_else(|| token.strip_suffix("'S"))
@@ -318,6 +348,23 @@ fn process_alpha_token(token: &str) -> String {
 
     let alpha_count = stem.chars().filter(|c| c.is_alphabetic()).count();
     let all_caps = stem.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_uppercase());
+
+    // Roman numeral check: skip single chars (I, V, X etc. are too ambiguous).
+    // Lowercase Roman numerals are capped at 100 to avoid converting real words
+    // like "mix" (which is canonically MIX = 1009).
+    if alpha_count >= 2 {
+        let all_lower = stem.chars().all(|c| c.is_lowercase());
+        if all_caps || all_lower {
+            let candidate = if all_lower { stem.to_uppercase() } else { stem.to_string() };
+            let cap = if all_lower { Some(100) } else { None };
+            if let Some(n) = roman::from(&candidate) {
+                if cap.map_or(true, |limit| n <= limit) {
+                    let words = number_to_words(n as u32);
+                    return if suffix.is_empty() { words } else { format!("{words}{}", suffix.to_lowercase()) };
+                }
+            }
+        }
+    }
 
     if all_caps {
         if alpha_count <= 3 {
@@ -339,6 +386,71 @@ fn process_alpha_token(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn roman_numerals_converted() {
+        assert_eq!(process_alpha_token("II"),    "two");
+        assert_eq!(process_alpha_token("III"),   "three");
+        assert_eq!(process_alpha_token("IV"),    "four");
+        assert_eq!(process_alpha_token("VIII"),  "eight");
+        assert_eq!(process_alpha_token("IX"),    "nine");
+        assert_eq!(process_alpha_token("XIV"),   "fourteen");
+        assert_eq!(process_alpha_token("XIX"),   "nineteen");
+        assert_eq!(process_alpha_token("XX"),    "twenty");
+        assert_eq!(process_alpha_token("XXI"),   "twenty one");
+        assert_eq!(process_alpha_token("XLII"),  "forty two");
+        assert_eq!(process_alpha_token("XVIII"), "eighteen");
+        assert_eq!(process_alpha_token("MCMXCIX"), "one thousand nine hundred ninety nine");
+    }
+
+    #[test]
+    fn roman_lowercase_converted() {
+        assert_eq!(process_alpha_token("ii"),    "two");
+        assert_eq!(process_alpha_token("iii"),   "three");
+        assert_eq!(process_alpha_token("iv"),    "four");
+        assert_eq!(process_alpha_token("viii"),  "eight");
+        assert_eq!(process_alpha_token("xiv"),   "fourteen");
+        assert_eq!(process_alpha_token("xcix"),  "ninety nine");
+    }
+
+    #[test]
+    fn roman_lowercase_cap_at_100() {
+        // "mix" uppercases to MIX = 1009, which exceeds the lowercase cap — left as-is.
+        assert_eq!(process_alpha_token("mix"),   "mix");
+    }
+
+    #[test]
+    fn roman_single_chars_not_converted() {
+        // Single Roman-numeral chars are too ambiguous — left to existing all-caps logic.
+        assert_eq!(process_alpha_token("I"), "I");
+        assert_eq!(process_alpha_token("V"), "V");
+        assert_eq!(process_alpha_token("X"), "X");
+        assert_eq!(process_alpha_token("i"), "i");
+    }
+
+    #[test]
+    fn non_roman_allcaps_unchanged() {
+        // These fail the canonical re-encoding check and fall through to all-caps handling.
+        assert_eq!(process_alpha_token("CIVIL"),  "civil");
+        assert_eq!(process_alpha_token("MILL"),   "mill");
+        // MIX is a genuine Roman numeral (1009 = M + IX) — converted, not lowercased.
+        assert_eq!(process_alpha_token("MIX"),    "one thousand nine");
+    }
+
+    #[test]
+    fn roman_possessive() {
+        assert_eq!(process_alpha_token("VIII's"), "eight's");
+    }
+
+    #[test]
+    fn number_to_words_spot_checks() {
+        assert_eq!(number_to_words(1),    "one");
+        assert_eq!(number_to_words(14),   "fourteen");
+        assert_eq!(number_to_words(20),   "twenty");
+        assert_eq!(number_to_words(21),   "twenty one");
+        assert_eq!(number_to_words(100),  "one hundred");
+        assert_eq!(number_to_words(1999), "one thousand nine hundred ninety nine");
+    }
 
     #[test]
     fn long_allcaps_lowercased() {

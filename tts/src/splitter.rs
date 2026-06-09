@@ -1,4 +1,5 @@
 use unicode_segmentation::UnicodeSegmentation;
+use roman;
 
 /// Placeholder that temporarily replaces periods in known abbreviations so
 /// they don't trigger Unicode sentence boundaries. U+FFFE is a non-character
@@ -69,14 +70,59 @@ fn split_paragraph(paragraph: &str) -> Vec<String> {
         protected = protected.replace(&pattern, &replacement);
     }
 
-    // Split on single newlines (hard breaks) then Unicode sentence boundaries
-    protected
+    // Split on single newlines (hard breaks) then Unicode sentence boundaries.
+    let raw: Vec<String> = protected
         .lines()
         .flat_map(|line| line.unicode_sentences())
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.replace(PERIOD_PLACEHOLDER, "."))
-        .collect()
+        .collect();
+
+    merge_outline_labels(raw)
+}
+
+/// Merge outline-style labels with the sentence that follows them.
+///
+/// Unicode sentence segmentation splits `"I. Introduction"` into `["I.", "Introduction"]`
+/// because the capital `I` after the space triggers a boundary. The same split happens
+/// in the browser's `Intl.Segmenter`. By merging on both sides with the same rule we
+/// keep server and client indices in sync.
+///
+/// A sentence is an outline label if it matches: one or more word-chars, then `.`,
+/// with at most 4 alphabetic characters (covers `I`–`VIII`, `A`–`Z`, `1`–`99` etc.)
+/// and no lowercase letters (avoids merging real sentences like `"Wait."`).
+fn merge_outline_labels(sentences: Vec<String>) -> Vec<String> {
+    let is_label = |s: &str| -> bool {
+        let s = s.trim().trim_end_matches('.');
+        if s.is_empty() || !s.chars().all(|c| c.is_alphanumeric()) { return false; }
+        let alpha: Vec<char> = s.chars().filter(|c| c.is_alphabetic()).collect();
+        if alpha.len() > 4 { return false; }
+        if alpha.iter().all(|c| c.is_uppercase()) {
+            return true; // I., II., A., XIV., etc.
+        }
+        if alpha.iter().all(|c| c.is_lowercase()) {
+            // Accept lowercase only if it's a valid Roman numeral ≤ 100 (avoids "mix." = 1009)
+            let upper = s.to_uppercase();
+            return roman::from(&upper).map_or(false, |n| n <= 100);
+        }
+        false
+    };
+
+    let mut out: Vec<String> = Vec::with_capacity(sentences.len());
+    let mut iter = sentences.into_iter().peekable();
+    while let Some(s) = iter.next() {
+        if is_label(&s) {
+            if let Some(next) = iter.peek() {
+                let merged = format!("{} {}", s.trim_end(), next.trim_start());
+                iter.next();
+                out.push(merged);
+                continue;
+            }
+        }
+        out.push(s);
+    }
+    out
 }
 
 /// Convenience: return just the sentence strings, dropping structure.
@@ -219,6 +265,41 @@ mod tests {
             "Thanks for asking.",
         ]);
         assert_eq!(paragraph_ends(&result), vec![false, true, false, true]);
+    }
+
+    // ── outline headers ───────────────────────────────────────────────────
+
+    #[test]
+    fn outline_header_merged_with_next() {
+        let result = split("I. Introduction\n\nII. Methods");
+        assert_eq!(texts(result.clone()), vec!["I. Introduction", "II. Methods"]);
+        assert_eq!(paragraph_ends(&result), vec![true, true]);
+    }
+
+    #[test]
+    fn outline_header_lowercase_next_word() {
+        // Lowercase next word — unicode_sentences already keeps as one sentence.
+        let result = split("I. introduction\n\nII. methods");
+        assert_eq!(texts(result.clone()), vec!["I. introduction", "II. methods"]);
+    }
+
+    #[test]
+    fn outline_alpha_label_merged() {
+        let result = split("A. Background\n\nB. Related Work");
+        assert_eq!(texts(result.clone()), vec!["A. Background", "B. Related Work"]);
+    }
+
+    #[test]
+    fn lowercase_roman_label_merged() {
+        let result = split("i. Introduction\n\nii. Methods\n\niii. Results");
+        assert_eq!(texts(result.clone()), vec!["i. Introduction", "ii. Methods", "iii. Results"]);
+    }
+
+    #[test]
+    fn non_outline_short_sentence_not_merged() {
+        // "Wait." is short but ends with real punctuation after a word — not an outline label.
+        let result = split("Wait. Are you sure?");
+        assert_eq!(texts(result), vec!["Wait.", "Are you sure?"]);
     }
 
     // ── ellipsis ──────────────────────────────────────────────────────────
