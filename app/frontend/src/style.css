@@ -852,6 +852,12 @@ html, body {
   flex: 1;
 }
 
+.voice-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
 .synth-progress {
   font-family: var(--font-mono);
   font-size: 0.75rem;

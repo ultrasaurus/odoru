@@ -57,7 +57,7 @@ export function mount(onReader) {
               <div id="fetch-status" class="fetch-status"></div>
             </div>
 
-            <div class="doc-fields">
+            <div class="doc-fields" style="display:none">
               <input
                 id="doc-title-input"
                 class="doc-title-input"
@@ -92,6 +92,7 @@ export function mount(onReader) {
               </div>
               <div class="synth-row">
                 <div id="time-estimate" class="time-estimate"></div>
+                <div id="voice-label" class="voice-label"></div>
                 <span id="synth-progress" class="synth-progress"></span>
                 <div class="synth-buttons">
                   <button id="edit-toggle-btn" class="edit-toggle-btn" style="display:none">Edit</button>
@@ -475,6 +476,7 @@ export function mount(onReader) {
     const editArea = document.getElementById('edit-area');
     const synthProgress = document.getElementById('synth-progress');
     const timeEstimate = document.getElementById('time-estimate');
+    const voiceLabel = document.getElementById('voice-label');
     const urlInput = document.getElementById('url-input');
     const fetchStatus = document.getElementById('fetch-status');
     const voiceList = document.getElementById('voice-list');
@@ -489,6 +491,8 @@ export function mount(onReader) {
     const textInput = document.getElementById('text-input');
     const docTitleInput = document.getElementById('doc-title-input');
     const docSourceUrlInput = document.getElementById('doc-source-url-input');
+    const docFields = document.querySelector('.doc-fields');
+    let urlFetched = false;
     function showDocId(id) {
         if (id) {
             docIdDisplay.textContent = id;
@@ -653,7 +657,8 @@ export function mount(onReader) {
         activeTab = tab;
         tabUrl.classList.toggle('active', tab === 'url');
         tabText.classList.toggle('active', tab === 'text');
-        urlArea.style.display = tab === 'url' ? '' : 'none';
+        urlArea.style.display = (tab === 'url' && !urlFetched) ? '' : 'none';
+        docFields.style.display = (tab === 'text' || urlFetched) ? '' : 'none';
         if (tab === 'text') {
             if (currentDocId) {
                 // Doc already loaded — switch to Edit mode to show the textarea
@@ -730,6 +735,7 @@ export function mount(onReader) {
         selectedVoice = id;
         const v = voices.find(v => v.id === id);
         voiceDescription.textContent = v?.description ?? '';
+        voiceLabel.textContent = v ? `Voice: ${v.name}` : '';
         renderVoices();
     }
     async function loadVoices() {
@@ -824,6 +830,9 @@ export function mount(onReader) {
             fetchStatus.textContent = `✔ ${state.title ?? url}${suffix}`;
             fetchStatus.className = 'fetch-status success';
             urlInput.disabled = true;
+            urlFetched = true;
+            urlArea.style.display = 'none';
+            docFields.style.display = '';
             return true;
         }
         catch (e) {
@@ -949,7 +958,9 @@ export function mount(onReader) {
         activeTab = 'url';
         tabUrl.classList.add('active');
         tabText.classList.remove('active');
+        urlFetched = false;
         urlArea.style.display = '';
+        docFields.style.display = 'none';
         pollQueue();
     }
     async function loadAndListen(summary) {
@@ -964,13 +975,17 @@ export function mount(onReader) {
             activeTab = 'url';
             tabUrl.classList.add('active');
             tabText.classList.remove('active');
-            urlArea.style.display = '';
+            urlFetched = true;
+            urlArea.style.display = 'none';
+            docFields.style.display = '';
         }
         else {
             activeTab = 'text';
             tabText.classList.add('active');
             tabUrl.classList.remove('active');
+            urlFetched = false;
             urlArea.style.display = 'none';
+            docFields.style.display = '';
         }
         // Reset to Preview mode
         isEditMode = false;
