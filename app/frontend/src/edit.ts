@@ -160,7 +160,7 @@ export function mount(onReader: () => void): () => void {
       in_progress: '⚙',
       done:        '✓',
       error:       '✕ Error',
-      cancelled:   '— Cancelled',
+      paused:      '⏸ Paused',
     } as Record<string, string>)[status] ?? status
   }
 
@@ -180,7 +180,7 @@ export function mount(onReader: () => void): () => void {
     const activeJobsMap = new Map<string, JobInfo[]>()
     for (const job of jobs) {
       if (!job.document_id) continue
-      if (job.status !== 'in_progress' && job.status !== 'pending') continue
+      if (job.status !== 'in_progress' && job.status !== 'pending' && job.status !== 'paused') continue
       const list = activeJobsMap.get(job.document_id) ?? []
       list.push(job)
       activeJobsMap.set(job.document_id, list)
@@ -229,6 +229,7 @@ export function mount(onReader: () => void): () => void {
     listEl: HTMLElement,
     jobMap: Map<string, JobInfo>,
     activeJobsMap: Map<string, JobInfo[]>,
+    inJobsPanel = false,
   ) {
       const job        = jobMap.get(doc.id)
       const activeJobs = activeJobsMap.get(doc.id) ?? []
@@ -238,14 +239,124 @@ export function mount(onReader: () => void): () => void {
       let statusClass = ''
 
       if (anyActive) {
-        statusText  = activeJobs.length > 1 ? `⚙ (${activeJobs.length})` : '⚙'
-        statusClass = 'in_progress'
+        const allPaused = activeJobs.every(j => j.status === 'paused')
+        if (allPaused) {
+          statusText  = '⏸'
+          statusClass = 'paused'
+        } else {
+          statusText  = activeJobs.length > 1 ? `⚙ (${activeJobs.length})` : '⚙'
+          statusClass = 'in_progress'
+        }
       } else if (job) {
         statusText  = jobStatusLabel(job.status)
         statusClass = job.status
       } else if (hasReadyVoice(doc)) {
         statusText  = '✓'
         statusClass = 'done'
+      }
+
+      function buildJobControls(activeJob: JobInfo, inline: boolean) {
+        const pct = activeJob.total_sentences > 0
+          ? Math.round((activeJob.completed_sentences / activeJob.total_sentences) * 100) : 0
+        const voiceName = voices.find(v => v.id === activeJob.voice)?.name ?? activeJob.voice
+
+        const voiceEl = document.createElement('span')
+        voiceEl.className = 'queue-voice'
+        voiceEl.textContent = voiceName
+
+        const bar = document.createElement('div')
+        bar.className = inline ? 'queue-progress-bar queue-progress-bar-inline' : 'queue-progress-bar'
+        const fill = document.createElement('div')
+        fill.className = 'queue-progress-fill'
+        fill.style.width = `${pct}%`
+        bar.appendChild(fill)
+
+        const pctEl = document.createElement('span')
+        pctEl.className = 'queue-progress'
+        pctEl.textContent = `${pct}%`
+
+        const pauseResumeBtn = document.createElement('button')
+        pauseResumeBtn.className = 'queue-cancel-btn'
+        if (activeJob.status === 'paused') {
+          pauseResumeBtn.textContent = '▶'
+          pauseResumeBtn.title = 'Resume'
+          pauseResumeBtn.addEventListener('click', async () => {
+            await fetch(`/jobs/${activeJob.id}/resume`, { method: 'POST' })
+            pollQueue()
+          })
+        } else {
+          pauseResumeBtn.textContent = '⏸'
+          pauseResumeBtn.title = 'Pause'
+          pauseResumeBtn.addEventListener('click', async () => {
+            await fetch(`/jobs/${activeJob.id}/pause`, { method: 'POST' })
+            pollQueue()
+          })
+        }
+
+        const deleteVoiceBtn = document.createElement('button')
+        deleteVoiceBtn.className = 'queue-cancel-btn'
+        deleteVoiceBtn.textContent = '✕'
+        deleteVoiceBtn.title = 'Delete voice'
+        deleteVoiceBtn.addEventListener('click', async () => {
+          await fetch(`/documents/${doc.id}/voices/${encodeURIComponent(activeJob.voice)}`, { method: 'DELETE' })
+          pollQueue()
+        })
+
+        return [voiceEl, bar, pctEl, pauseResumeBtn, deleteVoiceBtn] as const
+      }
+
+      if (inJobsPanel) {
+        const jobRow = document.createElement('div')
+        jobRow.className = 'queue-row jobs-panel-row'
+
+        const top = document.createElement('div')
+        top.className = 'queue-row-top'
+
+        if (activeJobs.length > 1) {
+          const toggleBtn = document.createElement('button')
+          toggleBtn.className = 'queue-toggle-btn'
+          toggleBtn.textContent = '▶'
+          toggleBtn.title = 'Show all jobs'
+          if (expandedRows.has(doc.id)) {
+            toggleBtn.classList.add('open')
+            jobRow.classList.add('open')
+          }
+          toggleBtn.addEventListener('click', () => {
+            const open = body.style.display !== 'none'
+            body.style.display = open ? 'none' : ''
+            toggleBtn.classList.toggle('open', !open)
+            jobRow.classList.toggle('open', !open)
+            if (open) expandedRows.delete(doc.id)
+            else expandedRows.add(doc.id)
+          })
+          top.appendChild(toggleBtn)
+        }
+
+        const titleEl = document.createElement('span')
+        titleEl.textContent = doc.title ?? doc.source_url ?? 'Untitled'
+        titleEl.className = 'queue-title queue-title-link'
+        titleEl.addEventListener('click', () => loadAndListen(doc))
+        top.appendChild(titleEl)
+
+        const topControls = document.createElement('div')
+        topControls.className = 'queue-job-controls queue-job-controls-inline'
+        topControls.append(...buildJobControls(activeJobs[0], true))
+        top.appendChild(topControls)
+
+        const body = document.createElement('div')
+        body.className = 'queue-row-body'
+        if (!expandedRows.has(doc.id)) body.style.display = 'none'
+
+        for (const activeJob of activeJobs.slice(1)) {
+          const controls = document.createElement('div')
+          controls.className = 'queue-job-controls queue-job-controls-inline'
+          controls.append(...buildJobControls(activeJob, true))
+          body.appendChild(controls)
+        }
+
+        jobRow.append(top, body)
+        listEl.appendChild(jobRow)
+        return
       }
 
       const row = document.createElement('div')
@@ -281,37 +392,6 @@ export function mount(onReader: () => void): () => void {
       titleEl.className = 'queue-title queue-title-link'
       titleEl.addEventListener('click', () => loadAndListen(doc))
       top.appendChild(titleEl)
-
-      function buildJobControls(activeJob: JobInfo, inline: boolean) {
-        const pct = activeJob.total_sentences > 0
-          ? Math.round((activeJob.completed_sentences / activeJob.total_sentences) * 100) : 0
-        const voiceName = voices.find(v => v.id === activeJob.voice)?.name ?? activeJob.voice
-
-        const voiceEl = document.createElement('span')
-        voiceEl.className = 'queue-voice'
-        voiceEl.textContent = voiceName
-
-        const bar = document.createElement('div')
-        bar.className = inline ? 'queue-progress-bar queue-progress-bar-inline' : 'queue-progress-bar'
-        const fill = document.createElement('div')
-        fill.className = 'queue-progress-fill'
-        fill.style.width = `${pct}%`
-        bar.appendChild(fill)
-
-        const pctEl = document.createElement('span')
-        pctEl.className = 'queue-progress'
-        pctEl.textContent = `${pct}%`
-
-        const cancelBtn = document.createElement('button')
-        cancelBtn.className = 'queue-cancel-btn'
-        cancelBtn.textContent = '✕'
-        cancelBtn.addEventListener('click', async () => {
-          await fetch(`/jobs/${activeJob.id}`, { method: 'DELETE' })
-          pollQueue()
-        })
-
-        return [voiceEl, bar, pctEl, cancelBtn] as const
-      }
 
       if (statusText && statusText !== '✓') {
         const statusEl = document.createElement('span')
@@ -365,17 +445,6 @@ export function mount(onReader: () => void): () => void {
         actions.className = 'queue-row-actions'
         actions.appendChild(deleteBtn)
         body.appendChild(actions)
-      }
-
-      const extraJobs = activeJobs.slice(1)
-
-      if (doc.status !== 'ready') {
-        for (const activeJob of extraJobs) {
-          const meta = document.createElement('div')
-          meta.className = 'queue-row-meta'
-          meta.append(...buildJobControls(activeJob, false))
-          body.appendChild(meta)
-        }
       }
 
       if (!anyActive && job?.status === 'done') {
@@ -446,21 +515,7 @@ export function mount(onReader: () => void): () => void {
         if (voiceEntries.length > 0) pub.appendChild(select)
         pub.append(editBtn, deleteBtn)
 
-        if (extraJobs.length > 0) {
-          const controls = document.createElement('div')
-          controls.className = 'queue-job-controls'
-          controls.append(...buildJobControls(extraJobs[0], false))
-          pub.appendChild(controls)
-        }
-
         body.insertBefore(pub, body.firstChild)
-
-        for (const activeJob of extraJobs.slice(1)) {
-          const meta = document.createElement('div')
-          meta.className = 'queue-job-controls'
-          meta.append(...buildJobControls(activeJob, false))
-          body.insertBefore(meta, pub.nextSibling)
-        }
 
         const metaForm = document.createElement('div')
         metaForm.className = 'queue-meta-form'
@@ -576,7 +631,7 @@ export function mount(onReader: () => void): () => void {
     }
 
     for (const doc of activeDocs) {
-      buildDocRow(doc, jobsList, jobMap, activeJobsMap)
+      buildDocRow(doc, jobsList, jobMap, activeJobsMap, true)
     }
   }
 
@@ -794,7 +849,7 @@ export function mount(onReader: () => void): () => void {
     pollQueue()
   }
 
-  async function cancelActiveJobsForDoc(docId: string) {
+  async function pauseActiveJobsForDoc(docId: string) {
     try {
       const res = await fetch('/jobs')
       if (!res.ok) return
@@ -803,14 +858,14 @@ export function mount(onReader: () => void): () => void {
         j.document_id === docId &&
         (j.status === 'in_progress' || j.status === 'pending'),
       )
-      await Promise.all(active.map(j => fetch(`/jobs/${j.id}`, { method: 'DELETE' })))
+      await Promise.all(active.map(j => fetch(`/jobs/${j.id}/pause`, { method: 'POST' })))
     } catch { /* best-effort */ }
   }
 
   async function saveAndSynth(plain: string) {
     await triggerSave()
     if (!selectedVoice || !currentDocId) return
-    await cancelActiveJobsForDoc(currentDocId)
+    await pauseActiveJobsForDoc(currentDocId)
     // Restart WS stream so new spans get audio wired up
     listenBtn.disabled = true
     player.setPendingSpans(currentPendingSpans)
@@ -1301,6 +1356,20 @@ export function mount(onReader: () => void): () => void {
 
   // ── URL synthesize / text create ───────────────────────────────────────────
 
+  async function synthesizeUrlDoc(url: string): Promise<void> {
+    if (!fetchedDocument) {
+      const ok = await fetchDocument(url)
+      if (!ok) return
+    }
+
+    const text = fetchedDocument?.current.plain_text
+    if (!text) return
+
+    showListenNew()
+    startListen()
+    await startBgJob(text, fetchedDocument?.current.id)
+  }
+
   synthBtn.addEventListener('click', async () => {
     if (activeTab === 'text') {
       showListenNew()
@@ -1316,27 +1385,14 @@ export function mount(onReader: () => void): () => void {
       return
     }
 
-    if (!fetchedDocument) {
-      const ok = await fetchDocument(url)
-      if (!ok) return
-    }
-
-    const text = fetchedDocument?.current.plain_text
-    if (!text) return
-
-    showListenNew()
-    await startBgJob(text, fetchedDocument?.current.id)
+    await synthesizeUrlDoc(url)
   })
 
   urlInput.addEventListener('keydown', async (e: KeyboardEvent) => {
     if (e.key !== 'Enter') return
     const url = urlInput.value.trim()
     if (!url) return
-    const ok = await fetchDocument(url)
-    if (ok) {
-      showListenNew()
-      startListen()
-    }
+    await synthesizeUrlDoc(url)
   })
 
   return () => {

@@ -27,8 +27,11 @@ export function pollJob(jobId, total, callbacks) {
                     callbacks.onError(`Synthesis error: ${job.error ?? ''}`);
                     return;
                 }
-                if (job.status === 'cancelled') {
-                    callbacks.onError('Job cancelled.');
+                if (job.status === 'paused') {
+                    if (callbacks.onPaused)
+                        callbacks.onPaused();
+                    else
+                        callbacks.onError('Job paused.');
                     return;
                 }
                 const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0;

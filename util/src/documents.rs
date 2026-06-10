@@ -674,6 +674,19 @@ pub fn update_voice_status_in(
     write_voices_in(dir, &voices)
 }
 
+/// Remove a voice's entry from `voices.json`.
+/// Returns `Ok(None)` if the voice had no entry, otherwise the removed
+/// entry's `job_id` (empty string if it had none) so the caller can clean
+/// up the associated job.
+pub fn delete_voice_in(dir: &PathBuf, voice_id: &str) -> Result<Option<String>> {
+    let mut voices = read_voices_in(dir)?;
+    let Some(entry) = voices.remove(voice_id) else {
+        return Ok(None);
+    };
+    write_voices_in(dir, &voices)?;
+    Ok(Some(entry.job_id.unwrap_or_default()))
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

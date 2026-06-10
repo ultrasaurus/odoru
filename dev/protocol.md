@@ -15,13 +15,17 @@ PATCH /documents/:id       ← { publish?: bool, published_voice?: string,
                                content?: string, plain_text?: string,
                                title?: string, source_url?: string,
                                authors?: string[], date?: string } → 204
-DELETE /documents/:id      → 204   (cancels in-progress jobs first, then removes directory)
+DELETE /documents/:id      → 204   (deletes in-progress jobs first, then removes directory)
+DELETE /documents/:id/voices/:voice_id → 204   (removes voice entry from voices.json and
+                                                 deletes its job, if any; 404 if voice not present)
 
 GET  /ws                   → WebSocket upgrade
-POST /jobs                 ← { text, voice, document_id? } → job (deduplicates by text+voice)
+POST /jobs                 ← { text, voice, document_id? } → job (deduplicates by text+voice;
+                              returns an existing paused job as-is, without resuming it)
 GET  /jobs                 → [job, ...]
 GET  /jobs/:id             → job
-DELETE /jobs/:id           → cancel job
+POST /jobs/:id/pause       → job   (404 if not found or not pending/in_progress)
+POST /jobs/:id/resume      → job   (404 if not found, 400 if not paused or has no document_id)
 
 GET    /overrides          → { overrides: [{word, replacement}] }  (sorted alphabetically)
 POST   /overrides          ← { word, replacement } → 204

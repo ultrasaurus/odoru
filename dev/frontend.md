@@ -76,14 +76,18 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
 - Two input modes, selected via **URL | Text** tabs:
   - **URL tab**: paste a URL, press Enter — fetches and extracts article via trafilatura; starts in Preview + Listen mode
   - **Text tab**: textarea for markdown; starts in Edit mode for new docs; existing docs start in Preview + Listen
-- Always-visible fields below the tabs (both modes): **Title**, **Source URL**, **UUID** (selectable, shown once doc is created)
+- Always-visible fields below the tabs (both modes): **Title**, **Source URL**
   - Title and Source URL auto-save via 4s debounce (`PATCH /documents/:id`, metadata only, no re-synth)
+  - **UUID**: shown as a small selectable label tucked into the bottom-right corner of the player card
+    (`#doc-id-display`, absolutely positioned within `.card`), once doc is created
+- **Edit/Preview/New buttons**: live in the `.input-tabs` row alongside URL/Text tabs — Edit/Preview
+  to the left of New, New on the far right (`.input-tabs-spacer` pushes them right)
 - **Edit / Preview toggle** (shown once a doc is loaded, replaces Synthesize):
   - **Edit**: textarea visible, article hidden, player stops
   - **Preview**: article visible with rendered spans; if content changed since last render, triggers re-synth (see below)
   - Clicking the Text tab while a doc is loaded also enters Edit mode
 - **Auto-save** while in Edit mode: PATCH content only (no job) — on sentence-ending punctuation (`.?!`) or 4s debounce
-- **Preview re-synth** (only when content changed): cancel active jobs → PATCH content → WS stream → `POST /jobs`; see [editing.md](editing.md)
+- **Preview re-synth** (only when content changed): pause active jobs → PATCH content → WS stream → `POST /jobs`; see [editing.md](editing.md)
 - `lastRenderedContent` guard: Edit → Preview with unchanged content keeps existing live spans and audio intact
 - **Synthesize** button (shown for new text docs before first save): calls `setEditMode(false)`, triggering the same Preview re-synth flow
 - New: resets to blank state (clears all fields, article, player)
@@ -91,17 +95,51 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
   by ID via `Document.load(id)`, renders markdown, populates title/source URL/textarea, calls `startListen()` immediately
   - Switches to URL tab if doc has a `source_url`; Text tab otherwise
   - Always starts in Preview mode; Edit/Listen/New buttons shown
+  - Selects the doc's published voice (`voices[id].published === true`) if one exists, else falls back
+    to the default-pick logic
 - Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
-- Voice picker ever-present in sidebar; user can synthesize the same doc with a second voice later
-- Documents panel: always visible; fetches `GET /documents` + `GET /jobs` in parallel, polls every 10s
-  - "hide ready" toggle in panel header collapses rows with no active/pending job; shows hidden count
-  - One row per document; title click opens doc; status badge, progress bar, cancel, publish controls
-  - Active jobs: progress bar + % + cancel button
-  - Publish controls: checkbox + voice picker (voices with duration); changes fire `PATCH /documents/:id`
+- Voice picker (sidebar): lists every voice from `/voices`, grouped by backend; each row shows a status
+  badge (✓/⚙/~/✕) for the open document's `voices[id].status`, blank if never synthesized for this doc
+  - `selectVoice(id, restartPlayer?)` — updates labels/description always; when `restartPlayer` is true
+    (user clicked a voice row, or changed the queue's publish-voice picker for the open doc) and a doc
+    with `plain_text` is loaded, stops the player and re-runs `synthesize()` with the new voice
+  - user can synthesize the same doc with a second voice later
+- Documents panel: always visible; fetches `GET /documents` + `GET /jobs` in parallel, polls every 5s
+  - One row per document; title click opens doc; toggle arrow (visible on row hover, or when expanded) reveals details
+  - Status badge only — shows `✓`/`⚙`/`⏸`/`✕`/etc; hidden entirely when the only state is "ready" (✓)
+  - No progress bar or job controls in the queue rows — those live in the jobs panel (below)
+  - Open (expanded) rows get a top/bottom border + raised background; closed rows have no border
+  - Publish controls (in expanded body): checkbox + voice picker listing **all** voices in `voices.json`
+    (not just those with `duration`), each with a status icon (✓/⚙/~/✕); changes fire `PATCH /documents/:id`
+    and, if this doc is currently open in the editor, also call `selectVoice(..., restartPlayer: true)`
   - Metadata edit form (pencil button): title, author, date fields; toggled per-row
+  - Panel is sticky, full viewport height (`100vh - header height`); only the row list scrolls
+- Jobs panel (header, shown when any job is active): one row per document with an active job
+  - Top row: title (click to open doc) + first active job's inline controls (voice name, progress
+    bar, %, pause/resume, delete-voice via `DELETE /documents/:id/voices/:voice_id`)
+  - If a doc has more than one active job, an expand toggle reveals the rest below
+  - `pollJob` ([jobs.ts](../app/frontend/src/jobs.ts)) has a `paused` branch — when a watched job
+    is paused, callers can show a resume affordance instead of treating it as an error
 - `cleanup()` (returned by `mount`) stops all timers and audio when navigating to Reader view
 - Download enabled on `onSynthDone` (all audio received over WS), not on playback end
 - `downloadFilename()` evaluated at click time (lazy), not at view init
+
+## Sticky full-viewport layout
+
+Both the Documents panel (`.queue-column`) and the editor card (`.card-column`) use the same
+sticky pattern so each fills the viewport below the header and scrolls only its inner content:
+
+- A `--header-height` CSS variable is set on `<html>` from the header's `offsetHeight` (measured
+  in JS, updated on `resize`); both columns use `height: calc(100vh - var(--header-height, 0px))`
+  and `position: sticky; top: var(--header-height, 0px)`.
+- `.queue-column` → `.queue-section` → `.queue-list` is a flex column; only `.queue-list` scrolls
+  (`overflow-y: auto; flex: 1; min-height: 0`).
+- `.card-column` → `.card` is a flex column; `.input-area` is the `flex: 1; min-height: 0` region,
+  and within it `.article-area` scrolls (`overflow-y: auto`) while `.controls`/`.synth-row` stay
+  fixed via `flex-shrink: 0`. This keeps the player pinned to the bottom of the viewport while only
+  the article text scrolls.
+- Below 280px width (matches the panel's min-width), both columns drop back to static/auto height
+  so they stack normally on very small screens.
 
 ## Player timing model
 - `AudioContext` plays segments as they arrive (streaming)

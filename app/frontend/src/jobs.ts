@@ -2,6 +2,8 @@ export interface PollJobCallbacks {
   onProgress: (completed: number, total: number, pct: number) => void
   onDone: () => void
   onError: (msg: string) => void
+  /** Called when the job is paused. Polling stops; pass to show a resume option. */
+  onPaused?: () => void
 }
 
 /**
@@ -32,8 +34,9 @@ export function pollJob(jobId: string, total: number, callbacks: PollJobCallback
           callbacks.onError(`Synthesis error: ${job.error ?? ''}`)
           return
         }
-        if (job.status === 'cancelled') {
-          callbacks.onError('Job cancelled.')
+        if (job.status === 'paused') {
+          if (callbacks.onPaused) callbacks.onPaused()
+          else callbacks.onError('Job paused.')
           return
         }
         const pct = total > 0 ? Math.round((job.completed_sentences / total) * 100) : 0

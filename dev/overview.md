@@ -86,13 +86,20 @@ See [protocol.md](protocol.md).
 - Location: `~/.odoru/jobs/<id>.json`
 - Synthesize a document in the background, populating the audio disk cache sentence-by-sentence
 - Per-sentence lock in TtsEngine prevents duplicate synthesis with live WS sessions
-- Status: `pending | in_progress | done | error | cancelled`
-- `POST /jobs` deduplicates: same text+voice returns existing job unless error/cancelled
+- Status: `pending | in_progress | done | error | paused`
+- `POST /jobs` deduplicates: same text+voice returns existing job unless `error`; a `paused`
+  job is returned as-is (not auto-resumed) — only `POST /jobs/:id/resume` restarts it
 - Jobs that were `in_progress` at server shutdown reset to `pending` on reload (preserving
   `completed_sentences`); on startup, pending jobs with an `article_id` auto-restart
   sequentially
 - On completion: updates `voices.json` via `update_voice_status`
-- Cancel flag (`Arc<AtomicBool>`) is in-memory only; task stops at next sentence boundary
+- Pause: `POST /jobs/:id/pause` sets a stop flag (`Arc<AtomicBool>`); the task stops at the
+  next sentence boundary and marks the job `paused`, preserving `completed_sentences` so
+  `POST /jobs/:id/resume` re-runs quickly via the disk cache. Paused jobs are never
+  auto-resumed.
+- Delete: `JobStore::delete()` removes a job's in-memory and on-disk state; if a task is
+  running, signals it to stop without re-persisting. Used by `DELETE /documents/:id` (all
+  jobs for the doc) and `DELETE /documents/:id/voices/:voice_id` (that voice's job).
 - `text_preview`, `article_id`, `article_title` use `#[serde(default)]` so old entries load
 
 ## Planned improvements
@@ -110,9 +117,7 @@ See [protocol.md](protocol.md).
 - Transclusion authoring (paste-as-transclusion, refs.json resolution) — see [transclusion.md](transclusion.md)
 
 ### Small authoring bugs / improvements
-- pause/cancel/resume/delete jobs
 - Open button in Documents panel: navigate to reader (or editor?) for that document
-- Publish voice picker in queue row: show all voices (including in-progress), not just those with `duration`
 - upload text/markdown docs to synthesize
 
 #### Open questions for authoring

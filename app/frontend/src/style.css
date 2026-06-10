@@ -492,6 +492,10 @@ html, body {
   margin-left: auto;
 }
 
+.queue-job-controls-inline {
+  gap: 0.4rem;
+}
+
 .queue-row-actions {
   display: flex;
   justify-content: flex-end;
@@ -516,6 +520,7 @@ html, body {
 .queue-status.done        { color: var(--accent); }
 .queue-status.error       { color: #e07070; }
 .queue-status.cancelled   { color: var(--text-dim); opacity: 0.6; }
+.queue-status.paused      { color: var(--text-dim); opacity: 0.6; }
 
 .queue-row-publish {
   display: flex;

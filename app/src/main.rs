@@ -27,7 +27,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get},
+    routing::{delete, get, post},
     Json, Router,
 };
 use dashmap::DashMap;
@@ -695,8 +695,20 @@ async fn delete_document(
         Ok(Some(_)) => {}
     }
 
-    // Cancel all jobs referencing this document before removing files.
-    state.jobs.cancel_for_document(&id).await;
+    // Delete all jobs referencing this document before removing files.
+    for shared in state.jobs.all() {
+        let job_id = {
+            let job = shared.read().await;
+            if job.document_id.as_deref() == Some(id.as_str()) {
+                Some(job.id.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(job_id) = job_id {
+            state.jobs.delete(&job_id);
+        }
+    }
 
     // Remove from in-memory indexes and flush to disk.
     state.doc_index.remove(&id).await;
@@ -891,17 +903,91 @@ async fn get_job(
     }
 }
 
-async fn cancel_job(
+async fn pause_job(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    if state.jobs.cancel(&id).await {
+    if state.jobs.pause(&id).await {
         let shared = state.jobs.get(&id).unwrap();
         let job = shared.read().await;
         Json(JobResponse::from_job(&job)).into_response()
     } else {
         (StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "job not found or already finished" }))).into_response()
+            Json(serde_json::json!({ "error": "job not found or not pausable" }))).into_response()
+    }
+}
+
+async fn resume_job(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let Some(shared) = state.jobs.get(&id) else {
+        return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "job not found" }))).into_response();
+    };
+
+    let (voice_id, document_id) = {
+        let job = shared.read().await;
+        if job.status != JobStatus::Paused {
+            return (StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "job is not paused" }))).into_response();
+        }
+        (job.voice.clone(), job.document_id.clone())
+    };
+    let Some(document_id) = document_id else {
+        return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "job has no document_id" }))).into_response();
+    };
+
+    let plain_text = match tokio::task::spawn_blocking({
+        let id = document_id.clone();
+        move || documents::lookup_by_id(&id)
+    }).await {
+        Ok(Ok(Some(d))) => d.plain_text,
+        Ok(Ok(None)) => return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" }))).into_response(),
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "failed to load document" }))).into_response(),
+    };
+
+    let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
+        Ok(p) => p,
+        Err(e) => return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e }))).into_response(),
+    };
+
+    state.jobs.resume(&id).await;
+    let cancel_flag = state.jobs.register_cancel_flag(&id);
+    jobs::spawn_job(shared.clone(), cancel_flag, plain_text, voice_name, voice_id,
+        Some(document_id), engine, state.jobs.clone());
+
+    let job = shared.read().await;
+    Json(JobResponse::from_job(&job)).into_response()
+}
+
+async fn delete_voice(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path((id, voice_id)): axum::extract::Path<(String, String)>,
+) -> impl IntoResponse {
+    let dir = match documents::documents_dir().map(|d| d.join(&id)) {
+        Ok(d) => d,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    };
+
+    let lock = state.voice_lock(&id);
+    let _guard = lock.write().await;
+    match documents::delete_voice_in(&dir, &voice_id) {
+        Ok(None) => (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "voice not found" }))).into_response(),
+        Ok(Some(job_id)) => {
+            if !job_id.is_empty() {
+                state.jobs.delete(&job_id);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
     }
 }
 
@@ -1481,9 +1567,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws", get(ws_handler))
         .route("/documents", get(list_documents).post(create_document))
         .route("/documents/:id", get(get_document).patch(patch_document).delete(delete_document))
+        .route("/documents/:id/voices/:voice_id", delete(delete_voice))
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))
-        .route("/jobs/:id", get(get_job).delete(cancel_job))
+        .route("/jobs/:id", get(get_job))
+        .route("/jobs/:id/pause", post(pause_job))
+        .route("/jobs/:id/resume", post(resume_job))
         .route("/overrides", get(get_overrides).post(add_override))
         .route("/overrides/:word", delete(remove_override))
         .layer(CorsLayer::permissive())

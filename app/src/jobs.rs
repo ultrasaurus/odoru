@@ -14,15 +14,23 @@
 //! ## Deduplication
 //!
 //! `POST /jobs` with the same (text, voice) as an existing pending,
-//! in_progress, or done job returns the existing job rather than creating a
-//! new one. Error and cancelled jobs can be re-submitted.
+//! in_progress, paused, or done job returns the existing job rather than
+//! creating a new one. Error jobs can be re-submitted.
 //!
-//! ## Cancellation
+//! ## Pause / resume
 //!
-//! Each running job has an `Arc<AtomicBool>` cancel flag stored in memory.
-//! `JobStore::cancel()` sets the flag; the synthesis task checks it between
-//! sentences and marks the job `Cancelled` when it sees it. The flag is not
-//! persisted — cancelled jobs load as `Cancelled` on restart (no re-run).
+//! Each running job has an `Arc<AtomicBool>` stop flag stored in memory.
+//! `JobStore::pause()` sets the flag; the synthesis task checks it between
+//! sentences and marks the job `Paused` when it sees it. Paused jobs are
+//! not auto-resumed (on restart or via `POST /jobs`) — only an explicit
+//! `POST /jobs/:id/resume` restarts them, preserving `completed_sentences`
+//! so the disk cache makes the re-run fast.
+//!
+//! ## Deletion
+//!
+//! `JobStore::delete()` removes a job's in-memory and on-disk state. If a
+//! task is currently running for that job, its stop flag is set so it exits
+//! without re-persisting the file.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,7 +58,7 @@ pub enum JobStatus {
     InProgress,
     Done,
     Error,
-    Cancelled,
+    Paused,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,13 +127,14 @@ impl JobStore {
     }
 
     /// Find an existing non-terminal job with the same (text_hash, voice).
-    /// Error and Cancelled jobs are excluded so they can be re-submitted.
+    /// Error jobs are excluded so they can be re-submitted. Paused jobs are
+    /// returned as-is (not auto-resumed) so callers don't create a duplicate.
     pub async fn find_active(&self, text_hash: &str, voice: &str) -> Option<SharedJob> {
         for entry in self.jobs.iter() {
             let job = entry.value().read().await;
             if job.voice == voice
                 && entry.key().starts_with(text_hash)
-                && !matches!(job.status, JobStatus::Error | JobStatus::Cancelled)
+                && job.status != JobStatus::Error
             {
                 return Some(entry.value().clone());
             }
@@ -165,46 +174,62 @@ impl JobStore {
         Ok((shared, cancel_flag))
     }
 
-    /// Cancel a job by ID. Sets its cancel flag and marks it Cancelled immediately.
-    /// Returns false if the job is not found or already in a terminal state.
-    pub async fn cancel(&self, id: &str) -> bool {
+    /// Pause a job by ID. Sets its stop flag; the running task (if any) marks
+    /// it `Paused` when it notices. If the job has no running task (e.g.
+    /// `Pending`), marks it `Paused` immediately.
+    /// Returns false if the job is not found or not in a pausable state.
+    pub async fn pause(&self, id: &str) -> bool {
         let Some(shared) = self.jobs.get(id).map(|e| e.value().clone()) else {
             return false;
         };
         {
             let job = shared.read().await;
-            if matches!(job.status, JobStatus::Done | JobStatus::Error | JobStatus::Cancelled) {
+            if !matches!(job.status, JobStatus::Pending | JobStatus::InProgress) {
                 return false;
             }
         }
-        // Signal the running task.
         if let Some(flag) = self.cancel_flags.get(id) {
             flag.store(true, Ordering::Relaxed);
         }
-        // Mark immediately so the client sees the change without waiting for
-        // the task to notice the flag.
         let mut job = shared.write().await;
-        job.status = JobStatus::Cancelled;
+        job.status = JobStatus::Paused;
         let _ = self.persist(&job);
         true
     }
 
-    /// Cancel all non-terminal jobs referencing the given document UUID.
-    pub async fn cancel_for_document(&self, doc_id: &str) {
-        let jobs: Vec<SharedJob> = self.jobs.iter().map(|e| e.value().clone()).collect();
-        for shared in jobs {
-            let job_id = {
-                let job = shared.read().await;
-                if job.document_id.as_deref() == Some(doc_id) {
-                    Some(job.id.clone())
-                } else {
-                    None
-                }
-            };
-            if let Some(id) = job_id {
-                self.cancel(&id).await;
+    /// Resume a paused job: marks it `Pending` so the caller can spawn a new
+    /// task for it. Returns false if the job is not found or not paused.
+    pub async fn resume(&self, id: &str) -> bool {
+        let Some(shared) = self.jobs.get(id).map(|e| e.value().clone()) else {
+            return false;
+        };
+        {
+            let job = shared.read().await;
+            if job.status != JobStatus::Paused {
+                return false;
             }
         }
+        let mut job = shared.write().await;
+        job.status = JobStatus::Pending;
+        let _ = self.persist(&job);
+        true
+    }
+
+    /// True if a job with this ID is currently tracked by the store.
+    pub fn exists(&self, id: &str) -> bool {
+        self.jobs.contains_key(id)
+    }
+
+    /// Remove a job's in-memory and on-disk state. If a task is currently
+    /// running for this job, signals it to stop without re-persisting.
+    pub fn delete(&self, id: &str) {
+        if let Some(flag) = self.cancel_flags.get(id) {
+            flag.store(true, Ordering::Relaxed);
+        }
+        self.jobs.remove(id);
+        self.cancel_flags.remove(id);
+        let path = self.jobs_dir.join(format!("{id}.json"));
+        let _ = std::fs::remove_file(path);
     }
 
     pub fn all(&self) -> Vec<SharedJob> {
@@ -256,7 +281,7 @@ pub fn spawn_job(
     tokio::spawn(async move {
         {
             let mut job = shared.write().await;
-            if job.status == JobStatus::Cancelled { return; }
+            if job.status == JobStatus::Paused { return; }
             job.status = JobStatus::InProgress;
             if let Err(e) = store.persist(&job) {
                 error!("[jobs] persist error: {e}");
@@ -271,11 +296,15 @@ pub fn spawn_job(
         let mut last_end = 0.0f64;
 
         while let Some(result) = stream.next().await {
-            // Check cancel flag between sentences.
+            // Check stop flag between sentences.
             if cancel_flag.load(Ordering::Relaxed) {
-                info!("[jobs] cancelled job {}", &job_id[job_id.len()-8..]);
+                if !store.exists(&job_id) {
+                    info!("[jobs] job {} deleted, stopping", &job_id[job_id.len()-8..]);
+                    return;
+                }
+                info!("[jobs] paused job {}", &job_id[job_id.len()-8..]);
                 let mut job = shared.write().await;
-                job.status = JobStatus::Cancelled;
+                job.status = JobStatus::Paused;
                 let _ = store.persist(&job);
                 return;
             }
