@@ -117,9 +117,8 @@ export function mount(onReader: () => void): () => void {
             </div>
 
             ${controlsHtml()}
+            <div id="doc-id-display" class="doc-id-display" style="display:none"></div>
           </div>
-
-          <div id="doc-id-display" class="doc-id-display" style="display:none"></div>
           </div><!-- end card-column -->
 
         </div>
