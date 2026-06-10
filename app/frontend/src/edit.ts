@@ -58,6 +58,9 @@ export function mount(onReader: () => void): () => void {
             <div class="input-tabs">
               <button id="tab-url" class="input-tab active">URL</button>
               <button id="tab-text" class="input-tab">Text</button>
+              <div class="input-tabs-spacer"></div>
+              <button id="edit-toggle-btn" class="edit-toggle-btn" style="display:none">Edit</button>
+              <button id="reset-btn" class="reset-btn" style="display:none">New</button>
             </div>
 
             <div class="url-area">
@@ -108,9 +111,7 @@ export function mount(onReader: () => void): () => void {
                 <div id="voice-label" class="voice-label"></div>
                 <span id="synth-progress" class="synth-progress"></span>
                 <div class="synth-buttons">
-                  <button id="edit-toggle-btn" class="edit-toggle-btn" style="display:none">Edit</button>
                   <button id="listen-btn" class="listen-btn" style="display:none">Listen</button>
-                  <button id="reset-btn" class="reset-btn" style="display:none">New</button>
                   <button id="synth-btn" class="synth-btn">Synthesize</button>
                 </div>
               </div>

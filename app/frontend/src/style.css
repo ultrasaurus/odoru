@@ -868,8 +868,20 @@ html, body {
 /* Input mode tabs */
 .input-tabs {
   display: flex;
-  gap: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding-right: 0.75rem;
   border-bottom: 1px solid var(--border);
+}
+
+.input-tabs-spacer {
+  flex: 1;
+}
+
+.input-tabs .edit-toggle-btn,
+.input-tabs .reset-btn {
+  padding: 0.3rem 0.9rem;
+  font-size: 0.72rem;
 }
 
 .input-tab {
@@ -1028,7 +1040,6 @@ html, body {
 
 .synth-btn,
 .edit-toggle-btn {
-  align-self: flex-end;
   background: transparent;
   border: 1.5px solid var(--accent);
   border-radius: 8px;
