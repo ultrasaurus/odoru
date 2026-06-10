@@ -72,20 +72,29 @@ export function wireControls(player, playBtn, downloadBtn, progressFill, timeCur
 export function controlsHtml() {
     return `
     <div class="controls">
-      <button id="play-btn" class="play-btn" disabled>
-        <span class="play-icon">▶</span>
-      </button>
-      <div class="progress-wrap">
-        <div class="progress-bar">
-          <div id="progress-fill" class="progress-fill"></div>
+      <div id="voice-label" class="voice-label"></div>
+      <div class="controls-row">
+        <div id="player-controls" class="player-controls" style="display:none">
+          <div class="player-row">
+            <button id="play-btn" class="play-btn" disabled>
+              <span class="play-icon">▶</span>
+            </button>
+            <div class="progress-bar">
+              <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
+          </div>
+          <div class="time-row">
+            <span id="time-current" class="time">0:00</span>
+            <span id="time-total" class="time">0:00</span>
+          </div>
+          <div id="seek-status" class="seek-status" style="display:none">Waiting for audio to arrive…</div>
         </div>
-        <div class="time-row">
-          <span id="time-current" class="time">0:00</span>
-          <span id="time-total" class="time">0:00</span>
+        <div class="synth-buttons">
+          <button id="synth-btn" class="synth-btn">Synthesize</button>
         </div>
-        <div id="seek-status" class="seek-status" style="display:none">Waiting for audio to arrive…</div>
       </div>
-      <button id="download-btn" class="download-btn" disabled title="Download WAV">↓</button>
+      <div id="time-estimate" class="time-estimate"></div>
     </div>
   `;
 }

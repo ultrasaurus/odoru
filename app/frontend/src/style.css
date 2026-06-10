@@ -154,9 +154,9 @@ html, body {
   width: 280px;
   min-width: 180px;
   max-width: 500px;
-  height: calc(100vh - var(--header-height, 0px));
+  height: calc(100vh - var(--header-height, 0px) - var(--jobs-panel-height, 0px));
   position: sticky;
-  top: var(--header-height, 0px);
+  top: calc(var(--header-height, 0px) + var(--jobs-panel-height, 0px));
   display: flex;
   flex-direction: column;
 }
@@ -199,9 +199,9 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  height: calc(100vh - var(--header-height, 0px));
+  height: calc(100vh - var(--header-height, 0px) - var(--jobs-panel-height, 0px));
   position: sticky;
-  top: var(--header-height, 0px);
+  top: calc(var(--header-height, 0px) + var(--jobs-panel-height, 0px));
 }
 
 .workspace .card {
@@ -805,12 +805,33 @@ html, body {
 /* Controls */
 .controls {
   display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  padding: 1.25rem 2rem;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 2rem;
   border-top: 1px solid var(--border);
   background: var(--bg);
   flex-shrink: 0;
+}
+
+.controls-row {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.player-controls {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  height: 3px;
 }
 
 .play-btn {
@@ -849,14 +870,8 @@ html, body {
 }
 
 /* Progress */
-.progress-wrap {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
 .progress-bar {
+  flex: 1;
   height: 3px;
   background: var(--border);
   border-radius: 2px;
@@ -874,6 +889,8 @@ html, body {
 .time-row {
   display: flex;
   justify-content: space-between;
+  padding-left: calc(44px + 1.25rem);
+  padding-right: calc(32px + 1.25rem);
 }
 
 .time {
@@ -969,6 +986,8 @@ html, body {
 .edit-area {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   padding: 0.75rem 2rem;
   border-bottom: 1px solid var(--border);
 }
@@ -1031,18 +1050,11 @@ html, body {
 .fetch-status.error   { color: #c0614a; }
 
 /* Input area */
-.input-area {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  gap: 0.75rem;
-  padding: 1.5rem 2rem 1.5rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-}
 
 .text-input {
   width: 100%;
+  flex: 1;
+  min-height: 0;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1051,7 +1063,7 @@ html, body {
   font-size: 1rem;
   line-height: 1.6;
   padding: 0.75rem 1rem;
-  resize: vertical;
+  resize: none;
   outline: none;
   transition: border-color 0.15s;
 }
@@ -1090,18 +1102,12 @@ html, body {
   cursor: not-allowed;
 }
 
-.synth-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-shrink: 0;
-}
-
 .time-estimate {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text-dim);
-  flex: 1;
+  text-align: center;
+  min-height: 1em;
 }
 
 .voice-label {
@@ -1109,37 +1115,7 @@ html, body {
   font-size: 0.75rem;
   color: var(--text);
   cursor: pointer;
-}
-
-.synth-progress {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-dim);
-}
-
-.listen-btn {
-  align-self: flex-end;
-  background: var(--accent);
-  border: 1.5px solid var(--accent);
-  border-radius: 8px;
-  color: var(--bg);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  padding: 0.5rem 1.25rem;
-  text-transform: uppercase;
-  transition: opacity 0.15s;
-}
-
-.listen-btn:hover:not(:disabled) {
-  opacity: 0.85;
-}
-
-.listen-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  text-align: center;
 }
 
 .reset-btn {
@@ -1168,6 +1144,8 @@ html, body {
   gap: 1rem;
   flex: 1;
   min-height: 0;
+  padding: 1.5rem 2rem 1.5rem 1.5rem;
+  border-bottom: 1px solid var(--border);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -1193,12 +1171,13 @@ html, body {
   gap: 0.5rem;
   align-items: center;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .download-btn {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 32px;
+  height: 28px;
   border-radius: 8px;
   border: 1.5px solid var(--border);
   background: transparent;

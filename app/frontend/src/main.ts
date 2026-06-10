@@ -4,7 +4,18 @@ import { mount as mountEdit } from './edit'
 
 let cleanup: (() => void) | null = null
 
-function showReader() { cleanup?.(); cleanup = mountReader(showEdit) }
-function showEdit()   { cleanup?.(); cleanup = mountEdit(showReader) }
+const LAST_VIEW_KEY = 'odoru:lastView'
 
-showReader()
+function showReader() {
+  cleanup?.()
+  localStorage.setItem(LAST_VIEW_KEY, 'reader')
+  cleanup = mountReader(showEdit)
+}
+function showEdit() {
+  cleanup?.()
+  localStorage.setItem(LAST_VIEW_KEY, 'edit')
+  cleanup = mountEdit(showReader)
+}
+
+if (localStorage.getItem(LAST_VIEW_KEY) === 'reader') showReader()
+else showEdit()

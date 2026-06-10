@@ -89,24 +89,13 @@ export function mount(onReader) {
               ></textarea>
             </div>
 
-            <div class="input-area">
-              <div id="article-area" class="article-area">
-                <div id="edit-outline-section" class="edit-outline-panel" style="display:none">
-                  <div class="sidebar-label">Outline</div>
-                  <div id="edit-outline-list" class="outline-list"></div>
-                </div>
-                <div id="article-content" class="article-content">
-                  <div class="placeholder">Fetch a URL above to see the article.</div>
-                </div>
+            <div id="article-area" class="article-area">
+              <div id="edit-outline-section" class="edit-outline-panel" style="display:none">
+                <div class="sidebar-label">Outline</div>
+                <div id="edit-outline-list" class="outline-list"></div>
               </div>
-              <div class="synth-row">
-                <div id="time-estimate" class="time-estimate"></div>
-                <div id="voice-label" class="voice-label"></div>
-                <span id="synth-progress" class="synth-progress"></span>
-                <div class="synth-buttons">
-                  <button id="listen-btn" class="listen-btn" style="display:none">Listen</button>
-                  <button id="synth-btn" class="synth-btn">Synthesize</button>
-                </div>
+              <div id="article-content" class="article-content">
+                <div class="placeholder">Fetch a URL above to see the article.</div>
               </div>
             </div>
 
@@ -289,12 +278,13 @@ export function mount(onReader) {
             jobRow.className = 'queue-row jobs-panel-row';
             const top = document.createElement('div');
             top.className = 'queue-row-top';
+            const key = `job:${doc.id}`;
             if (activeJobs.length > 1) {
                 const toggleBtn = document.createElement('button');
                 toggleBtn.className = 'queue-toggle-btn';
                 toggleBtn.textContent = '▶';
                 toggleBtn.title = 'Show all jobs';
-                if (expandedRows.has(doc.id)) {
+                if (expandedRows.has(key)) {
                     toggleBtn.classList.add('open');
                     jobRow.classList.add('open');
                 }
@@ -304,9 +294,9 @@ export function mount(onReader) {
                     toggleBtn.classList.toggle('open', !open);
                     jobRow.classList.toggle('open', !open);
                     if (open)
-                        expandedRows.delete(doc.id);
+                        expandedRows.delete(key);
                     else
-                        expandedRows.add(doc.id);
+                        expandedRows.add(key);
                 });
                 top.appendChild(toggleBtn);
             }
@@ -321,7 +311,7 @@ export function mount(onReader) {
             top.appendChild(topControls);
             const body = document.createElement('div');
             body.className = 'queue-row-body';
-            if (!expandedRows.has(doc.id))
+            if (!expandedRows.has(key))
                 body.style.display = 'none';
             for (const activeJob of activeJobs.slice(1)) {
                 const controls = document.createElement('div');
@@ -600,13 +590,12 @@ export function mount(onReader) {
     }
     errorBarRetry.addEventListener('click', () => loadVoices());
     const synthBtn = document.getElementById('synth-btn');
-    const listenBtn = document.getElementById('listen-btn');
     const newBtn = document.getElementById('reset-btn');
     const editToggleBtn = document.getElementById('edit-toggle-btn');
     const articleContent = document.getElementById('article-content');
     const articleArea = document.getElementById('article-area');
     const editArea = document.getElementById('edit-area');
-    const synthProgress = document.getElementById('synth-progress');
+    const playerControls = document.getElementById('player-controls');
     const timeEstimate = document.getElementById('time-estimate');
     const voiceLabel = document.getElementById('voice-label');
     const urlInput = document.getElementById('url-input');
@@ -628,6 +617,7 @@ export function mount(onReader) {
     voiceLabel.addEventListener('click', toggleVoicePanel);
     headerJobsLabel.addEventListener('click', () => {
         jobsPanel.classList.toggle('open');
+        updateJobsPanelHeight();
     });
     // ── Documents panel height tracks header height ─────────────────────────────
     const headerEl = document.querySelector('.header');
@@ -635,7 +625,24 @@ export function mount(onReader) {
         document.documentElement.style.setProperty('--header-height', `${headerEl.offsetHeight}px`);
     }
     updateHeaderHeight();
-    window.addEventListener('resize', updateHeaderHeight);
+    // ── Queue/card columns shrink to make room for the open jobs panel ──────────
+    function updateJobsPanelHeight() {
+        if (!jobsPanel.classList.contains('open')) {
+            document.documentElement.style.setProperty('--jobs-panel-height', '0px');
+            return;
+        }
+        const cap = window.innerWidth <= 700 ? 13.5 * 16 : window.innerHeight * 0.5;
+        const h = Math.min(jobsList.scrollHeight, cap);
+        document.documentElement.style.setProperty('--jobs-panel-height', `${h}px`);
+    }
+    updateJobsPanelHeight();
+    const jobsListResizeObserver = new ResizeObserver(updateJobsPanelHeight);
+    jobsListResizeObserver.observe(jobsList);
+    function updatePanelHeights() {
+        updateHeaderHeight();
+        updateJobsPanelHeight();
+    }
+    window.addEventListener('resize', updatePanelHeights);
     // ── Resizable documents panel ───────────────────────────────────────────────
     const QUEUE_WIDTH_KEY = 'odoru-queue-panel-width';
     const savedWidth = parseInt(localStorage.getItem(QUEUE_WIDTH_KEY) ?? '', 10);
@@ -791,7 +798,7 @@ export function mount(onReader) {
             return;
         await pauseActiveJobsForDoc(currentDocId);
         // Restart WS stream so new spans get audio wired up
-        listenBtn.disabled = true;
+        playerControls.style.display = '';
         player.setPendingSpans(currentPendingSpans);
         player.synthesize(plain, selectedVoice, currentPendingSpans, currentDocId);
         // Bg job caches to disk
@@ -852,7 +859,6 @@ export function mount(onReader) {
                 editArea.style.display = '';
                 articleArea.style.display = 'none';
                 synthBtn.style.display = '';
-                listenBtn.style.display = 'none';
                 newBtn.style.display = 'none';
                 editToggleBtn.style.display = 'none';
             }
@@ -864,8 +870,7 @@ export function mount(onReader) {
                 articleArea.style.display = '';
             }
         }
-        synthProgress.textContent = '';
-        timeEstimate.textContent = '';
+        jobStatusText = '';
         player.stop();
         updateEstimate(textInput.value);
     }
@@ -874,7 +879,7 @@ export function mount(onReader) {
     const player = new Player(articleContent);
     const editCore = new ReaderCore(articleContent, editOutlineList);
     player.onError(msg => {
-        synthProgress.textContent = `Error: ${msg}`;
+        setJobStatus(`Error: ${msg}`);
         synthBtn.disabled = false;
         playBtn.disabled = true;
     });
@@ -884,7 +889,8 @@ export function mount(onReader) {
         if (synthStart > 0) {
             const elapsed = ((Date.now() - synthStart) / 1000).toFixed(0);
             const words = player.synthesizedWordCount;
-            timeEstimate.textContent = `Synthesized ${words} words in ${elapsed}s`;
+            setEstimateText(`Synthesized ${words} words in ${elapsed}s`);
+            jobStatusText = '';
             synthStart = 0;
         }
     });
@@ -973,16 +979,31 @@ export function mount(onReader) {
         const s = Math.round(secs % 60);
         return s > 0 ? `~${m}m ${s}s` : `~${m}m`;
     }
+    let estimateText = '';
+    let jobStatusText = '';
+    function renderTimeEstimate() {
+        timeEstimate.textContent = jobStatusText
+            ? (estimateText ? `${estimateText} - ${jobStatusText}` : jobStatusText)
+            : estimateText;
+    }
+    function setEstimateText(text) {
+        estimateText = text;
+        renderTimeEstimate();
+    }
+    function setJobStatus(text) {
+        jobStatusText = text;
+        renderTimeEstimate();
+    }
     function updateEstimate(text) {
         const words = text.trim().split(/\s+/).filter(Boolean).length;
         if (words === 0) {
-            timeEstimate.textContent = '';
+            setEstimateText('');
             return;
         }
         const backend = selectedVoice?.split(':')[0] ?? 'kokoro';
         const rate = SECS_PER_WORD[backend] ?? 0.2;
         const secs = words * rate;
-        timeEstimate.textContent = `${fmtDuration(secs)} to synthesize (${words} words)`;
+        setEstimateText(`${fmtDuration(secs)} to synthesize (${words} words)`);
     }
     function downloadFilename() {
         const url = urlInput.value.trim();
@@ -1054,7 +1075,6 @@ export function mount(onReader) {
     // ── Background job ─────────────────────────────────────────────────────────
     function showListenNew() {
         synthBtn.style.display = 'none';
-        listenBtn.style.display = '';
         newBtn.style.display = '';
         editToggleBtn.style.display = '';
         synthBtn.disabled = false;
@@ -1062,7 +1082,7 @@ export function mount(onReader) {
     async function startBgJob(text, documentId) {
         stopBgPoll();
         synthBtn.disabled = true;
-        synthProgress.textContent = 'Queuing…';
+        setJobStatus('Queuing…');
         try {
             const body = { text };
             if (selectedVoice)
@@ -1076,28 +1096,28 @@ export function mount(onReader) {
             });
             const job = await res.json();
             if (!res.ok) {
-                synthProgress.textContent = job.error ?? 'Failed to queue job';
+                setJobStatus(job.error ?? 'Failed to queue job');
                 synthBtn.disabled = false;
                 return;
             }
             if (job.status === 'done') {
-                synthProgress.textContent = '✓ Synthesis complete';
+                setJobStatus('✓ Synthesis complete');
             }
             else {
-                synthProgress.textContent = `0/${job.total_sentences} sentences (0%)`;
+                setJobStatus('0% done');
                 stopBgPoll = pollJob(job.id, job.total_sentences, {
-                    onProgress: (completed, total, pct) => {
-                        synthProgress.textContent = `${completed}/${total} sentences (${pct}%)`;
+                    onProgress: (_completed, _total, pct) => {
+                        setJobStatus(`${pct}% done`);
                     },
-                    onDone: () => { synthProgress.textContent = '✓ Synthesis complete'; },
-                    onError: msg => { synthProgress.textContent = msg; },
+                    onDone: () => setJobStatus('✓ Synthesis complete'),
+                    onError: msg => setJobStatus(msg),
                 });
             }
             showListenNew();
             pollQueue();
         }
         catch {
-            synthProgress.textContent = 'Could not reach server';
+            setJobStatus('Could not reach server');
             synthBtn.disabled = false;
         }
     }
@@ -1105,7 +1125,7 @@ export function mount(onReader) {
         if (!fetchedDocument?.current)
             return;
         const doc = fetchedDocument.current;
-        listenBtn.disabled = true;
+        playerControls.style.display = '';
         player.setPendingSpans(currentPendingSpans);
         editCore.renderOutline(currentHeadings, i => player.seekTo(i));
         synthStart = Date.now();
@@ -1139,11 +1159,11 @@ export function mount(onReader) {
         textInput.value = '';
         docTitleInput.value = '';
         docSourceUrlInput.value = '';
-        synthProgress.textContent = '';
-        timeEstimate.textContent = '';
+        estimateText = '';
+        jobStatusText = '';
+        renderTimeEstimate();
         synthBtn.style.display = '';
-        listenBtn.style.display = 'none';
-        listenBtn.disabled = false;
+        playerControls.style.display = 'none';
         newBtn.style.display = 'none';
         editToggleBtn.style.display = 'none';
         editOutlineSection.style.display = 'none';
@@ -1202,9 +1222,9 @@ export function mount(onReader) {
         progressFill.style.width = '0%';
         timeCurrent.textContent = '0:00';
         timeTotal.textContent = '0:00';
-        synthProgress.textContent = '';
+        jobStatusText = '';
         synthBtn.style.display = 'none';
-        listenBtn.style.display = 'none';
+        playerControls.style.display = 'none';
         newBtn.style.display = 'none';
         editToggleBtn.style.display = 'none';
         editOutlineSection.style.display = 'none';
@@ -1258,7 +1278,7 @@ export function mount(onReader) {
                 synthBtn.style.display = '';
             }
             else {
-                timeEstimate.textContent = '';
+                setEstimateText('');
             }
             showListenNew();
             startListen();
@@ -1269,7 +1289,6 @@ export function mount(onReader) {
             fetchedDocument = null;
         }
     }
-    listenBtn.addEventListener('click', startListen);
     newBtn.addEventListener('click', resetEdit);
     // ── URL synthesize / text create ───────────────────────────────────────────
     async function synthesizeUrlDoc(url) {
@@ -1308,7 +1327,8 @@ export function mount(onReader) {
         await synthesizeUrlDoc(url);
     });
     return () => {
-        window.removeEventListener('resize', updateHeaderHeight);
+        window.removeEventListener('resize', updatePanelHeights);
+        jobsListResizeObserver.disconnect();
         if (saveDebounce)
             clearTimeout(saveDebounce);
         if (titleDebounce)

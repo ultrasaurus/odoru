@@ -19,7 +19,9 @@ layer; `ws.ts` is isolated beneath it, reached only via `document.ts` and `playe
 
 Files:
 
-- `main.ts` — boot: mounts reader or edit view, owns the cleanup handoff
+- `main.ts` — boot: mounts reader or edit view, owns the cleanup handoff. Persists the active
+  view to `localStorage` (`odoru:lastView`) on every switch and restores it on load; defaults
+  to Edit view if unset.
 - `edit.ts` — edit/synthesize view; exports `mount(onReader) → cleanup`
 - `reader-author.ts` — authoring reader view; exports `mount(onEdit) → cleanup`
 - `reader-core.ts` — outline rendering, shared between authoring reader and export SPA
@@ -56,7 +58,7 @@ next view, so timers and audio always stop on navigation.
 
 The app intentionally keeps two separate synthesis paths, each suited to a different use case:
 
-**WS streaming (`synth` message → segment frames)** — used by the Listen button and `loadAndListen`.
+**WS streaming (`synth` message → segment frames)** — used by `loadAndListen` and the Preview re-synth flow.
 - Synthesizes sentences on demand; client can seek to any sentence and hear it within seconds.
 - Server starts from the requested position, so seeking to sentence 80 doesn't wait for 1–79.
 - Ephemeral: if the tab closes, the stream is lost. No persistence across sessions.
@@ -94,16 +96,27 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
 - `loadAndListen(summary)` — called when a doc title is clicked in the Documents panel; loads doc
   by ID via `Document.load(id)`, renders markdown, populates title/source URL/textarea, calls `startListen()` immediately
   - Switches to URL tab if doc has a `source_url`; Text tab otherwise
-  - Always starts in Preview mode; Edit/Listen/New buttons shown
+  - Always starts in Preview mode; Edit/New buttons shown, player controls hidden until audio starts
   - Selects the doc's published voice (`voices[id].published === true`) if one exists, else falls back
     to the default-pick logic
 - Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
 - Voice picker (sidebar): lists every voice from `/voices`, grouped by backend; each row shows a status
   badge (✓/⚙/~/✕) for the open document's `voices[id].status`, blank if never synthesized for this doc
   - `selectVoice(id, restartPlayer?)` — updates labels/description always; when `restartPlayer` is true
-    (user clicked a voice row, or changed the queue's publish-voice picker for the open doc) and a doc
-    with `plain_text` is loaded, stops the player and re-runs `synthesize()` with the new voice
+    (the queue's publish-voice picker was changed for the open doc) and a doc with `plain_text` is
+    loaded, stops the player and re-runs `synthesize()` with the new voice
+  - Clicking a voice row in the sidebar only updates the label/description — it does not start
+    playback or a background job
   - user can synthesize the same doc with a second voice later
+- Player/controls (`.controls`, built by `controlsHtml()` in [ui.ts](../app/frontend/src/ui.ts)):
+  - Top row: `#voice-label` ("Voice: af_heart"), centered
+  - Middle row (`.controls-row`): `#player-controls` (play button, progress bar, download button —
+    hidden until synthesis/listen starts) on the left, `#synth-btn` right-aligned via `margin-left: auto`
+  - Bottom row: `#time-estimate` — shows the pre-synthesis word-count estimate (`setEstimateText`),
+    the active job's percent-done (`setJobStatus`), or both combined as
+    `"~25m 55s to synthesize (7774 words) - 24% done"` (`renderTimeEstimate`)
+  - There is no separate Listen button — `startListen()`/`saveAndSynth()` reveal `#player-controls`
+    directly (`playerControls.style.display = ''`)
 - Documents panel: always visible; fetches `GET /documents` + `GET /jobs` in parallel, polls every 5s
   - One row per document; title click opens doc; toggle arrow (visible on row hover, or when expanded) reveals details
   - Status badge only — shows `✓`/`⚙`/`⏸`/`✕`/etc; hidden entirely when the only state is "ready" (✓)
@@ -120,6 +133,11 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
   - If a doc has more than one active job, an expand toggle reveals the rest below
   - `pollJob` ([jobs.ts](../app/frontend/src/jobs.ts)) has a `paused` branch — when a watched job
     is paused, callers can show a resume affordance instead of treating it as an error
+  - Expand/collapse state is tracked in a single `expandedRows` Set shared with the Documents
+    panel, but jobs-panel multi-job toggles use the key `job:${doc.id}` so they don't collide
+    with that document's queue-row expand state
+  - When `.jobs-panel` is open, `.queue-column` and `.card-column` shrink to make room (see
+    "Sticky full-viewport layout" below); `.voice-panel` is unaffected
 - `cleanup()` (returned by `mount`) stops all timers and audio when navigating to Reader view
 - Download enabled on `onSynthDone` (all audio received over WS), not on playback end
 - `downloadFilename()` evaluated at click time (lazy), not at view init
@@ -130,14 +148,21 @@ Both the Documents panel (`.queue-column`) and the editor card (`.card-column`) 
 sticky pattern so each fills the viewport below the header and scrolls only its inner content:
 
 - A `--header-height` CSS variable is set on `<html>` from the header's `offsetHeight` (measured
-  in JS, updated on `resize`); both columns use `height: calc(100vh - var(--header-height, 0px))`
-  and `position: sticky; top: var(--header-height, 0px)`.
+  in JS, updated on `resize`).
+- A `--jobs-panel-height` CSS variable tracks the open height of `#jobs-panel`: `0px` when closed,
+  otherwise `min(jobsList.scrollHeight, cap)` where `cap` is `50vh` (or `13.5rem` below 700px width,
+  matching `.jobs-panel.open`'s own max-height). Updated on toggle, on `resize`, and via a
+  `ResizeObserver` on `#jobs-list` (job rows can grow/shrink while the panel is open).
+- Both columns use `height: calc(100vh - var(--header-height, 0px) - var(--jobs-panel-height, 0px))`
+  and `position: sticky; top: calc(var(--header-height, 0px) + var(--jobs-panel-height, 0px))` —
+  so opening the jobs panel shrinks and pushes down `.queue-column`/`.card-column` together.
+  `.voice-panel` is `position: fixed` and ignores both variables, so it stays full height.
 - `.queue-column` → `.queue-section` → `.queue-list` is a flex column; only `.queue-list` scrolls
   (`overflow-y: auto; flex: 1; min-height: 0`).
-- `.card-column` → `.card` is a flex column; `.input-area` is the `flex: 1; min-height: 0` region,
-  and within it `.article-area` scrolls (`overflow-y: auto`) while `.controls`/`.synth-row` stay
-  fixed via `flex-shrink: 0`. This keeps the player pinned to the bottom of the viewport while only
-  the article text scrolls.
+- `.card-column` → `.card` is a flex column; `.edit-area` / `#article-area` is the
+  `flex: 1; min-height: 0` region (whichever is visible — Edit vs Preview), and `#article-area`
+  scrolls (`overflow-y: auto`) while `.controls` stays fixed via `flex-shrink: 0`. This keeps the
+  player pinned to the bottom of the viewport while only the editor/article content scrolls.
 - Below 280px width (matches the panel's min-width), both columns drop back to static/auto height
   so they stack normally on very small screens.
 
