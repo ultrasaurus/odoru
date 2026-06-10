@@ -47,10 +47,6 @@ export function mount(onReader: () => void): () => void {
         <div class="workspace" id="workspace">
           <div id="queue-column" class="queue-column">
             <div id="queue-section" class="queue-section">
-              <div class="queue-header">
-                Documents
-                <button id="queue-collapse-btn" class="queue-collapse-btn">hide ready</button>
-              </div>
               <div id="queue-list" class="queue-list"></div>
             </div>
           </div>
@@ -147,13 +143,6 @@ export function mount(onReader: () => void): () => void {
   const queueColumn  = document.getElementById('queue-column') as HTMLDivElement
   const panelResizer = document.getElementById('panel-resizer') as HTMLDivElement
   const queueList    = document.getElementById('queue-list')!
-  const collapseBtn  = document.getElementById('queue-collapse-btn') as HTMLButtonElement
-  let hideReady = false
-
-  collapseBtn.addEventListener('click', () => {
-    hideReady = !hideReady
-    pollQueue()
-  })
 
   // ── Documents panel ────────────────────────────────────────────────────────
   let queuePollTimer: ReturnType<typeof setTimeout> | null = null
@@ -167,9 +156,9 @@ export function mount(onReader: () => void): () => void {
 
   function jobStatusLabel(status: string): string {
     return ({
-      pending:     '⏳ Pending',
-      in_progress: '⚙ Running',
-      done:        '✓ Ready',
+      pending:     '⏳',
+      in_progress: '⚙',
+      done:        '✓',
       error:       '✕ Error',
       cancelled:   '— Cancelled',
     } as Record<string, string>)[status] ?? status
@@ -214,7 +203,6 @@ export function mount(onReader: () => void): () => void {
     }
 
     const { jobMap, activeJobsMap } = buildJobMaps(jobs)
-    docs = docs.filter(d => !activeJobsMap.has(d.id))
 
     const sortRank = (doc: DocumentState) => {
       const job = jobMap.get(doc.id)
@@ -250,13 +238,13 @@ export function mount(onReader: () => void): () => void {
       let statusClass = ''
 
       if (anyActive) {
-        statusText  = `⚙ Running (${activeJobs.length})`
+        statusText  = activeJobs.length > 1 ? `⚙ (${activeJobs.length})` : '⚙'
         statusClass = 'in_progress'
       } else if (job) {
         statusText  = jobStatusLabel(job.status)
         statusClass = job.status
       } else if (hasReadyVoice(doc)) {
-        statusText  = '✓ Ready'
+        statusText  = '✓'
         statusClass = 'done'
       }
 
@@ -271,11 +259,15 @@ export function mount(onReader: () => void): () => void {
       toggleBtn.className = 'queue-toggle-btn'
       toggleBtn.textContent = '▶'
       toggleBtn.title = 'Show details'
-      if (expandedRows.has(doc.id)) toggleBtn.classList.add('open')
+      if (expandedRows.has(doc.id)) {
+        toggleBtn.classList.add('open')
+        row.classList.add('open')
+      }
       toggleBtn.addEventListener('click', () => {
         const open = body.style.display !== 'none'
         body.style.display = open ? 'none' : ''
         toggleBtn.classList.toggle('open', !open)
+        row.classList.toggle('open', !open)
         if (open) expandedRows.delete(doc.id)
         else expandedRows.add(doc.id)
       })
@@ -321,18 +313,11 @@ export function mount(onReader: () => void): () => void {
         return [voiceEl, bar, pctEl, cancelBtn] as const
       }
 
-      if (statusText) {
+      if (statusText && statusText !== '✓') {
         const statusEl = document.createElement('span')
         statusEl.className = `queue-status ${statusClass}`
         statusEl.textContent = statusText
         top.appendChild(statusEl)
-      }
-
-      if (anyActive) {
-        const controls = document.createElement('div')
-        controls.className = 'queue-job-controls'
-        controls.append(...buildJobControls(activeJobs[0], true))
-        top.appendChild(controls)
       }
 
       const deleteBtn = document.createElement('button')
@@ -594,24 +579,12 @@ export function mount(onReader: () => void): () => void {
       if (docsRes.ok && jobsRes.ok && openMetaForms.size === 0) {
         const allDocs: DocumentState[] = await docsRes.json()
         const jobs: JobInfo[] = await jobsRes.json()
-        let docs = allDocs.filter(d => d.status !== 'error')
-        if (hideReady) {
-          const activeDocIds = new Set(
-            jobs
-              .filter(j => j.document_id && (j.status === 'in_progress' || j.status === 'pending'))
-              .map(j => j.document_id!),
-          )
-          const hiddenCount = docs.filter(d => !activeDocIds.has(d.id)).length
-          docs = docs.filter(d => activeDocIds.has(d.id))
-          collapseBtn.textContent = hiddenCount > 0 ? `show all (${hiddenCount} ready)` : 'show all'
-        } else {
-          collapseBtn.textContent = 'hide ready'
-        }
+        const docs = allDocs.filter(d => d.status !== 'error')
         renderQueue(docs, jobs)
         renderJobsPanel(allDocs, jobs)
       }
     } catch { /* silent */ }
-    queuePollTimer = setTimeout(pollQueue, 10_000)
+    queuePollTimer = setTimeout(pollQueue, 5_000)
   }
 
   pollQueue()
@@ -662,6 +635,14 @@ export function mount(onReader: () => void): () => void {
   headerJobsLabel.addEventListener('click', () => {
     jobsPanel.classList.toggle('open')
   })
+
+  // ── Documents panel height tracks header height ─────────────────────────────
+  const headerEl = document.querySelector('.header') as HTMLElement
+  function updateHeaderHeight() {
+    document.documentElement.style.setProperty('--header-height', `${headerEl.offsetHeight}px`)
+  }
+  updateHeaderHeight()
+  window.addEventListener('resize', updateHeaderHeight)
 
   // ── Resizable documents panel ───────────────────────────────────────────────
   const QUEUE_WIDTH_KEY = 'odoru-queue-panel-width'
@@ -1318,6 +1299,7 @@ export function mount(onReader: () => void): () => void {
   })
 
   return () => {
+    window.removeEventListener('resize', updateHeaderHeight)
     if (saveDebounce) clearTimeout(saveDebounce)
     if (titleDebounce) clearTimeout(titleDebounce)
     if (metaDebounce) clearTimeout(metaDebounce)

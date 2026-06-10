@@ -40,10 +40,6 @@ export function mount(onReader) {
         <div class="workspace" id="workspace">
           <div id="queue-column" class="queue-column">
             <div id="queue-section" class="queue-section">
-              <div class="queue-header">
-                Documents
-                <button id="queue-collapse-btn" class="queue-collapse-btn">hide ready</button>
-              </div>
               <div id="queue-list" class="queue-list"></div>
             </div>
           </div>
@@ -138,12 +134,6 @@ export function mount(onReader) {
     const queueColumn = document.getElementById('queue-column');
     const panelResizer = document.getElementById('panel-resizer');
     const queueList = document.getElementById('queue-list');
-    const collapseBtn = document.getElementById('queue-collapse-btn');
-    let hideReady = false;
-    collapseBtn.addEventListener('click', () => {
-        hideReady = !hideReady;
-        pollQueue();
-    });
     // ── Documents panel ────────────────────────────────────────────────────────
     let queuePollTimer = null;
     let stopBgPoll = () => { };
@@ -157,9 +147,9 @@ export function mount(onReader) {
     }
     function jobStatusLabel(status) {
         return {
-            pending: '⏳ Pending',
-            in_progress: '⚙ Running',
-            done: '✓ Ready',
+            pending: '⏳',
+            in_progress: '⚙',
+            done: '✓',
             error: '✕ Error',
             cancelled: '— Cancelled',
         }[status] ?? status;
@@ -203,7 +193,6 @@ export function mount(onReader) {
             return;
         }
         const { jobMap, activeJobsMap } = buildJobMaps(jobs);
-        docs = docs.filter(d => !activeJobsMap.has(d.id));
         const sortRank = (doc) => {
             const job = jobMap.get(doc.id);
             if (job?.status === 'in_progress')
@@ -233,7 +222,7 @@ export function mount(onReader) {
         let statusText = '';
         let statusClass = '';
         if (anyActive) {
-            statusText = `⚙ Running (${activeJobs.length})`;
+            statusText = activeJobs.length > 1 ? `⚙ (${activeJobs.length})` : '⚙';
             statusClass = 'in_progress';
         }
         else if (job) {
@@ -241,7 +230,7 @@ export function mount(onReader) {
             statusClass = job.status;
         }
         else if (hasReadyVoice(doc)) {
-            statusText = '✓ Ready';
+            statusText = '✓';
             statusClass = 'done';
         }
         const row = document.createElement('div');
@@ -254,12 +243,15 @@ export function mount(onReader) {
         toggleBtn.className = 'queue-toggle-btn';
         toggleBtn.textContent = '▶';
         toggleBtn.title = 'Show details';
-        if (expandedRows.has(doc.id))
+        if (expandedRows.has(doc.id)) {
             toggleBtn.classList.add('open');
+            row.classList.add('open');
+        }
         toggleBtn.addEventListener('click', () => {
             const open = body.style.display !== 'none';
             body.style.display = open ? 'none' : '';
             toggleBtn.classList.toggle('open', !open);
+            row.classList.toggle('open', !open);
             if (open)
                 expandedRows.delete(doc.id);
             else
@@ -298,17 +290,11 @@ export function mount(onReader) {
             });
             return [voiceEl, bar, pctEl, cancelBtn];
         }
-        if (statusText) {
+        if (statusText && statusText !== '✓') {
             const statusEl = document.createElement('span');
             statusEl.className = `queue-status ${statusClass}`;
             statusEl.textContent = statusText;
             top.appendChild(statusEl);
-        }
-        if (anyActive) {
-            const controls = document.createElement('div');
-            controls.className = 'queue-job-controls';
-            controls.append(...buildJobControls(activeJobs[0], true));
-            top.appendChild(controls);
         }
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'queue-delete-btn';
@@ -527,24 +513,13 @@ export function mount(onReader) {
             if (docsRes.ok && jobsRes.ok && openMetaForms.size === 0) {
                 const allDocs = await docsRes.json();
                 const jobs = await jobsRes.json();
-                let docs = allDocs.filter(d => d.status !== 'error');
-                if (hideReady) {
-                    const activeDocIds = new Set(jobs
-                        .filter(j => j.document_id && (j.status === 'in_progress' || j.status === 'pending'))
-                        .map(j => j.document_id));
-                    const hiddenCount = docs.filter(d => !activeDocIds.has(d.id)).length;
-                    docs = docs.filter(d => activeDocIds.has(d.id));
-                    collapseBtn.textContent = hiddenCount > 0 ? `show all (${hiddenCount} ready)` : 'show all';
-                }
-                else {
-                    collapseBtn.textContent = 'hide ready';
-                }
+                const docs = allDocs.filter(d => d.status !== 'error');
                 renderQueue(docs, jobs);
                 renderJobsPanel(allDocs, jobs);
             }
         }
         catch { /* silent */ }
-        queuePollTimer = setTimeout(pollQueue, 10_000);
+        queuePollTimer = setTimeout(pollQueue, 5_000);
     }
     pollQueue();
     // Error bar helpers
@@ -589,6 +564,13 @@ export function mount(onReader) {
     headerJobsLabel.addEventListener('click', () => {
         jobsPanel.classList.toggle('open');
     });
+    // ── Documents panel height tracks header height ─────────────────────────────
+    const headerEl = document.querySelector('.header');
+    function updateHeaderHeight() {
+        document.documentElement.style.setProperty('--header-height', `${headerEl.offsetHeight}px`);
+    }
+    updateHeaderHeight();
+    window.addEventListener('resize', updateHeaderHeight);
     // ── Resizable documents panel ───────────────────────────────────────────────
     const QUEUE_WIDTH_KEY = 'odoru-queue-panel-width';
     const savedWidth = parseInt(localStorage.getItem(QUEUE_WIDTH_KEY) ?? '', 10);
@@ -1233,6 +1215,7 @@ export function mount(onReader) {
         }
     });
     return () => {
+        window.removeEventListener('resize', updateHeaderHeight);
         if (saveDebounce)
             clearTimeout(saveDebounce);
         if (titleDebounce)

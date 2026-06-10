@@ -159,6 +159,18 @@ html, body {
   width: 280px;
   min-width: 180px;
   max-width: 500px;
+  height: calc(100vh - var(--header-height, 0px));
+  position: sticky;
+  top: var(--header-height, 0px);
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 280px) {
+  .queue-column {
+    height: auto;
+    position: static;
+  }
 }
 
 .panel-resizer {
@@ -307,8 +319,11 @@ html, body {
 /* Background Queue */
 .queue-section {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0px solid var(--border);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .queue-header {
@@ -319,7 +334,7 @@ html, body {
   color: var(--text-dim);
   letter-spacing: 0.06em;
   padding: 0.75rem 1.25rem 0.4rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0px solid var(--border);
 }
 
 .queue-collapse-btn {
@@ -343,6 +358,16 @@ html, body {
 .queue-list {
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 280px) {
+  .queue-list {
+    overflow: visible;
+    flex: none;
+  }
 }
 
 .queue-row {
@@ -350,12 +375,17 @@ html, body {
   flex-direction: column;
   gap: 0.2rem;
   padding: 0.6rem 1.25rem;
-  border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: 0.78rem;
 }
 
-.queue-row:last-child { border-bottom: none; }
+.queue-row.open {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow:  inset 0 2px 4px 0 rgba(255, 255, 255, 0.2);
+          /*     inset 0 6px 20px 0 rgba(255, 255, 255, 0.19); */
+}
 
 .queue-empty {
   color: var(--text-dim);
@@ -379,6 +409,12 @@ html, body {
   padding: 0 0.2rem;
   flex-shrink: 0;
   transition: transform 0.15s ease;
+  visibility: hidden;
+}
+
+.queue-row:hover .queue-toggle-btn,
+.queue-toggle-btn.open {
+  visibility: visible;
 }
 
 .queue-toggle-btn.open {
@@ -415,7 +451,9 @@ html, body {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  justify-content: flex-start;
   font-size: 0.72rem;
+  padding-left: 1.55rem;
 }
 
 .queue-job-controls {
@@ -482,8 +520,6 @@ html, body {
 .queue-progress {
   color: var(--text-dim);
   flex-shrink: 0;
-  width: 2.5em;
-  text-align: right;
 }
 
 .queue-progress-bar {
