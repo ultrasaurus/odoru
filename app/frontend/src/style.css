@@ -106,19 +106,89 @@ html, body {
   background: rgba(200, 169, 110, 0.07);
 }
 
-/* Workspace — card + sidebar side by side */
+#header-jobs-label {
+  right: calc(18px + 77px + 130px);
+}
+
+/* Jobs panel — slides down below the header, pushing content down */
+.jobs-panel {
+  width: 100%;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease, width 0.2s ease;
+  background: var(--surface);
+  border-bottom: 0px solid var(--border);
+}
+
+.jobs-panel.voice-panel-open {
+  width: calc(100% - 172px);
+}
+
+.jobs-panel.open {
+  max-height: 50vh;
+  border-bottom-width: 1px;
+  overflow-y: auto;
+}
+
+@media (max-width: 700px) {
+  .jobs-panel.open {
+    max-height: 13.5rem;
+  }
+}
+
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Workspace — documents panel + edit area side by side */
 .workspace {
   display: flex;
-  gap: 1.5rem;
   width: 100%;
-  max-width: 1000px;
+  max-width: 1400px;
   align-items: flex-start;
+  transition: margin-right 0.2s ease;
+}
+
+.workspace.voice-panel-open {
+  margin-right: 172px;
+}
+
+.queue-column {
+  flex-shrink: 0;
+  width: 280px;
+  min-width: 180px;
+  max-width: 500px;
+}
+
+.panel-resizer {
+  flex-shrink: 0;
+  width: 1.5rem;
+  align-self: stretch;
+  cursor: col-resize;
+  position: relative;
+}
+
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  transform: translateX(-50%);
+}
+
+.panel-resizer:hover::after,
+.panel-resizer.dragging::after {
+  background: var(--accent);
+  width: 2px;
 }
 
 .card-column {
   flex: 1;
   min-width: 0;
-  max-width: 720px;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -231,7 +301,6 @@ html, body {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -239,7 +308,6 @@ html, body {
 .queue-section {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -299,7 +367,28 @@ html, body {
 .queue-row-top {
   display: flex;
   gap: 0.5rem;
-  align-items: baseline;
+  align-items: center;
+}
+
+.queue-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.65rem;
+  padding: 0 0.2rem;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.queue-toggle-btn.open {
+  transform: rotate(90deg);
+}
+
+.queue-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 
 .queue-title {
@@ -310,6 +399,18 @@ html, body {
   white-space: nowrap;
 }
 
+.queue-progress-bar-inline {
+  flex: none;
+  width: clamp(2rem, 30vw, 6rem);
+  max-width: 50%;
+  position: relative;
+  top: -2px;
+}
+
+.voice-panel-open .queue-progress-bar-inline {
+  width: clamp(2rem, 20vw, 6rem);
+}
+
 .queue-row-meta {
   display: flex;
   gap: 0.75rem;
@@ -317,9 +418,30 @@ html, body {
   font-size: 0.72rem;
 }
 
+.queue-job-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.queue-row-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.queue-row-publish .queue-delete-btn {
+  margin-left: 0.5rem;
+}
+
 .queue-voice {
   color: var(--accent);
   flex-shrink: 0;
+  width: 5rem;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .queue-status { color: var(--text-dim); flex-shrink: 0; }
@@ -332,7 +454,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding-top: 0.25rem;
+  padding-left: 1.55rem;
 }
 
 .queue-publish-cb {
@@ -357,7 +479,12 @@ html, body {
   cursor: pointer;
 }
 
-.queue-progress { color: var(--text-dim); }
+.queue-progress {
+  color: var(--text-dim);
+  flex-shrink: 0;
+  width: 2.5em;
+  text-align: right;
+}
 
 .queue-progress-bar {
   flex: 1;

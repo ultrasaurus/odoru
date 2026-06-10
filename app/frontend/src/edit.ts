@@ -35,20 +35,29 @@ export function mount(onReader: () => void): () => void {
       <header class="header">
         <a class="back-link" id="back-link">← Publish Preview</a>
         <div class="logo">▶ odoru</div>
+        <button id="header-jobs-label" class="header-voice-label" style="display:none"></button>
         <button id="header-voice-label" class="header-voice-label"></button>
       </header>
 
+      <div id="jobs-panel" class="jobs-panel">
+        <div id="jobs-list" class="jobs-list"></div>
+      </div>
+
       <main class="main">
-        <div class="workspace">
-          <div class="card-column">
-          <div id="queue-section" class="queue-section">
-            <div class="queue-header">
-              Documents
-              <button id="queue-collapse-btn" class="queue-collapse-btn">hide ready</button>
+        <div class="workspace" id="workspace">
+          <div id="queue-column" class="queue-column">
+            <div id="queue-section" class="queue-section">
+              <div class="queue-header">
+                Documents
+                <button id="queue-collapse-btn" class="queue-collapse-btn">hide ready</button>
+              </div>
+              <div id="queue-list" class="queue-list"></div>
             </div>
-            <div id="queue-list" class="queue-list"></div>
           </div>
 
+          <div id="panel-resizer" class="panel-resizer"></div>
+
+          <div class="card-column">
           <div class="card">
             <div class="input-tabs">
               <button id="tab-url" class="input-tab active">URL</button>
@@ -134,6 +143,9 @@ export function mount(onReader: () => void): () => void {
 
   document.getElementById('back-link')!.addEventListener('click', onReader)
 
+  const workspace    = document.getElementById('workspace')!
+  const queueColumn  = document.getElementById('queue-column') as HTMLDivElement
+  const panelResizer = document.getElementById('panel-resizer') as HTMLDivElement
   const queueList    = document.getElementById('queue-list')!
   const collapseBtn  = document.getElementById('queue-collapse-btn') as HTMLButtonElement
   let hideReady = false
@@ -147,6 +159,7 @@ export function mount(onReader: () => void): () => void {
   let queuePollTimer: ReturnType<typeof setTimeout> | null = null
   let stopBgPoll = () => {}
   const openMetaForms = new Set<string>()
+  const expandedRows = new Set<string>()
 
   function stopQueuePoll() {
     if (queuePollTimer !== null) { clearTimeout(queuePollTimer); queuePollTimer = null }
@@ -162,16 +175,7 @@ export function mount(onReader: () => void): () => void {
     } as Record<string, string>)[status] ?? status
   }
 
-  function renderQueue(docs: DocumentState[], jobs: JobInfo[]) {
-    queueList.innerHTML = ''
-    if (docs.length === 0) {
-      const empty = document.createElement('div')
-      empty.className = 'queue-empty'
-      empty.textContent = 'No documents yet.'
-      queueList.appendChild(empty)
-      return
-    }
-
+  function buildJobMaps(jobs: JobInfo[]) {
     const jobRank = (s: string) => s === 'in_progress' ? 0 : s === 'pending' ? 1 : s === 'done' ? 2 : 3
 
     const jobMap = new Map<string, JobInfo>()
@@ -193,8 +197,24 @@ export function mount(onReader: () => void): () => void {
       activeJobsMap.set(job.document_id, list)
     }
 
-    const hasReadyVoice = (doc: DocumentState) =>
-      Object.values(doc.voices).some(v => !!v.duration)
+    return { jobMap, activeJobsMap }
+  }
+
+  const hasReadyVoice = (doc: DocumentState) =>
+    Object.values(doc.voices).some(v => !!v.duration)
+
+  function renderQueue(docs: DocumentState[], jobs: JobInfo[]) {
+    queueList.innerHTML = ''
+    if (docs.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'queue-empty'
+      empty.textContent = 'No documents yet.'
+      queueList.appendChild(empty)
+      return
+    }
+
+    const { jobMap, activeJobsMap } = buildJobMaps(jobs)
+    docs = docs.filter(d => !activeJobsMap.has(d.id))
 
     const sortRank = (doc: DocumentState) => {
       const job = jobMap.get(doc.id)
@@ -212,6 +232,16 @@ export function mount(onReader: () => void): () => void {
     })
 
     for (const doc of sorted) {
+      buildDocRow(doc, queueList, jobMap, activeJobsMap)
+    }
+  }
+
+  function buildDocRow(
+    doc: DocumentState,
+    listEl: HTMLElement,
+    jobMap: Map<string, JobInfo>,
+    activeJobsMap: Map<string, JobInfo[]>,
+  ) {
       const job        = jobMap.get(doc.id)
       const activeJobs = activeJobsMap.get(doc.id) ?? []
       const anyActive  = activeJobs.length > 0
@@ -220,7 +250,7 @@ export function mount(onReader: () => void): () => void {
       let statusClass = ''
 
       if (anyActive) {
-        statusText  = activeJobs.length > 1 ? `⚙ Running (${activeJobs.length})` : jobStatusLabel(activeJobs[0].status)
+        statusText  = `⚙ Running (${activeJobs.length})`
         statusClass = 'in_progress'
       } else if (job) {
         statusText  = jobStatusLabel(job.status)
@@ -233,8 +263,26 @@ export function mount(onReader: () => void): () => void {
       const row = document.createElement('div')
       row.className = 'queue-row'
 
+      const body = document.createElement('div')
+      body.className = 'queue-row-body'
+      if (!expandedRows.has(doc.id)) body.style.display = 'none'
+
+      const toggleBtn = document.createElement('button')
+      toggleBtn.className = 'queue-toggle-btn'
+      toggleBtn.textContent = '▶'
+      toggleBtn.title = 'Show details'
+      if (expandedRows.has(doc.id)) toggleBtn.classList.add('open')
+      toggleBtn.addEventListener('click', () => {
+        const open = body.style.display !== 'none'
+        body.style.display = open ? 'none' : ''
+        toggleBtn.classList.toggle('open', !open)
+        if (open) expandedRows.delete(doc.id)
+        else expandedRows.add(doc.id)
+      })
+
       const top = document.createElement('div')
       top.className = 'queue-row-top'
+      top.appendChild(toggleBtn)
 
       const titleEl = document.createElement('span')
       titleEl.textContent = doc.title ?? doc.source_url ?? 'Untitled'
@@ -242,11 +290,49 @@ export function mount(onReader: () => void): () => void {
       titleEl.addEventListener('click', () => loadAndListen(doc))
       top.appendChild(titleEl)
 
+      function buildJobControls(activeJob: JobInfo, inline: boolean) {
+        const pct = activeJob.total_sentences > 0
+          ? Math.round((activeJob.completed_sentences / activeJob.total_sentences) * 100) : 0
+        const voiceName = voices.find(v => v.id === activeJob.voice)?.name ?? activeJob.voice
+
+        const voiceEl = document.createElement('span')
+        voiceEl.className = 'queue-voice'
+        voiceEl.textContent = voiceName
+
+        const bar = document.createElement('div')
+        bar.className = inline ? 'queue-progress-bar queue-progress-bar-inline' : 'queue-progress-bar'
+        const fill = document.createElement('div')
+        fill.className = 'queue-progress-fill'
+        fill.style.width = `${pct}%`
+        bar.appendChild(fill)
+
+        const pctEl = document.createElement('span')
+        pctEl.className = 'queue-progress'
+        pctEl.textContent = `${pct}%`
+
+        const cancelBtn = document.createElement('button')
+        cancelBtn.className = 'queue-cancel-btn'
+        cancelBtn.textContent = '✕'
+        cancelBtn.addEventListener('click', async () => {
+          await fetch(`/jobs/${activeJob.id}`, { method: 'DELETE' })
+          pollQueue()
+        })
+
+        return [voiceEl, bar, pctEl, cancelBtn] as const
+      }
+
       if (statusText) {
         const statusEl = document.createElement('span')
         statusEl.className = `queue-status ${statusClass}`
         statusEl.textContent = statusText
         top.appendChild(statusEl)
+      }
+
+      if (anyActive) {
+        const controls = document.createElement('div')
+        controls.className = 'queue-job-controls'
+        controls.append(...buildJobControls(activeJobs[0], true))
+        top.appendChild(controls)
       }
 
       const deleteBtn = document.createElement('button')
@@ -272,7 +358,7 @@ export function mount(onReader: () => void): () => void {
         row.remove()
         const res = await fetch(`/documents/${doc.id}`, { method: 'DELETE' })
         if (!res.ok) {
-          queueList.appendChild(row)
+          listEl.appendChild(row)
           confirmEl.replaceWith(deleteBtn)
         }
         pollQueue()
@@ -286,46 +372,25 @@ export function mount(onReader: () => void): () => void {
       })
 
       confirmEl.append(confirmLabel, confirmYes, confirmNo)
-      top.appendChild(deleteBtn)
 
-      row.appendChild(top)
+      row.append(top, body)
 
-      for (const activeJob of activeJobs) {
-        const pct = activeJob.total_sentences > 0
-          ? Math.round((activeJob.completed_sentences / activeJob.total_sentences) * 100) : 0
-        const voiceName = voices.find(v => v.id === activeJob.voice)?.name ?? activeJob.voice
+      if (doc.status !== 'ready') {
+        const actions = document.createElement('div')
+        actions.className = 'queue-row-actions'
+        actions.appendChild(deleteBtn)
+        body.appendChild(actions)
+      }
 
-        const meta = document.createElement('div')
-        meta.className = 'queue-row-meta'
+      const extraJobs = activeJobs.slice(1)
 
-        const voiceEl = document.createElement('span')
-        voiceEl.className = 'queue-voice'
-        voiceEl.textContent = voiceName
-        meta.appendChild(voiceEl)
-
-        const bar = document.createElement('div')
-        bar.className = 'queue-progress-bar'
-        const fill = document.createElement('div')
-        fill.className = 'queue-progress-fill'
-        fill.style.width = `${pct}%`
-        bar.appendChild(fill)
-        meta.appendChild(bar)
-
-        const pctEl = document.createElement('span')
-        pctEl.className = 'queue-progress'
-        pctEl.textContent = `${pct}%`
-        meta.appendChild(pctEl)
-
-        const cancelBtn = document.createElement('button')
-        cancelBtn.className = 'queue-cancel-btn'
-        cancelBtn.textContent = '✕'
-        cancelBtn.addEventListener('click', async () => {
-          await fetch(`/jobs/${activeJob.id}`, { method: 'DELETE' })
-          pollQueue()
-        })
-        meta.appendChild(cancelBtn)
-
-        row.appendChild(meta)
+      if (doc.status !== 'ready') {
+        for (const activeJob of extraJobs) {
+          const meta = document.createElement('div')
+          meta.className = 'queue-row-meta'
+          meta.append(...buildJobControls(activeJob, false))
+          body.appendChild(meta)
+        }
       }
 
       if (!anyActive && job?.status === 'done') {
@@ -335,7 +400,7 @@ export function mount(onReader: () => void): () => void {
         countEl.className = 'queue-progress'
         countEl.textContent = `${job.total_sentences} sentences`
         meta.appendChild(countEl)
-        row.appendChild(meta)
+        body.appendChild(meta)
       }
 
       const readyVoices = Object.entries(doc.voices)
@@ -383,8 +448,23 @@ export function mount(onReader: () => void): () => void {
 
         pub.append(cb, label)
         if (readyVoices.length > 0) pub.appendChild(select)
-        pub.appendChild(editBtn)
-        row.appendChild(pub)
+        pub.append(editBtn, deleteBtn)
+
+        if (extraJobs.length > 0) {
+          const controls = document.createElement('div')
+          controls.className = 'queue-job-controls'
+          controls.append(...buildJobControls(extraJobs[0], false))
+          pub.appendChild(controls)
+        }
+
+        body.insertBefore(pub, body.firstChild)
+
+        for (const activeJob of extraJobs.slice(1)) {
+          const meta = document.createElement('div')
+          meta.className = 'queue-job-controls'
+          meta.append(...buildJobControls(activeJob, false))
+          body.insertBefore(meta, pub.nextSibling)
+        }
 
         const metaForm = document.createElement('div')
         metaForm.className = 'queue-meta-form'
@@ -433,19 +513,28 @@ export function mount(onReader: () => void): () => void {
           makeMetaRow('date:', dateInput),
           formActions,
         )
-        row.appendChild(metaForm)
+        body.appendChild(metaForm)
 
         if (openMetaForms.has(doc.id)) {
           metaForm.style.display = ''
           editBtn.classList.add('active')
+          body.style.display = ''
+          toggleBtn.classList.add('open')
+          expandedRows.add(doc.id)
         }
 
         editBtn.addEventListener('click', () => {
           const open = metaForm.style.display !== 'none'
           metaForm.style.display = open ? 'none' : ''
           editBtn.classList.toggle('active', !open)
-          if (open) openMetaForms.delete(doc.id)
-          else openMetaForms.add(doc.id)
+          if (open) {
+            openMetaForms.delete(doc.id)
+          } else {
+            openMetaForms.add(doc.id)
+            body.style.display = ''
+            toggleBtn.classList.add('open')
+            expandedRows.add(doc.id)
+          }
         })
 
         cancelBtn.addEventListener('click', () => {
@@ -474,7 +563,24 @@ export function mount(onReader: () => void): () => void {
         })
       }
 
-      queueList.appendChild(row)
+      listEl.appendChild(row)
+  }
+
+  function renderJobsPanel(docs: DocumentState[], jobs: JobInfo[]) {
+    const { jobMap, activeJobsMap } = buildJobMaps(jobs)
+    const activeDocs = docs.filter(d => activeJobsMap.has(d.id))
+
+    headerJobsLabel.style.display = activeDocs.length > 0 ? '' : 'none'
+    headerJobsLabel.textContent = `${activeDocs.length} Synthesizing`
+
+    jobsList.innerHTML = ''
+    if (activeDocs.length === 0) {
+      jobsPanel.classList.remove('open')
+      return
+    }
+
+    for (const doc of activeDocs) {
+      buildDocRow(doc, jobsList, jobMap, activeJobsMap)
     }
   }
 
@@ -502,6 +608,7 @@ export function mount(onReader: () => void): () => void {
           collapseBtn.textContent = 'hide ready'
         }
         renderQueue(docs, jobs)
+        renderJobsPanel(allDocs, jobs)
       }
     } catch { /* silent */ }
     queuePollTimer = setTimeout(pollQueue, 10_000)
@@ -536,15 +643,54 @@ export function mount(onReader: () => void): () => void {
   const urlInput       = document.getElementById('url-input')        as HTMLInputElement
   const fetchStatus    = document.getElementById('fetch-status')     as HTMLDivElement
   const headerVoiceLabel   = document.getElementById('header-voice-label')  as HTMLButtonElement
+  const headerJobsLabel    = document.getElementById('header-jobs-label')   as HTMLButtonElement
+  const jobsPanel          = document.getElementById('jobs-panel')          as HTMLDivElement
+  const jobsList           = document.getElementById('jobs-list')           as HTMLDivElement
   const voicePanel         = document.getElementById('voice-panel')        as HTMLDivElement
   const voiceList          = document.getElementById('voice-list')          as HTMLDivElement
   const voiceDescription   = document.getElementById('voice-description')   as HTMLDivElement
 
   function toggleVoicePanel() {
     voicePanel.classList.toggle('open')
+    const open = voicePanel.classList.contains('open')
+    workspace.classList.toggle('voice-panel-open', open)
+    jobsPanel.classList.toggle('voice-panel-open', open)
   }
   headerVoiceLabel.addEventListener('click', toggleVoicePanel)
   voiceLabel.addEventListener('click', toggleVoicePanel)
+
+  headerJobsLabel.addEventListener('click', () => {
+    jobsPanel.classList.toggle('open')
+  })
+
+  // ── Resizable documents panel ───────────────────────────────────────────────
+  const QUEUE_WIDTH_KEY = 'odoru-queue-panel-width'
+  const savedWidth = parseInt(localStorage.getItem(QUEUE_WIDTH_KEY) ?? '', 10)
+  if (!isNaN(savedWidth)) queueColumn.style.width = `${savedWidth}px`
+
+  panelResizer.addEventListener('mousedown', (e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = queueColumn.getBoundingClientRect().width
+    panelResizer.classList.add('dragging')
+
+    function onMove(ev: MouseEvent) {
+      const min = 180
+      const max = 500
+      const width = Math.min(max, Math.max(min, startWidth + (ev.clientX - startX)))
+      queueColumn.style.width = `${width}px`
+    }
+
+    function onUp() {
+      panelResizer.classList.remove('dragging')
+      localStorage.setItem(QUEUE_WIDTH_KEY, queueColumn.style.width.replace('px', ''))
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  })
   const editOutlineSection = document.getElementById('edit-outline-section')!
   const editOutlineList    = document.getElementById('edit-outline-list')!
   const docIdDisplay       = document.getElementById('doc-id-display')!
