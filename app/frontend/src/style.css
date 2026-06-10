@@ -266,6 +266,10 @@ html, body {
 }
 
 .voice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -278,6 +282,23 @@ html, body {
   padding: 0.4rem 0.6rem;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
+
+.voice-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-row-status {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.voice-row-status.ready       { color: var(--accent); }
+.voice-row-status.in_progress { color: var(--text); }
+.voice-row-status.error       { color: #e07070; }
+.voice-row-status.stale       { color: var(--text-dim); opacity: 0.6; }
 
 .voice-row:hover {
   background: rgba(200, 169, 110, 0.07);

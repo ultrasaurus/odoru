@@ -352,8 +352,7 @@ export function mount(onReader) {
             meta.appendChild(countEl);
             body.appendChild(meta);
         }
-        const readyVoices = Object.entries(doc.voices)
-            .filter(([, v]) => !!v.duration);
+        const voiceEntries = Object.entries(doc.voices);
         if (doc.status === 'ready') {
             const pub = document.createElement('div');
             pub.className = 'queue-row-publish';
@@ -366,12 +365,20 @@ export function mount(onReader) {
             label.htmlFor = cb.id;
             label.className = 'queue-publish-label';
             label.textContent = 'Publish';
+            const statusIcon = {
+                ready: '✓',
+                in_progress: '⚙',
+                stale: '~',
+                error: '✕',
+            };
             const select = document.createElement('select');
             select.className = 'queue-voice-select';
-            for (const [vid, ve] of readyVoices) {
+            for (const [vid, ve] of voiceEntries) {
                 const opt = document.createElement('option');
                 opt.value = vid;
-                opt.textContent = voices.find(v => v.id === vid)?.name ?? vid;
+                const name = voices.find(v => v.id === vid)?.name ?? vid;
+                const icon = statusIcon[ve.status];
+                opt.textContent = icon ? `${name} ${icon}` : name;
                 opt.selected = !!ve.published;
                 select.appendChild(opt);
             }
@@ -383,14 +390,18 @@ export function mount(onReader) {
                 });
             };
             cb.addEventListener('change', patch);
-            if (readyVoices.length > 0)
-                select.addEventListener('change', patch);
+            if (voiceEntries.length > 0)
+                select.addEventListener('change', () => {
+                    patch();
+                    if (doc.id === currentDocId)
+                        selectVoice(select.value, true);
+                });
             const editBtn = document.createElement('button');
             editBtn.className = 'queue-edit-btn';
             editBtn.title = 'Edit metadata';
             editBtn.textContent = '✎';
             pub.append(cb, label);
-            if (readyVoices.length > 0)
+            if (voiceEntries.length > 0)
                 pub.appendChild(select);
             pub.append(editBtn, deleteBtn);
             if (extraJobs.length > 0) {
@@ -830,6 +841,7 @@ export function mount(onReader) {
             return;
         }
         voiceList.innerHTML = '';
+        const docVoices = fetchedDocument?.current?.voices ?? {};
         let lastBackend = '';
         for (const v of voices) {
             if (v.backend !== lastBackend) {
@@ -841,18 +853,39 @@ export function mount(onReader) {
             }
             const row = document.createElement('button');
             row.className = 'voice-row' + (v.id === selectedVoice ? ' selected' : '');
-            row.textContent = v.name;
-            row.addEventListener('click', () => selectVoice(v.id));
+            row.addEventListener('click', () => selectVoice(v.id, true));
+            const nameEl = document.createElement('span');
+            nameEl.className = 'voice-row-name';
+            nameEl.textContent = v.name;
+            row.appendChild(nameEl);
+            const status = docVoices[v.id]?.status;
+            if (status) {
+                const statusEl = document.createElement('span');
+                statusEl.className = `voice-row-status ${status}`;
+                statusEl.textContent = {
+                    ready: '✓',
+                    in_progress: '⚙',
+                    stale: '~',
+                    error: '✕',
+                }[status] ?? status;
+                row.appendChild(statusEl);
+            }
             voiceList.appendChild(row);
         }
     }
-    function selectVoice(id) {
+    function selectVoice(id, restartPlayer = false) {
         selectedVoice = id;
         const v = voices.find(v => v.id === id);
         voiceDescription.textContent = v?.description ?? '';
         voiceLabel.textContent = v ? `Voice: ${v.name}` : '';
         headerVoiceLabel.textContent = v ? `Voice: ${v.name}` : '';
         renderVoices();
+        if (restartPlayer && fetchedDocument?.current?.plain_text && currentDocId) {
+            player.stop();
+            player.setPendingSpans(currentPendingSpans);
+            synthStart = Date.now();
+            player.synthesize(fetchedDocument.current.plain_text, id, currentPendingSpans, currentDocId);
+        }
     }
     async function loadVoices() {
         try {
@@ -931,6 +964,7 @@ export function mount(onReader) {
             fetchedDocument = doc;
             currentDocId = state.id;
             showDocId(currentDocId);
+            renderVoices();
             docTitleInput.value = state.title ?? '';
             docSourceUrlInput.value = state.source_url ?? url;
             textInput.value = state.content ?? '';
@@ -1147,6 +1181,11 @@ export function mount(onReader) {
             }
             currentDocId = data.id;
             showDocId(currentDocId);
+            const publishedVoice = Object.entries(data.voices).find(([, v]) => v.published)?.[0];
+            if (publishedVoice)
+                selectVoice(publishedVoice);
+            else
+                renderVoices();
             textInput.value = data.content;
             docTitleInput.value = data.title ?? '';
             docSourceUrlInput.value = data.source_url ?? '';
