@@ -66,6 +66,10 @@ html, body {
 
 /* Header */
 .header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: var(--bg);
   padding: 1.5rem 2rem;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -73,12 +77,33 @@ html, body {
 }
 
 .logo {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
   font-family: var(--font-mono);
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--accent);
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.header-voice-label {
+  position: absolute;
+  right: calc(18px + 77px);
+  transform: translateX(50%);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+}
+
+.header-voice-label:hover {
+  background: rgba(200, 169, 110, 0.07);
 }
 
 /* Workspace — card + sidebar side by side */
@@ -103,13 +128,25 @@ html, body {
   min-width: 0;
 }
 
-/* Sidebar */
-.sidebar {
-  flex-shrink: 0;
-  width: 180px;
-  position: relative;
+/* Voice panel — slides in from the right edge */
+.voice-panel {
+  position: fixed;
+  top: 73px;
+  right: 18px;
+  bottom: 0;
+  width: 154px;
+  padding: 1.5rem 1rem;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  transform: translateX(calc(100% + 18px));
+  transition: transform 0.2s ease;
+  z-index: 50;
 }
 
+.voice-panel.open {
+  transform: translateX(0);
+}
 
 .sidebar-section {
   display: flex;
@@ -856,6 +893,7 @@ html, body {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text);
+  cursor: pointer;
 }
 
 .synth-progress {
@@ -944,8 +982,8 @@ html, body {
 
 .download-btn {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 18px;
+  height: 18px;
   border-radius: 8px;
   border: 1.5px solid var(--border);
   background: transparent;

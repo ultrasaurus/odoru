@@ -26,8 +26,9 @@ export function mount(onReader) {
         <button id="error-bar-retry" class="error-bar-retry">Retry</button>
       </div>
       <header class="header">
-        <a class="back-link" id="back-link">← Documents</a>
+        <a class="back-link" id="back-link">← Publish Preview</a>
         <div class="logo">▶ odoru</div>
+        <button id="header-voice-label" class="header-voice-label"></button>
       </header>
 
       <main class="main">
@@ -109,17 +110,18 @@ export function mount(onReader) {
           <div id="doc-id-display" class="doc-id-display" style="display:none"></div>
           </div><!-- end card-column -->
 
-          <aside class="sidebar">
-            <div class="sidebar-section">
-              <div class="sidebar-label">Voice</div>
-              <div id="voice-list" class="voice-list">
-                <div class="voice-loading">Loading voices…</div>
-              </div>
-              <div id="voice-description" class="voice-description"></div>
-            </div>
-          </aside>
         </div>
       </main>
+
+      <aside id="voice-panel" class="voice-panel">
+        <div class="sidebar-section">
+          <div class="sidebar-label">Voice</div>
+          <div id="voice-list" class="voice-list">
+            <div class="voice-loading">Loading voices…</div>
+          </div>
+          <div id="voice-description" class="voice-description"></div>
+        </div>
+      </aside>
     </div>
   `;
     document.getElementById('back-link').addEventListener('click', onReader);
@@ -479,8 +481,15 @@ export function mount(onReader) {
     const voiceLabel = document.getElementById('voice-label');
     const urlInput = document.getElementById('url-input');
     const fetchStatus = document.getElementById('fetch-status');
+    const headerVoiceLabel = document.getElementById('header-voice-label');
+    const voicePanel = document.getElementById('voice-panel');
     const voiceList = document.getElementById('voice-list');
     const voiceDescription = document.getElementById('voice-description');
+    function toggleVoicePanel() {
+        voicePanel.classList.toggle('open');
+    }
+    headerVoiceLabel.addEventListener('click', toggleVoicePanel);
+    voiceLabel.addEventListener('click', toggleVoicePanel);
     const editOutlineSection = document.getElementById('edit-outline-section');
     const editOutlineList = document.getElementById('edit-outline-list');
     const docIdDisplay = document.getElementById('doc-id-display');
@@ -736,6 +745,7 @@ export function mount(onReader) {
         const v = voices.find(v => v.id === id);
         voiceDescription.textContent = v?.description ?? '';
         voiceLabel.textContent = v ? `Voice: ${v.name}` : '';
+        headerVoiceLabel.textContent = v ? `Voice: ${v.name}` : '';
         renderVoices();
     }
     async function loadVoices() {

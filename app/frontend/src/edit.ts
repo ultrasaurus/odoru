@@ -33,8 +33,9 @@ export function mount(onReader: () => void): () => void {
         <button id="error-bar-retry" class="error-bar-retry">Retry</button>
       </div>
       <header class="header">
-        <a class="back-link" id="back-link">← Documents</a>
+        <a class="back-link" id="back-link">← Publish Preview</a>
         <div class="logo">▶ odoru</div>
+        <button id="header-voice-label" class="header-voice-label"></button>
       </header>
 
       <main class="main">
@@ -116,17 +117,18 @@ export function mount(onReader: () => void): () => void {
           <div id="doc-id-display" class="doc-id-display" style="display:none"></div>
           </div><!-- end card-column -->
 
-          <aside class="sidebar">
-            <div class="sidebar-section">
-              <div class="sidebar-label">Voice</div>
-              <div id="voice-list" class="voice-list">
-                <div class="voice-loading">Loading voices…</div>
-              </div>
-              <div id="voice-description" class="voice-description"></div>
-            </div>
-          </aside>
         </div>
       </main>
+
+      <aside id="voice-panel" class="voice-panel">
+        <div class="sidebar-section">
+          <div class="sidebar-label">Voice</div>
+          <div id="voice-list" class="voice-list">
+            <div class="voice-loading">Loading voices…</div>
+          </div>
+          <div id="voice-description" class="voice-description"></div>
+        </div>
+      </aside>
     </div>
   `
 
@@ -533,8 +535,16 @@ export function mount(onReader: () => void): () => void {
   const voiceLabel     = document.getElementById('voice-label')      as HTMLDivElement
   const urlInput       = document.getElementById('url-input')        as HTMLInputElement
   const fetchStatus    = document.getElementById('fetch-status')     as HTMLDivElement
+  const headerVoiceLabel   = document.getElementById('header-voice-label')  as HTMLButtonElement
+  const voicePanel         = document.getElementById('voice-panel')        as HTMLDivElement
   const voiceList          = document.getElementById('voice-list')          as HTMLDivElement
   const voiceDescription   = document.getElementById('voice-description')   as HTMLDivElement
+
+  function toggleVoicePanel() {
+    voicePanel.classList.toggle('open')
+  }
+  headerVoiceLabel.addEventListener('click', toggleVoicePanel)
+  voiceLabel.addEventListener('click', toggleVoicePanel)
   const editOutlineSection = document.getElementById('edit-outline-section')!
   const editOutlineList    = document.getElementById('edit-outline-list')!
   const docIdDisplay       = document.getElementById('doc-id-display')!
@@ -799,6 +809,7 @@ export function mount(onReader: () => void): () => void {
     const v = voices.find(v => v.id === id)
     voiceDescription.textContent = v?.description ?? ''
     voiceLabel.textContent = v ? `Voice: ${v.name}` : ''
+    headerVoiceLabel.textContent = v ? `Voice: ${v.name}` : ''
     renderVoices()
   }
 
