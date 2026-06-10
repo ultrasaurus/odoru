@@ -163,7 +163,7 @@ html, body {
 
 .panel-resizer {
   flex-shrink: 0;
-  width: 1.5rem;
+  width: 3px;
   align-self: stretch;
   cursor: col-resize;
   position: relative;
@@ -175,7 +175,7 @@ html, body {
   left: 50%;
   top: 0;
   bottom: 0;
-  width: 1px;
+  width: 3px;
   background: var(--border);
   transform: translateX(-50%);
 }
@@ -295,7 +295,7 @@ html, body {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 3rem 1.5rem;
+  padding: 0;
 }
 
 .card {
