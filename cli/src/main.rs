@@ -18,7 +18,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Fetch a URL or local file (.txt, .html) as markdown or plain text
+    /// Fetch a URL or local file (.txt, .html) as markdown or plain text,
+    /// optionally synthesizing audio (--audio, --backend, --voice, -o)
     Fetch(FetchArgs),
     /// Export published documents as a standalone static SPA
     Spa(SpaArgs),
@@ -183,9 +184,10 @@ fn build_backend(backend: AudioBackend, voice: Option<&str>) -> anyhow::Result<(
 
 /// Load article content from a local file or URL.
 ///
-/// Local files: `.txt` (read directly) or `.html` (extract via trafilatura).
-/// Any other extension is an error. If the input is not an existing file path,
-/// it is treated as a URL.
+/// Local files: `.txt` (read directly), `.md` (read directly, plain text
+/// derived via `tts::markdown::to_plain_text`), or `.html` (extract via
+/// trafilatura). Any other extension is an error. If the input is not an
+/// existing file path, it is treated as a URL.
 fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Option<String>)> {
     let path = Path::new(input);
     if path.exists() {
@@ -210,6 +212,24 @@ fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Opt
                 };
                 Ok((article, Some(stem)))
             }
+            "md" => {
+                let content = std::fs::read_to_string(path)?;
+                let plain_text = tts::markdown::to_plain_text(&content);
+                let stem = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("output")
+                    .to_string();
+                let article = ParsedArticle {
+                    url: input.to_string(),
+                    title: None,
+                    authors: vec![],
+                    date: None,
+                    description: None,
+                    content,
+                    plain_text,
+                };
+                Ok((article, Some(stem)))
+            }
             "html" => {
                 let html = std::fs::read_to_string(path)?;
                 let article = dl::extract(&html, input)
@@ -217,7 +237,7 @@ fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Opt
                 Ok((article, None))
             }
             other => anyhow::bail!(
-                "Unsupported file extension '.{other}'. Only .txt and .html are supported."
+                "Unsupported file extension '.{other}'. Only .txt, .md, and .html are supported."
             ),
         }
     } else if input.starts_with("http://") || input.starts_with("https://") {
