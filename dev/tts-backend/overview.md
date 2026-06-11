@@ -17,6 +17,17 @@
 - Each voice dir: `voice.md` (YAML frontmatter: transcript, speed, cfg_strength) + `ref.wav`
 - `tts_overrides.txt`: word→pronunciation map, applied before synthesis
 
+### F5 Reference voice clips
+
+F5-TTS official guidance: reference audio should be **under 12 seconds**, with
+about 1s of trailing silence (`Use reference audio <12s and leave proper
+silence space (e.g. 1s) at the end.`).
+
+- Aim for roughly 8-12s of clean speech, single speaker, no background noise.
+- Leave ~1s of silence at the end of the clip — don't trim it tight.
+- Longer clips don't reliably improve voice match and can hurt
+  generation/truncation behavior.
+
 ## Mock
 - Sine wave, instant, no model weights needed, for testing
 
