@@ -1407,31 +1407,6 @@ async fn handle_synth(
 // Backend construction
 // ---------------------------------------------------------------------------
 
-/// Scan `<model_dir>/voices/` for `.bin` files and return sorted voice names.
-/// Falls back to ["am_puck"] if the directory can't be read.
-fn kokoro_voice_names(model_dir: &std::path::Path) -> Vec<String> {
-    let voices_dir = model_dir.join("voices");
-    let Ok(entries) = std::fs::read_dir(&voices_dir) else {
-        warn!("Could not read voices dir: {}", voices_dir.display());
-        return vec!["am_puck".into()];
-    };
-
-    let mut names: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let path = e.path();
-            if path.extension()?.to_str()? == "bin" {
-                Some(path.file_stem()?.to_str()?.to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    names.sort();
-    if names.is_empty() { vec!["am_puck".into()] } else { names }
-}
-
 fn build_f5() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
     let voices_dir = voice_util::voices_dir()
         .map_err(|e| anyhow::anyhow!("Cannot find voices directory: {e}"))?;
@@ -1475,7 +1450,7 @@ fn build_kokoro() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
             std::path::PathBuf::from(home).join(".kokoro")
         });
 
-    let names = kokoro_voice_names(&model_dir);
+    let names = tts::kokoro::voice_names(&model_dir);
     let voice_infos: Vec<VoiceInfo> = names.iter().map(|n| VoiceInfo {
         id: format!("kokoro:{n}"),
         name: n.clone(),
@@ -1483,7 +1458,11 @@ fn build_kokoro() -> anyhow::Result<(TtsEngine, Vec<VoiceInfo>)> {
         description: String::new(),
     }).collect();
 
-    let default_voice = names.first().cloned().unwrap_or_else(|| "am_puck".into());
+    let default_voice = if names.iter().any(|n| n == "af_heart") {
+        "af_heart".to_string()
+    } else {
+        names.first().cloned().unwrap_or_else(|| "af_heart".into())
+    };
 
     info!("Kokoro backend: {} voice(s) in {}", voice_infos.len(), model_dir.display());
     for v in &voice_infos { info!("  - {}", v.id); }

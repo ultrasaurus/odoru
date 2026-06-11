@@ -17,6 +17,31 @@ use crate::g2p::G2pEngine;
 // KokoroBackend
 // ---------------------------------------------------------------------------
 
+/// Scan `<model_dir>/voices/` for `.bin` files and return sorted voice names.
+/// Falls back to `["af_heart"]` if the directory can't be read or is empty.
+pub fn voice_names(model_dir: &Path) -> Vec<String> {
+    let voices_dir = model_dir.join("voices");
+    let Ok(entries) = std::fs::read_dir(&voices_dir) else {
+        warn!("Could not read voices dir: {}", voices_dir.display());
+        return vec!["af_heart".into()];
+    };
+
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension()?.to_str()? == "bin" {
+                Some(path.file_stem()?.to_str()?.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    names.sort();
+    if names.is_empty() { vec!["af_heart".into()] } else { names }
+}
+
 pub struct KokoroBackend {
     inference: Mutex<KokoroInference>,
 }

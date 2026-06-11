@@ -41,12 +41,12 @@ struct FetchArgs {
     #[arg(long)]
     no_cache: bool,
 
-    /// Also synthesize audio to an MP3 file
+    /// Also synthesize audio and write it to an MP3 file (see --output, --backend, --voice)
     #[arg(long)]
     audio: bool,
 
-    /// Output path for the MP3 file, or directory to write into.
-    /// Defaults to out/<name>.mp3 in the current directory.
+    /// Output path for the MP3 file, or directory to write into. Only used
+    /// with --audio. Defaults to out/<name>.mp3 in the current directory.
     #[arg(short, long, value_name = "PATH")]
     output: Option<String>,
 
@@ -54,8 +54,12 @@ struct FetchArgs {
     #[arg(long, value_enum, default_value_t = AudioBackend::Kokoro)]
     backend: AudioBackend,
 
-    /// Voice name for F5 backend (e.g. "sarah"). Lists available voices if
-    /// combined with --backend f5. Errors if used with other backends.
+    /// Voice name to use when --audio is set. For --backend kokoro, this is
+    /// a Kokoro preset name (e.g. "af_heart") found in $KOKORO_MODEL_DIR/voices/
+    /// (default: af_heart, or the first available voice). For --backend f5,
+    /// this is a name from the local voices/ directory (default: first
+    /// alphabetically). Errors if the named voice isn't found, listing the
+    /// voices that are available. Not supported with --backend mock.
     #[arg(long)]
     voice: Option<String>,
 }
@@ -74,9 +78,10 @@ enum Format {
 
 #[derive(ValueEnum, Clone)]
 enum AudioBackend {
-    /// Kokoro ONNX (default). Requires $KOKORO_MODEL_DIR.
+    /// Kokoro ONNX (default). Loads voices from $KOKORO_MODEL_DIR/voices/
+    /// (default: ~/.kokoro/voices/).
     Kokoro,
-    /// F5-TTS MLX. Requires $F5_VOICE_REF and $F5_REF_TEXT.
+    /// F5-TTS MLX. Loads voice definitions from the local voices/ directory.
     F5,
     /// Sine-wave mock (testing only, no model weights needed).
     Mock,
@@ -108,16 +113,33 @@ fn audio_progress(total: usize) -> ProgressBar {
 fn build_backend(backend: AudioBackend, voice: Option<&str>) -> anyhow::Result<(Backend, String)> {
     match backend {
         AudioBackend::Kokoro => {
-            if voice.is_some() {
-                anyhow::bail!("--voice is only supported with --backend f5");
-            }
             let model_dir = std::env::var("KOKORO_MODEL_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| {
                     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                     std::path::PathBuf::from(home).join(".kokoro")
                 });
-            Ok((Backend::Kokoro { model_dir, voice: "am_puck".into(), all_voices: vec![], speed: 1.0 }, "am_puck".into()))
+            let names = tts::kokoro::voice_names(&model_dir);
+            let chosen = match voice {
+                Some(name) => {
+                    if !names.iter().any(|n| n == name) {
+                        anyhow::bail!(
+                            "Voice '{}' not found. Available: {}",
+                            name,
+                            names.join(", ")
+                        );
+                    }
+                    name.to_string()
+                }
+                None => {
+                    if names.iter().any(|n| n == "af_heart") {
+                        "af_heart".to_string()
+                    } else {
+                        names.first().cloned().unwrap_or_else(|| "af_heart".into())
+                    }
+                }
+            };
+            Ok((Backend::Kokoro { model_dir, voice: chosen.clone(), all_voices: names, speed: 1.0 }, chosen))
         }
         AudioBackend::F5 => {
             let voices_dir = util::voice::voices_dir()
@@ -912,21 +934,39 @@ mod tests {
         std::env::set_var("KOKORO_MODEL_DIR", "/tmp/kokoro-test");
         let (backend, voice_name) = build_backend(AudioBackend::Kokoro, None).unwrap();
         std::env::remove_var("KOKORO_MODEL_DIR");
-        assert_eq!(voice_name, "am_puck");
+        assert_eq!(voice_name, "af_heart");
         match backend {
             tts::Backend::Kokoro { model_dir, voice, .. } => {
                 assert_eq!(model_dir, std::path::PathBuf::from("/tmp/kokoro-test"));
-                assert_eq!(voice, "am_puck");
+                assert_eq!(voice, "af_heart");
             }
             _ => panic!("expected Kokoro backend"),
         }
     }
 
     #[test]
-    fn build_backend_kokoro_rejects_voice_flag() {
-        let result = build_backend(AudioBackend::Kokoro, Some("sarah"));
+    fn build_backend_kokoro_unknown_voice_errors() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("KOKORO_MODEL_DIR", "/tmp/kokoro-test");
+        let result = build_backend(AudioBackend::Kokoro, Some("nobody"));
+        std::env::remove_var("KOKORO_MODEL_DIR");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("--voice"));
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("nobody"));
+        assert!(msg.contains("Available"));
+    }
+
+    #[test]
+    fn build_backend_kokoro_selects_named_voice() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("KOKORO_MODEL_DIR", "/tmp/kokoro-test");
+        let (backend, voice_name) = build_backend(AudioBackend::Kokoro, Some("af_heart")).unwrap();
+        std::env::remove_var("KOKORO_MODEL_DIR");
+        assert_eq!(voice_name, "af_heart");
+        match backend {
+            tts::Backend::Kokoro { voice, .. } => assert_eq!(voice, "af_heart"),
+            _ => panic!("expected Kokoro backend"),
+        }
     }
 
     #[test]
