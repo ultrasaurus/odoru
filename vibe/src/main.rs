@@ -51,6 +51,8 @@ enum Command {
         #[arg(long)]
         gpu_type_id: Option<String>,
     },
+    /// Normalize text (calls tts::f5::normalizer::normalize)
+    Normalize { text: String },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
         wav_path: String,
@@ -131,6 +133,9 @@ async fn main() -> Result<()> {
             let pod = client.create_pod(&template_id, compute_type, network_volume_id.as_deref(), &name, gpu_type_id.as_deref()).await?;
             let pod_id = pod.get("id").and_then(|v| v.as_str()).context("created pod missing id")?;
             println!("Created pod: {pod_id}");
+        }
+        Command::Normalize { text } => {
+            println!("{}", tts::f5::normalizer::normalize(&text));
         }
         Command::Silencedetect {
             wav_path,
