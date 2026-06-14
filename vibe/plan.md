@@ -37,6 +37,17 @@
    (e.g. `dev/runpod.md`) pointing at this CLI, so it's discoverable
    alongside the existing curl-based workflows.
 
+## Future
+- `start-pod` can fail with "not enough free GPUs on the host
+  machine" (hit during testing). Per `pod-lifecycle/dev/runpod.md`,
+  the fix is terminate + recreate from template:
+  - `delete-pod <pod_id>` (DELETE `/pods/{id}`)
+  - `create-pod-from-template <template_id>` (POST `/pods` with
+    templateId)
+  - Then update any stored pod ID references (e.g.
+    `RUNPOD_POD_ID` secret in pilot-worker, like `dev/new-pod.sh`
+    does).
+
 ## Related
 - [dev/normalize-future.md](../dev/normalize-future.md) — normalizer
   test cases found while listening and comparing `vibe/odoru_markers_normalized.txt` output to `data/markers.txt`.
