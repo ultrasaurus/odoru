@@ -1,0 +1,23 @@
+Markers
+
+As one "holds a place" in a book by leaving a temporary place marker in it, an author can place "markers" at arbitrary locations within an AUGMENT file. When placing a marker, he attaches it to a specific character in the text and gives it a name or label. Marker names are local to each file. Simple commands provide for displaying where one's markers are located and what their names are, for deleting or moving a marker, or for installing a new one.
+
+A marker name may be included in an address expression, to provide another way of designating an address. A marker name can designate not only a particular statement, but a specific character within that statement. For example, "Copy Word #x (to follow word) <Select>" would designate that a word located somewhere in the file and marked with an "x" is to be copied to follow the cursor-selected word. There are many unique ways in which markers may be employed by an author who has integrated their artful use into her working methodology.
+
+As a comparative example of some of the foregoing addressing forms, consider a statement whose SID is "069", whose statement number is "3b5", that has statement-name delimiters designated for it as "NULL" and ":", that starts with the text "Capacity: For every ...", and that has a marker named "x" positioned on one of its characters. A command to move this statement could optionally be expressed as:
+
+"Move Statement <Select> ...",
+
+"Move Statement 3b5 ...",
+
+"Move Statement 069 ...",
+
+"Move Statement Capacity ...", or
+
+"Move Statement #x ...".
+
+Relative-Address Extensions
+
+A sequence of characters may be appended to the address of a given statement to specify an address of a position "relative" to that statement. A major class of these designations deals with relative structural location, such as: Up a level, Down a level, Successor at same level, Predecessor at same level, Head at this level, Tail at this level, and End statement at last and lowest position in this branch. A period (".") in the address string indicates that relative addressing is beginning, and each of these relative-location designators is indicated with a directly mnemonic, one-letter designation.
+
+For example, "Move Statement 0609 (to follow statement) 4b.dt" would move Statement 0609 to follow the tail statement of the substructure one level down from Statement 4b -- or, to conceptualize the associated address-location pathway, "go to 4b, then Down a level and to the Tail".
