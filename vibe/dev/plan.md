@@ -5,26 +5,33 @@
   without triggering a migraine .
 
 Steps
-1. Section A issues from [dev/normalize-future.md](../dev/normalize-future.md):
-   1. Acronym spelling (A1): review existing test coverage for the
+1. [x] Section A issues from [dev/normalize-future.md](../dev/normalize-future.md):
+   1. [x] Acronym spelling (A1): review existing test coverage for the
       3-letter-acronym rule; add cases for an acronym that should be
       pronounced as a word, and confirm the override map can force
       that behavior over the default spell-out.
-   2. Em dash (A2): change `--` handling from "becomes spaces" to
-      "becomes a comma" (pause cue), with a unit test.
-   3. Ref/code patterns (A3): Sarah to draft test cases from
-      `authorship.txt` (may span sections beyond Markers); design and
-      implement once cases are in hand.
-2. Listen test: create audio wav files for sections of
+   2. [x] Em dash (A2): change `--` handling from "becomes spaces" to
+      "becomes a comma" (pause cue), with a unit test. (Reverted back
+      to spaces after listen-test — see normalize-future.md section D.)
+   3. [x] Ref/code patterns (A3): bracket-stripping + punctuated-override
+      fixes, confirmed passing in normalize-future.md sections E/F.
+2. [x] Listen test: create audio wav files for sections of
    `data/authorship.txt`:
-    * Markers
-    * Traveling Through the Working Files
-    * Supporting Multi-Party Collaboration
-3. Write new test sentences that form a reasonably realistic prose
+    * [x] Markers
+    * [x] Traveling Through the Working Files (`augment_traveling`)
+    * [x] Supporting Multi-Party Collaboration (`augment_multiparty`)
+3. [x] Write new test sentences that form a reasonably realistic prose
    paragraph covering Section B in
    [dev/normalize-future.md](../dev/normalize-future.md), create
    audio, listen test.
-4. Create audio file for all of `data/authorship.txt` by dividing
+4. [ ] `augment_multiparty` (and likely other multi-paragraph files)
+   speed up noticeably toward the end at cfg=2.0 — before tackling
+   full-file stitching, chunk `augment_multiparty.txt` into its
+   individual paragraphs, generate audio per paragraph, and listen to
+   see whether each paragraph alone stays at normal speed (i.e.
+   confirm the speed-up is a function of cumulative generation length,
+   not the content itself).
+5. [ ] Create audio file for all of `data/authorship.txt` by dividing
    into text segments (~300 words at paragraph division) then
    stitching audio pieces together.
    (Needs design when we get there — how segments are split/joined,
