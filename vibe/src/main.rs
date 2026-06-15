@@ -61,6 +61,52 @@ enum Command {
         #[arg(long, default_value_t = 0.5)]
         duration: f64,
     },
+    /// Run the full listen-test loop: normalize data/<name>.txt, upload,
+    /// run VibeVoice inference on the pod, wait for completion, and
+    /// download the resulting wav to data/<name>_generated.wav.
+    ListenTest {
+        /// Stem of vibe/data/<name>.txt (no extension)
+        name: String,
+        pod_id: String,
+        #[arg(long, default_value = "Sarah")]
+        speaker: String,
+        #[arg(long, default_value_t = 2.0)]
+        cfg_scale: f64,
+        /// Seconds between checks of the inference log
+        #[arg(long, default_value_t = 30)]
+        poll_secs: u64,
+        /// Give up waiting for inference after this many minutes
+        #[arg(long, default_value_t = 60)]
+        timeout_mins: u64,
+    },
+}
+
+/// Run a command, streaming its output, and bail if it fails.
+fn run(argv: &[String]) -> Result<()> {
+    println!("running: {}", argv.join(" "));
+    let status = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("command failed: {status}");
+    }
+    Ok(())
+}
+
+/// Run a command and return its captured stdout (trimmed), bailing on
+/// non-zero exit.
+fn run_output(argv: &[String]) -> Result<String> {
+    let output = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .output()?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "command failed: {}\nstderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 #[tokio::main]
@@ -136,6 +182,90 @@ async fn main() -> Result<()> {
         }
         Command::Normalize { text } => {
             println!("{}", tts::f5::normalizer::normalize(&text));
+        }
+        Command::ListenTest {
+            name,
+            pod_id,
+            speaker,
+            cfg_scale,
+            poll_secs,
+            timeout_mins,
+        } => {
+            let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let input_path = format!("{data_dir}/{name}.txt");
+            let normalized_path = format!("{data_dir}/{name}_normalized.txt");
+            let wav_path = format!("{data_dir}/{name}_generated.wav");
+
+            println!("normalizing {input_path}");
+            let input = std::fs::read_to_string(&input_path)
+                .with_context(|| format!("reading {input_path}"))?;
+            let normalized: String = input
+                .lines()
+                .map(|line| tts::f5::normalizer::normalize(line))
+                .collect::<Vec<_>>()
+                .join("\n");
+            std::fs::write(&normalized_path, normalized + "\n")
+                .with_context(|| format!("writing {normalized_path}"))?;
+
+            let pod = client.get_pod(&pod_id).await?;
+
+            let remote_txt = format!("/workspace/VibeVoice/demo/{name}_normalized.txt");
+            run(&runpod::scp_upload_command(&pod_id, &pod, &normalized_path, &remote_txt)?)?;
+
+            println!("ensuring vibevoice installed (system python)");
+            // Note: a venv under /workspace doesn't work — `python3 -m venv`
+            // produces broken bin/ symlinks on the network filesystem.
+            // `torch` has no version constraint in vibevoice's
+            // pyproject.toml, so `pip install -e .` won't touch the
+            // pod's existing CUDA-matched torch build.
+            let setup_cmd = "set -e; \
+                python3 -c 'import vibevoice' 2>/dev/null || pip install -e /workspace/VibeVoice";
+            run(&runpod::ssh_exec_command(&pod_id, &pod, setup_cmd)?)?;
+
+            let output_dir = format!("/workspace/output_{name}");
+            let log_path = format!("/workspace/output_{name}.log");
+            println!("starting inference (cfg_scale={cfg_scale}, speaker={speaker})");
+            let start_cmd = format!(
+                "cd /workspace/VibeVoice && \
+                 rm -f {log_path} && \
+                 nohup python3 demo/inference_from_file.py \
+                   --model_path vibevoice/VibeVoice-1.5B \
+                   --txt_path demo/{name}_normalized.txt \
+                   --speaker_names {speaker} \
+                   --cfg_scale {cfg_scale} \
+                   --output_dir {output_dir} > {log_path} 2>&1 < /dev/null & disown"
+            );
+            run(&runpod::ssh_exec_command(&pod_id, &pod, &start_cmd)?)?;
+
+            println!("polling {log_path} every {poll_secs}s (timeout {timeout_mins}m)");
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_mins * 60);
+            loop {
+                if tokio::time::Instant::now() >= deadline {
+                    anyhow::bail!("timed out waiting for inference after {timeout_mins} minutes");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(poll_secs)).await;
+                let check_cmd = format!(
+                    "test -f {log_path} && (grep -q 'RTF (Real' {log_path} && echo DONE || (grep -iq 'Traceback' {log_path} && echo ERROR || echo RUNNING)) || echo MISSING"
+                );
+                let status = run_output(&runpod::ssh_exec_command(&pod_id, &pod, &check_cmd)?)?;
+                println!("status: {status}");
+                match status.as_str() {
+                    "DONE" => break,
+                    "ERROR" => {
+                        let tail_cmd = format!("tail -n 40 {log_path}");
+                        let tail = run_output(&runpod::ssh_exec_command(&pod_id, &pod, &tail_cmd)?)?;
+                        anyhow::bail!("inference failed:\n{tail}");
+                    }
+                    "MISSING" => anyhow::bail!("{log_path} not found on pod"),
+                    _ => continue,
+                }
+            }
+
+            println!("downloading wav to {wav_path}");
+            let remote_wav = format!("{output_dir}/*.wav");
+            run(&runpod::scp_download_command(&pod_id, &pod, &remote_wav, &wav_path)?)?;
+
+            println!("done: {wav_path}");
         }
         Command::Silencedetect {
             wav_path,

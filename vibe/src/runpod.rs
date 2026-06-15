@@ -47,6 +47,45 @@ pub fn scp_download_command(pod_id: &str, pod: &Value, remote_path: &str, local_
     ])
 }
 
+/// Build the `scp` command to upload a file to a running pod.
+pub fn scp_upload_command(pod_id: &str, pod: &Value, local_path: &str, remote_path: &str) -> Result<Vec<String>> {
+    let (ip, port) = ssh_endpoint(pod_id, pod)?;
+    Ok(vec![
+        "scp".to_string(),
+        "-i".to_string(),
+        shellexpand_home("~/.ssh/runpod"),
+        "-P".to_string(),
+        port.to_string(),
+        "-o".to_string(),
+        "StrictHostKeyChecking=accept-new".to_string(),
+        local_path.to_string(),
+        format!("root@{ip}:{remote_path}"),
+    ])
+}
+
+/// Build an `ssh` command that runs `remote_cmd` via `bash -lc` on a
+/// running pod and returns (does not open an interactive shell).
+pub fn ssh_exec_command(pod_id: &str, pod: &Value, remote_cmd: &str) -> Result<Vec<String>> {
+    let (ip, port) = ssh_endpoint(pod_id, pod)?;
+    Ok(vec![
+        "ssh".to_string(),
+        "-i".to_string(),
+        shellexpand_home("~/.ssh/runpod"),
+        "-p".to_string(),
+        port.to_string(),
+        "-o".to_string(),
+        "StrictHostKeyChecking=accept-new".to_string(),
+        format!("root@{ip}"),
+        "--".to_string(),
+        format!("bash -lc {}", shell_quote(remote_cmd)),
+    ])
+}
+
+/// Single-quote a string for a POSIX shell, escaping embedded `'`.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 fn shellexpand_home(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Ok(home) = std::env::var("HOME") {

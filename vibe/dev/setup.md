@@ -21,6 +21,11 @@
   free GPUs on the host machine" — workaround is terminate and
   recreate from the template (`pqszh5ec2m`). Cost was ~$2/hr while
   running; terminate when not in use.
+- A stopped pod with a network volume attached often can't be
+  restarted ("not enough free GPUs" even when GPUs are free) —
+  terminate the stopped pod and create a new one instead of trying
+  to restart it. `/workspace` (on the network volume) persists across
+  this terminate+recreate cycle.
 
 ## VibeVoice checkout (`vibe/vv/`)
 

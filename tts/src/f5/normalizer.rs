@@ -129,7 +129,8 @@ pub fn normalize(text: &str) -> String {
     // Pass 2b: expand comma-grouped numbers (2,000 -> "two thousand").
     let text = expand_comma_numbers(&text);
 
-    // Pass 3: apply punctuated overrides (those containing '.' or '-').
+    // Pass 3: handle punctuated overrides before token processing, so they
+    // can match across punctuation (e.g. `e.g.`).
     let text = apply_punctuated_overrides(&text, &*overrides);
 
     // Pass 4: tokenize and process word/alphanumeric tokens.
@@ -153,7 +154,9 @@ pub fn normalize(text: &str) -> String {
     }
     flush_token(&mut tok_buf, &mut out);
 
-    out
+    // Pass 6: strip bracket characters (keeping their contents) — VibeVoice
+    // hallucinates on tokens with `<>`/`()`/`[]` next to other punctuation.
+    out.chars().filter(|c| !matches!(c, '(' | ')' | '<' | '>' | '[' | ']')).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -294,12 +297,15 @@ fn expand_comma_numbers(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Pass 3: punctuated overrides
+// Pass 3: handle punctuated overrides before token processing, so they can
+// match across punctuation (e.g. `e.g.`).
 // ---------------------------------------------------------------------------
 
 fn apply_punctuated_overrides(text: &str, overrides: &HashMap<String, String>) -> String {
     let mut text = text.to_owned();
-    for (from, to) in overrides.iter().filter(|(k, _)| k.contains('.')) {
+    // A "punctuated" override key contains any character that pass 4's
+    // tokenizer would otherwise split on.
+    for (from, to) in overrides.iter().filter(|(k, _)| !k.chars().all(|c| c.is_alphanumeric() || c == '\'')) {
         let lower = text.to_lowercase();
         let mut result = String::with_capacity(text.len());
         let mut pos = 0;
@@ -594,6 +600,19 @@ mod tests {
     fn acronym_without_override_spells_out() {
         let overrides = HashMap::new();
         assert_eq!(process_token("SID", &overrides), "S I D");
+    }
+
+    #[test]
+    fn brackets_stripped() {
+        assert_eq!(normalize("<Ref-8>.) and (EEE,yy,cc)."), "Ref 8. and E E E,yy,cc.");
+    }
+
+    #[test]
+    fn colon_override_applied() {
+        // <4b:mi> is defined in tts_overrides.txt; the override key
+        // contains ':' not '.', which previously wasn't matched by
+        // apply_punctuated_overrides.
+        assert_eq!(normalize("\"<4b:mi>\""), "\"4 b colon M I\"");
     }
 
     #[test]

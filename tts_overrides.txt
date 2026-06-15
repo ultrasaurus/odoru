@@ -1,7 +1,6 @@
 arpanet	arpa net
 ave	Avenue
 blvd	Boulevard
-delete	deeleet
 dr	Doctor
 e.g.	for example
 etc	et cetera
@@ -10,7 +9,6 @@ http	HTTP
 https	HTTPS
 i.e.	that is
 json	jason
-move	moove
 mr	Mister
 mrs	Missus
 st	Saint
@@ -28,4 +26,8 @@ yaml	yamel
 # TODO: migrate to per-document overrides once that mechanism exists.
 <ref-1.l>	    Ref 1 point L
 <ref-1.l:i;ll>	Ref 1 point L colon I semi-colon L L
-<4b:mi>         4 b M I
+<4b:mi>         4 b colon M I
+zzz             zee zee zee
+move	        moove
+delete	        deeleet
+<OAD,2237,>     O A D comma 2 2 3 7 comma

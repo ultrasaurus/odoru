@@ -128,3 +128,61 @@ Notes:
   normalized) are ready but not yet run through VibeVoice — run once the
   above listen tests look good.
 
+## E. `augment_multiparty`/`augment_traveling` listen-test findings
+(2026-06-14, two runs: 7:30pm and 10pm, GPU pod `ypl1py60u8knen`)
+
+`augment_traveling`:
+- 7:30pm: `"<4b:mi>"` -> "cree-aw" / `"<Ref-1.l:i;LL>"` -> "Ref 1.L
+  view i filter LL" (latter is correct)
+- 10pm: `"<4b:mi>"` -> "day 4b m eye daya" (still wrong, different
+  hallucination each run — non-deterministic)
+
+`augment_multiparty` — overall **improvement** vs. the pre-`--`-revert
+run in section D (the "prawned"/"prawnnd" pattern after `--` is gone),
+but new/different hallucinations on bracket-heavy strings, and they
+differ between runs (non-deterministic):
+- `<Ref-8>.)` -> 7:30pm "Ref 8 prawnnd" / 10pm "Ref 8 d a breet"
+- `"<OAD,2237,>"` -> 7:30pm "Subtle A DDD, 2237" / 10pm "C O A D, 2237
+  day here"
+- `(EEE,yy,cc).` -> 7:30pm "EEE, yy, cero sake" / 10pm "EEE, yy, c sef"
+- `and "zzz"` -> 7:30pm "zizzle zee" / 10pm "zi zi zizzeh"
+- `Recorded Mail -- AUGMENT's Journal System` -> "Recorded Mail at
+  moinky Nob mc neer L'AUGMENT's Journal System" (7:30pm; not
+  reported for 10pm)
+
+**Conclusion**: hallucinations cluster on tokens with complex trailing
+punctuation — `<...>`, `(...)`, `[...]` combined with `.`, `,`, `)`
+right at the end. Done: strip `()`, `<>`, `[]` (the bracket characters
+themselves, keeping their contents) at the end of normalization, fixed
+`apply_punctuated_overrides` to also match keys containing `:` (so
+`<4b:mi>` -> `4 b colon M I` now applies), and added `zzz` to
+`tts_overrides.txt`.
+
+**Open**: other punctuation that may need similar treatment —
+`-` (already mostly handled, becomes space), `;`, and `/` (e.g. "1/2"
+as a fraction). Not yet known whether these cause hallucinations;
+revisit if found in future listen tests, likely via
+`apply_punctuated_overrides` or a dedicated fraction pass.
+
+## F. Re-test after bracket-stripping + colon-override fix
+(2026-06-14, pod `kdkms4m3d7opyt`, RTX A4000, GPU)
+
+- `augment_traveling` — **passes**. `<4b:mi>` -> "4 b colon M I" via
+  override, `<Ref-1.l:i;LL>` correct as before.
+- `augment_multiparty` — much closer, one remaining issue:
+  - `"<OAD,2237,>"` -> normalized to "OADD237" (digits/letters run
+    together, comma lost) -> still mispronounced. Added override
+    `<OAD,2237,>` -> `O A D comma 2 2 3 7 comma` to
+    `tts_overrides.txt`. This also surfaced another instance of the
+    `apply_punctuated_overrides` matching bug (section E/the `:` fix)
+    — the key contains `,` not `.`/`:`, so it was silently skipped.
+    Generalized the filter to match any override key with non-
+    alphanumeric chars; confirmed via `cargo run -- normalize` that
+    `"<OAD,2237,>".` -> `"O A D comma 2 2 3 7 comma".`. Not yet
+    re-tested with audio.
+  - `<Ref-8>.)` and `(EEE,yy,cc).` and `"zzz"` issues from section E
+    appear resolved (not re-reported).
+
+**Next**: re-run `augment_multiparty` with the new `<OAD,2237,>`
+override to confirm.
+

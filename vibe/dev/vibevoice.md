@@ -73,6 +73,18 @@ each — gitignored (large binary), live in `vibe/data/` locally.
   sounded fine in this voice (Section B in normalize-future.md,
   still wants broader test coverage).
 
+## Run log
+
+- 2026-06-15, pod `ypl1py60u8knen`: GPU NVIDIA RTX 4000 Ada (20GB) per
+  `nvidia-smi`, 16 vCPU, 62GB RAM, $0.26/hr. The first attempt (04:55
+  UTC) ran on CPU instead of GPU — a fresh venv's torch was reinstalled
+  as a cu130 build, incompatible with this pod's cu124 driver, so
+  `torch.cuda.is_available()` was False (~4.5s/it, projected ~70min).
+  Once fixed to use system python (torch already cu124, GPU available),
+  both files generated at GPU speed: `augment_multiparty` (98.67s
+  audio) in 89.76s, RTF 0.91x; `augment_traveling` (66.67s audio) in
+  59.27s, RTF 0.89x — both ~$0.26/hr, so a few cents each.
+
 ## Open questions / not yet evaluated
 
 - Generation speed (wall-clock per minute of audio) on the GPU pod —
