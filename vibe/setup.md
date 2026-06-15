@@ -37,7 +37,21 @@
   artifacts over longer full-file runs).
 - `vv/demo/voices/` has sample stock voice wavs (en-Alice_woman,
   en-Frank_man, etc.), but the runs so far use a custom reference
-  voice at `voices/sarah/ref.wav` instead.
+  voice instead — placed in that same directory and renamed to match
+  the stock `en-<Name>_<gender>.wav` pattern (`en-Sarah_woman.wav`),
+  since `inference_from_file.py` appears to expect that naming to pick
+  up a custom voice. Earlier notes referred to this file as
+  `voices/sarah/ref.wav`; confirm the actual path/name on `/workspace`
+  before the next run.
+
+## Open TODO: pip installs don't survive pod recreation
+
+`pip install -e /workspace/VibeVoice` installs into the container's
+site-packages, not `/workspace` (the network volume) — so every time the
+pod is recreated, `vibevoice` has to be reinstalled (~30s) before
+inference will run (`ModuleNotFoundError: No module named 'vibevoice'`).
+Consider creating a venv on `/workspace` or using `pip install
+--target=/workspace/...` so the install persists across recreates.
 
 ## Local tooling (`vibe/`)
 

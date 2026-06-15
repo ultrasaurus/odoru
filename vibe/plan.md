@@ -5,9 +5,16 @@
   without triggering a migraine .
 
 Steps
-1. Write failing unit tests for the Section A issues listed in
-   [dev/normalize-future.md](../dev/normalize-future.md), then fix
-   `normalize()` until they pass.
+1. Section A issues from [dev/normalize-future.md](../dev/normalize-future.md):
+   1. Acronym spelling (A1): review existing test coverage for the
+      3-letter-acronym rule; add cases for an acronym that should be
+      pronounced as a word, and confirm the override map can force
+      that behavior over the default spell-out.
+   2. Em dash (A2): change `--` handling from "becomes spaces" to
+      "becomes a comma" (pause cue), with a unit test.
+   3. Ref/code patterns (A3): Sarah to draft test cases from
+      `authorship.txt` (may span sections beyond Markers); design and
+      implement once cases are in hand.
 2. Listen test: create audio wav files for sections of
    `data/authorship.txt`:
     * Markers

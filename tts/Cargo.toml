@@ -48,6 +48,7 @@ roman = "0.2"
 
 # Markdown -> plain text conversion
 pulldown-cmark = "0.13"
+num2words = "1.2.0"
 
 [dev-dependencies]
 tempfile = "3"

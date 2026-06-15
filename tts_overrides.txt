@@ -21,3 +21,11 @@ tymnet	Time net
 tymshare	timeshare
 wysiwyg	wizzy wig
 yaml	yamel
+
+# Global overrides for authorship.txt's Ref-N.x citation links, which
+# aren't handled by the general <Tag-N> expansion (try_expand_tag requires
+# an all-digit suffix). See dev/normalize-future.md section A.
+# TODO: migrate to per-document overrides once that mechanism exists.
+<ref-1.l>	    Ref 1 point L
+<ref-1.l:i;ll>	Ref 1 point L colon I semi-colon L L
+<4b:mi>         4 b M I

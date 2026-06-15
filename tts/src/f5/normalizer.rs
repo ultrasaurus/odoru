@@ -126,6 +126,9 @@ pub fn normalize(text: &str) -> String {
     // Pass 2: expand year ranges (4-digit year, hyphen, 2+ digits).
     let text = expand_year_ranges(&text);
 
+    // Pass 2b: expand comma-grouped numbers (2,000 -> "two thousand").
+    let text = expand_comma_numbers(&text);
+
     // Pass 3: apply punctuated overrides (those containing '.' or '-').
     let text = apply_punctuated_overrides(&text, &*overrides);
 
@@ -246,6 +249,51 @@ fn expand_year_ranges(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Pass 2b: comma-grouped number expansion
+// ---------------------------------------------------------------------------
+
+/// Expand comma-grouped numbers like "2,000" or "100,000" into words
+/// ("two thousand", "one hundred thousand"). Requires each group after the
+/// first comma to have exactly 3 digits, and the whole number not to be
+/// adjacent to other digits/letters (so "Ref-1,000" style codes are left
+/// alone).
+fn expand_comma_numbers(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() && (i == 0 || !chars[i - 1].is_ascii_digit()) {
+            let start = i;
+            let mut j = i;
+            while j < chars.len() && chars[j].is_ascii_digit() { j += 1; }
+            let mut end = j;
+            while end < chars.len() && chars[end] == ','
+                && end + 3 < chars.len()
+                && chars[end + 1..end + 4].iter().all(|c| c.is_ascii_digit())
+                && (end + 4 == chars.len() || !chars[end + 4].is_ascii_digit())
+            {
+                end += 4;
+            }
+            if end > j {
+                let digits: String = chars[start..end].iter().filter(|c| **c != ',').collect();
+                if let Ok(n) = digits.parse::<u64>() {
+                    out.push_str(&number_to_words(n));
+                    i = end;
+                    continue;
+                }
+            }
+            for &c in &chars[start..j] { out.push(c); }
+            i = j;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Pass 3: punctuated overrides
 // ---------------------------------------------------------------------------
 
@@ -289,6 +337,12 @@ fn process_token(token: &str, overrides: &HashMap<String, String>) -> String {
         return process_alpha_token(token);
     }
 
+    // Leading-zero numbers ("0609", "069") are IDs, not magnitudes — read
+    // digit by digit so TTS doesn't garble the leading zero.
+    if has_digit && token.len() > 1 && token.starts_with('0') {
+        return token.chars().map(|c| c.to_string()).collect::<Vec<_>>().join(" ");
+    }
+
     token.to_owned()
 }
 
@@ -307,34 +361,20 @@ fn split_alphanumeric(token: &str) -> String {
     out
 }
 
-fn number_to_words(n: u32) -> String {
-    const ONES: &[&str] = &[
-        "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-        "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
-        "seventeen", "eighteen", "nineteen",
-    ];
-    const TENS: &[&str] = &["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-
-    let mut parts: Vec<String> = Vec::new();
-    let mut n = n;
-
-    if n >= 1000 {
-        parts.push(format!("{} thousand", ONES[(n / 1000) as usize]));
-        n %= 1000;
-    }
-    if n >= 100 {
-        parts.push(format!("{} hundred", ONES[(n / 100) as usize]));
-        n %= 100;
-    }
-    if n >= 20 {
-        let t = TENS[(n / 10) as usize];
-        let o = ONES[(n % 10) as usize];
-        parts.push(if o.is_empty() { t.to_string() } else { format!("{t} {o}") });
-    } else if n > 0 {
-        parts.push(ONES[n as usize].to_string());
-    }
-
-    parts.join(" ")
+/// Spell out a number in words, e.g. 1999 -> "one thousand nine hundred
+/// ninety nine". Drops num2words' hyphens ("ninety-nine") and "and"
+/// ("hundred and ninety-nine") to match this normalizer's plain
+/// space-separated style.
+fn number_to_words(n: u64) -> String {
+    let words = num2words::Num2Words::new(n)
+        .to_words()
+        .unwrap_or_else(|_| n.to_string());
+    words
+        .replace('-', " ")
+        .split(' ')
+        .filter(|w| *w != "and")
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn process_alpha_token(token: &str) -> String {
@@ -350,19 +390,15 @@ fn process_alpha_token(token: &str) -> String {
     let all_caps = stem.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_uppercase());
 
     // Roman numeral check: skip single chars (I, V, X etc. are too ambiguous).
-    // Lowercase Roman numerals are capped at 100 to avoid converting real words
-    // like "mix" (which is canonically MIX = 1009).
-    if alpha_count >= 2 {
-        let all_lower = stem.chars().all(|c| c.is_lowercase());
-        if all_caps || all_lower {
-            let candidate = if all_lower { stem.to_uppercase() } else { stem.to_string() };
-            let cap = if all_lower { Some(100) } else { None };
-            if let Some(n) = roman::from(&candidate) {
-                if cap.map_or(true, |limit| n <= limit) {
-                    let words = number_to_words(n as u32);
-                    return if suffix.is_empty() { words } else { format!("{words}{}", suffix.to_lowercase()) };
-                }
-            }
+    // Only all-caps stems are converted — lowercase Roman numerals ("xxx",
+    // "yy") are indistinguishable from lowercase placeholder strings (e.g.
+    // "(DDD,xxx,bb)" in authorship.txt), which are far more common in our
+    // target documents. Disambiguating "xiv" (= 14) from a placeholder would
+    // need per-document overrides; not implemented.
+    if alpha_count >= 2 && all_caps {
+        if let Some(n) = roman::from(stem) {
+            let words = number_to_words(n as u64);
+            return if suffix.is_empty() { words } else { format!("{words}{}", suffix.to_lowercase()) };
         }
     }
 
@@ -404,6 +440,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "lowercase Roman numerals disabled: indistinguishable from \
+                placeholder strings like 'xxx'/'yy' in authorship.txt; \
+                would need per-document overrides to do both correctly"]
     fn roman_lowercase_converted() {
         assert_eq!(process_alpha_token("ii"),    "two");
         assert_eq!(process_alpha_token("iii"),   "three");
@@ -414,9 +453,12 @@ mod tests {
     }
 
     #[test]
-    fn roman_lowercase_cap_at_100() {
-        // "mix" uppercases to MIX = 1009, which exceeds the lowercase cap — left as-is.
-        assert_eq!(process_alpha_token("mix"),   "mix");
+    fn lowercase_placeholder_strings_unchanged() {
+        // "xxx", "yy" etc. as Journal-item placeholders (authorship.txt) must
+        // not be read as Roman numerals.
+        assert_eq!(process_alpha_token("xxx"), "xxx");
+        assert_eq!(process_alpha_token("yy"),  "yy");
+        assert_eq!(process_alpha_token("mix"), "mix");
     }
 
     #[test]
@@ -444,12 +486,31 @@ mod tests {
 
     #[test]
     fn number_to_words_spot_checks() {
-        assert_eq!(number_to_words(1),    "one");
-        assert_eq!(number_to_words(14),   "fourteen");
-        assert_eq!(number_to_words(20),   "twenty");
-        assert_eq!(number_to_words(21),   "twenty one");
-        assert_eq!(number_to_words(100),  "one hundred");
-        assert_eq!(number_to_words(1999), "one thousand nine hundred ninety nine");
+        assert_eq!(number_to_words(1),      "one");
+        assert_eq!(number_to_words(14),     "fourteen");
+        assert_eq!(number_to_words(20),     "twenty");
+        assert_eq!(number_to_words(21),     "twenty one");
+        assert_eq!(number_to_words(100),    "one hundred");
+        assert_eq!(number_to_words(1999),   "one thousand nine hundred ninety nine");
+        assert_eq!(number_to_words(2000),   "two thousand");
+        assert_eq!(number_to_words(100000), "one hundred thousand");
+    }
+
+    #[test]
+    fn leading_zero_numbers_spelled_digit_by_digit() {
+        assert_eq!(process_token("0609", &HashMap::new()), "0 6 0 9");
+        assert_eq!(process_token("069",  &HashMap::new()), "0 6 9");
+        assert_eq!(process_token("012",  &HashMap::new()), "0 1 2");
+        // single "0" is not an "ID" — leave alone.
+        assert_eq!(process_token("0",    &HashMap::new()), "0");
+    }
+
+    #[test]
+    fn comma_grouped_numbers_expanded() {
+        assert_eq!(expand_comma_numbers("2,000 characters"), "two thousand characters");
+        assert_eq!(expand_comma_numbers("100,000 items"), "one hundred thousand items");
+        // not a thousands grouping (only 2 digits after comma) — left alone.
+        assert_eq!(expand_comma_numbers("(4b,12)"), "(4b,12)");
     }
 
     #[test]
@@ -519,5 +580,36 @@ mod tests {
     fn full_citation_sentence() {
         let input = "as reported in <Ref-3> and <Ref-4>";
         assert_eq!(normalize(input), "as reported in Ref 3 and Ref 4");
+    }
+
+    #[test]
+    fn em_dash_becomes_space() {
+        assert_eq!(
+            normalize("Statement 4b -- or, to conceptualize"),
+            "Statement 4 b    or, to conceptualize"
+        );
+    }
+
+    #[test]
+    fn acronym_without_override_spells_out() {
+        let overrides = HashMap::new();
+        assert_eq!(process_token("SID", &overrides), "S I D");
+    }
+
+    #[test]
+    fn override_forces_acronym_to_word() {
+        // A 3-letter acronym that should be pronounced as a word, not spelled out.
+        let mut overrides = HashMap::new();
+        overrides.insert("sql".to_string(), "sequel".to_string());
+        assert_eq!(process_token("SQL", &overrides), "sequel");
+    }
+
+    #[test]
+    fn override_forces_long_acronym_to_spell_out() {
+        // A >3-letter acronym that would normally be lowercased, but should
+        // be spelled out letter-by-letter instead.
+        let mut overrides = HashMap::new();
+        overrides.insert("nasa".to_string(), "N A S A".to_string());
+        assert_eq!(process_token("NASA", &overrides), "N A S A");
     }
 }

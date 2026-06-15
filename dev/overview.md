@@ -200,3 +200,6 @@ The future versioning vision (retaining original document) may change what
 - Segfault on CLI exit when `--audio` is used (PyO3/tokio shutdown ordering)
   — all output written successfully before crash
 - F5 voice switching reloads the full model (~30s penalty)
+- lowercase roman numbers aren't spoken as such -- would need per document
+  overrides for when they are sample data (as in authorship paper) or
+  kisses (xx or xxx).
