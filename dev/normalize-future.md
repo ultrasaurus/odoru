@@ -183,6 +183,11 @@ revisit if found in future listen tests, likely via
   - `<Ref-8>.)` and `(EEE,yy,cc).` and `"zzz"` issues from section E
     appear resolved (not re-reported).
 
-**Next**: re-run `augment_multiparty` with the new `<OAD,2237,>`
-override to confirm.
+**Confirmed** (2026-06-15, pod `vidc9vtpogh0ad`, A100): re-ran
+`augment_multiparty` with the `<OAD,2237,>` override — **passes**, all
+section D/E hallucinations resolved. One remaining issue carried over
+from section B: narration speeds up toward the end of the file (the
+same cfg=2.0 degradation-over-length pattern noted in the main
+qualitative notes above) — still unresolved, relevant to the long-form
+segmentation/stitching plan (plan.md step 4).
 
