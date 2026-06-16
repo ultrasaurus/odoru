@@ -8,6 +8,12 @@
 - Title and source URL editable for all docs
 - `PATCH /documents/:id` supports `content`, `plain_text`, `title`, `source_url`, `authors`, `date`
 
+## Next up
+build incrementally to support word-level timestamps, pre-req for transclusion
+- author may highlight portions of text for their own use (not published)
+- highlighted text may be played back crossing sentence boundaries
+  - requires word-level timestamps
+
 #### Deferred
 - Outline view for editor
 - Transclusion authoring (paste-as-transclusion, refs.json resolution) — see [transclusion.md](transclusion.md)
