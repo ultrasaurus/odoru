@@ -212,14 +212,9 @@ async fn main() -> Result<()> {
             let remote_txt = format!("/workspace/VibeVoice/demo/{name}_normalized.txt");
             run(&runpod::scp_upload_command(&pod_id, &pod, &normalized_path, &remote_txt)?)?;
 
-            println!("ensuring vibevoice installed (system python)");
-            // Note: a venv under /workspace doesn't work — `python3 -m venv`
-            // produces broken bin/ symlinks on the network filesystem.
-            // `torch` has no version constraint in vibevoice's
-            // pyproject.toml, so `pip install -e .` won't touch the
-            // pod's existing CUDA-matched torch build.
+            println!("ensuring vibevoice installed (/opt/venv)");
             let setup_cmd = "set -e; \
-                python3 -c 'import vibevoice' 2>/dev/null || pip install -e /workspace/VibeVoice";
+                /opt/venv/bin/python3 -c 'import vibevoice' 2>/dev/null || /opt/venv/bin/pip install -e /workspace/VibeVoice";
             run(&runpod::ssh_exec_command(&pod_id, &pod, setup_cmd)?)?;
 
             let output_dir = format!("/workspace/output_{name}");
@@ -228,7 +223,7 @@ async fn main() -> Result<()> {
             let start_cmd = format!(
                 "cd /workspace/VibeVoice && \
                  rm -f {log_path} && \
-                 nohup python3 demo/inference_from_file.py \
+                 nohup /opt/venv/bin/python3 demo/inference_from_file.py \
                    --model_path vibevoice/VibeVoice-1.5B \
                    --txt_path demo/{name}_normalized.txt \
                    --speaker_names {speaker} \
@@ -238,6 +233,7 @@ async fn main() -> Result<()> {
             run(&runpod::ssh_exec_command(&pod_id, &pod, &start_cmd)?)?;
 
             println!("polling {log_path} every {poll_secs}s (timeout {timeout_mins}m)");
+            let inference_start = std::time::Instant::now();
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_mins * 60);
             loop {
                 if tokio::time::Instant::now() >= deadline {
@@ -250,7 +246,11 @@ async fn main() -> Result<()> {
                 let status = run_output(&runpod::ssh_exec_command(&pod_id, &pod, &check_cmd)?)?;
                 println!("status: {status}");
                 match status.as_str() {
-                    "DONE" => break,
+                    "DONE" => {
+                        let elapsed = inference_start.elapsed();
+                        println!("inference time: {:.1}s", elapsed.as_secs_f64());
+                        break;
+                    }
                     "ERROR" => {
                         let tail_cmd = format!("tail -n 40 {log_path}");
                         let tail = run_output(&runpod::ssh_exec_command(&pod_id, &pod, &tail_cmd)?)?;
@@ -264,6 +264,14 @@ async fn main() -> Result<()> {
             println!("downloading wav to {wav_path}");
             let remote_wav = format!("{output_dir}/*.wav");
             run(&runpod::scp_download_command(&pod_id, &pod, &remote_wav, &wav_path)?)?;
+
+            // print audio duration and RTF
+            if let Ok(meta) = hound::WavReader::open(&wav_path) {
+                let spec = meta.spec();
+                let duration_secs = meta.len() as f64 / spec.sample_rate as f64 / spec.channels as f64;
+                let wall = inference_start.elapsed().as_secs_f64();
+                println!("audio duration: {:.1}s  RTF: {:.2}x", duration_secs, wall / duration_secs);
+            }
 
             println!("done: {wav_path}");
         }

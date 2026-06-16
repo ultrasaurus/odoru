@@ -25,3 +25,13 @@ COPY voices/sarah/ref.wav /workspace/VibeVoice/demo/voices/en-Sarah_woman.wav
 
 # debug tools, kept as a separate late layer per project convention
 RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
+
+# sshd, so RunPod can expose a direct ssh/scp port into the container
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd
+
+COPY vibe/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 22
+ENTRYPOINT ["/entrypoint.sh"]
