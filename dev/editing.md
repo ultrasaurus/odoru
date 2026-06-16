@@ -1,6 +1,9 @@
 # Editing
 
-Documents are editable in the Edit view. Both URL-fetched and text-pasted documents can be edited after creation.
+Documents are editable in the Edit view.
+- URL-fetched docs are editable, so author may correct imperfect scraping
+- textarea editor with Edit/Preview toggle, auto-save on debounce; re-synth on Preview;
+
 
 ## UI fields
 
