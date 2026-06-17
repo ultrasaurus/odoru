@@ -34,3 +34,7 @@ delete	        deeleet
 # TODO: quoted punctuation always sounds wrong; ":" → "colon" is a stopgap.
 # Consider a general quoted-punctuation-to-spoken-word pass in the normalizer.
 ":"             colon
+#x              marker X
+"."             Baseline dot symbol
+"*D"            asterisk dee
+#s              marker S

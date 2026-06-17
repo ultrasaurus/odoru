@@ -1,15 +1,22 @@
 /// normalizer.rs — text normalization applied before TTS synthesis.
 ///
 /// Processing order:
+///   0. Strip short inline quotes (≤5 words): "foo bar" → foo bar.
 ///   1. Expand known `<Tag-N>` citation/figure/table markers.
 ///   2. Expand year ranges: 1976-77 → "1976 to 77".
+///   2b. Expand comma-grouped numbers: 2,000 → "two thousand".
+///   2c. Spell item/reference numbers digit-by-digit: Item 71279 → Item seven one …
 ///   3. Load `tts_overrides.txt` and apply punctuated overrides (e.g. "e.g.").
+///   3b. Replace dots between alphanumeric chars with " dot ": 4b.l → 4b dot l.
 ///   4. Tokenize on word boundaries:
 ///      a. Apply single-word overrides (case-insensitive).
 ///      b. Spell out short all-caps (≤3 chars) letter by letter: UIS → U I S.
 ///      c. Lowercase long all-caps (>3 chars): AUGMENT → augment.
 ///      d. Insert spaces in alphanumeric tokens: 1a → 1 a, 4c2 → 4 c 2.
+///      e. Spell leading-zero digit strings word-by-word: 0609 → zero six zero nine.
 ///   5. Replace remaining hyphens with spaces.
+///   6. Strip bracket characters.
+///   7. Replace ellipses with newlines (with punctuation normalisation).
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -120,8 +127,12 @@ pub fn list_overrides() -> Vec<(String, String)> {
 pub fn normalize(text: &str) -> String {
     let overrides = read_map();
 
+    // Pass 0: strip short inline quotes (≤5 words) — prevents TTS mangling
+    // of brief quoted phrases by removing the quotation marks.
+    let text = strip_short_quotes(text);
+
     // Pass 1: expand <Tag-N> markers.
-    let text = expand_tags(text);
+    let text = expand_tags(&text);
 
     // Pass 2: expand year ranges (4-digit year, hyphen, 2+ digits).
     let text = expand_year_ranges(&text);
@@ -129,9 +140,17 @@ pub fn normalize(text: &str) -> String {
     // Pass 2b: expand comma-grouped numbers (2,000 -> "two thousand").
     let text = expand_comma_numbers(&text);
 
+    // Pass 2c: spell Item/reference numbers digit-by-digit (Item 71279 →
+    // Item seven one two seven nine) so TTS doesn't garble large IDs.
+    let text = spell_item_numbers(&text);
+
     // Pass 3: handle punctuated overrides before token processing, so they
     // can match across punctuation (e.g. `e.g.`).
     let text = apply_punctuated_overrides(&text, &*overrides);
+
+    // Pass 3b: replace dots between alphanumeric chars with " dot " so link
+    // notation like `4b.l` or `Ref.dt` is read correctly.
+    let text = replace_identifier_dots(&text);
 
     // Pass 4: tokenize and process word/alphanumeric tokens.
     let mut out = String::with_capacity(text.len());
@@ -158,9 +177,9 @@ pub fn normalize(text: &str) -> String {
     // hallucinates on tokens with `<>`/`()`/`[]` next to other punctuation.
     let out: String = out.chars().filter(|c| !matches!(c, '(' | ')' | '<' | '>' | '[' | ']')).collect();
 
-    // Pass 7: remove ellipses — trailing "..." tricks VibeVoice into thinking
-    // the sentence is unfinished, causing looping/echoing artifacts.
-    out.replace("...", "")
+    // Pass 7: replace ellipses with newlines so VibeVoice treats the pause
+    // as a sentence boundary rather than looping on an unfinished sentence.
+    replace_ellipsis(&out)
 }
 
 // ---------------------------------------------------------------------------
@@ -347,10 +366,10 @@ fn process_token(token: &str, overrides: &HashMap<String, String>) -> String {
         return process_alpha_token(token);
     }
 
-    // Leading-zero numbers ("0609", "069") are IDs, not magnitudes — read
-    // digit by digit so TTS doesn't garble the leading zero.
+    // Leading-zero numbers ("0609", "069") are IDs, not magnitudes — spell
+    // each digit as a word so TTS reads them clearly.
     if has_digit && token.len() > 1 && token.starts_with('0') {
-        return token.chars().map(|c| c.to_string()).collect::<Vec<_>>().join(" ");
+        return token.chars().map(digit_word).collect::<Vec<_>>().join(" ");
     }
 
     token.to_owned()
@@ -423,6 +442,140 @@ fn process_alpha_token(token: &str) -> String {
     } else {
         token.to_owned()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 0: strip short inline quotes
+// ---------------------------------------------------------------------------
+
+fn strip_short_quotes(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '"' {
+            let start = i + 1;
+            let mut j = start;
+            while j < chars.len() && chars[j] != '"' { j += 1; }
+            if j < chars.len() {
+                let content: String = chars[start..j].iter().collect();
+                if content.split_whitespace().count() <= 5 {
+                    out.push_str(&content);
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2c: spell Item/reference numbers digit-by-digit
+// ---------------------------------------------------------------------------
+
+fn spell_item_numbers(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if i + 4 <= chars.len()
+            && chars[i] == 'I' && chars[i+1] == 't' && chars[i+2] == 'e' && chars[i+3] == 'm'
+            && (i == 0 || !chars[i-1].is_alphanumeric())
+        {
+            let mut j = i + 4;
+            while j < chars.len() && chars[j].is_whitespace() { j += 1; }
+            let digit_start = j;
+            while j < chars.len() && chars[j].is_ascii_digit() { j += 1; }
+            let digit_count = j - digit_start;
+            if digit_count >= 4 && (j == chars.len() || !chars[j].is_alphanumeric()) {
+                out.push_str("Item ");
+                for (k, &c) in chars[digit_start..j].iter().enumerate() {
+                    if k > 0 { out.push(' '); }
+                    out.push_str(digit_word(c));
+                }
+                i = j;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn digit_word(c: char) -> &'static str {
+    match c {
+        '0' => "zero", '1' => "one",  '2' => "two",   '3' => "three", '4' => "four",
+        '5' => "five", '6' => "six",  '7' => "seven",  '8' => "eight", '9' => "nine",
+        _   => "",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pass 3b: replace dots between alphanumeric chars with " dot "
+// ---------------------------------------------------------------------------
+
+fn replace_identifier_dots(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + 16);
+    for i in 0..chars.len() {
+        if chars[i] == '.'
+            && i > 0 && chars[i - 1].is_alphanumeric()
+            && i + 1 < chars.len() && chars[i + 1].is_alphanumeric()
+        {
+            out.push_str(" dot ");
+        } else {
+            out.push(chars[i]);
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Pass 7: replace ellipses with newlines
+// ---------------------------------------------------------------------------
+
+fn replace_ellipsis(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let elen = if chars[i] == '\u{2026}' {
+            Some(1)
+        } else if chars[i] == '.'
+            && chars.get(i + 1) == Some(&'.')
+            && chars.get(i + 2) == Some(&'.')
+        {
+            Some(3)
+        } else {
+            None
+        };
+        if let Some(n) = elen {
+            i += n;
+            // Consume a closing quote if present, keeping it in output.
+            if chars.get(i) == Some(&'"') {
+                out.push('"');
+                i += 1;
+            }
+            // Replace trailing punctuation (not ! ? .) with "." then newline;
+            // otherwise just insert a newline.
+            match chars.get(i) {
+                Some(&c) if c.is_ascii_punctuation() && !matches!(c, '!' | '?' | '.') => {
+                    out.push('.');
+                    out.push('\n');
+                    i += 1;
+                }
+                _ => out.push('\n'),
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -507,12 +660,57 @@ mod tests {
     }
 
     #[test]
-    fn leading_zero_numbers_spelled_digit_by_digit() {
-        assert_eq!(process_token("0609", &HashMap::new()), "0 6 0 9");
-        assert_eq!(process_token("069",  &HashMap::new()), "0 6 9");
-        assert_eq!(process_token("012",  &HashMap::new()), "0 1 2");
+    fn leading_zero_numbers_spelled_as_words() {
+        assert_eq!(process_token("0609", &HashMap::new()), "zero six zero nine");
+        assert_eq!(process_token("069",  &HashMap::new()), "zero six nine");
+        assert_eq!(process_token("012",  &HashMap::new()), "zero one two");
         // single "0" is not an "ID" — leave alone.
         assert_eq!(process_token("0",    &HashMap::new()), "0");
+    }
+
+    #[test]
+    fn short_quotes_stripped() {
+        assert_eq!(strip_short_quotes(r#""foo bar""#), "foo bar");
+        assert_eq!(strip_short_quotes(r#""one two three four five""#), "one two three four five");
+        // 6 words — keep quotes
+        assert_eq!(strip_short_quotes(r#""one two three four five six""#),
+                   r#""one two three four five six""#);
+        assert_eq!(strip_short_quotes(r#"He said "hello" and left"#), "He said hello and left");
+    }
+
+    #[test]
+    fn identifier_dots_replaced() {
+        assert_eq!(replace_identifier_dots("4b.l"),   "4b dot l");
+        assert_eq!(replace_identifier_dots("4b.dt"),  "4b dot dt");
+        assert_eq!(replace_identifier_dots("Ref.l"),  "Ref dot l");
+        assert_eq!(replace_identifier_dots("3.14"),   "3 dot 14");
+        // dot at end of sentence (not between alphanumerics) — unchanged
+        assert_eq!(replace_identifier_dots("end."),   "end.");
+        assert_eq!(replace_identifier_dots(". foo"),  ". foo");
+    }
+
+    #[test]
+    fn item_numbers_spelled_digit_by_digit() {
+        assert_eq!(spell_item_numbers("Item 71279"), "Item seven one two seven nine");
+        assert_eq!(spell_item_numbers("Item 1000"),  "Item one zero zero zero");
+        // fewer than 4 digits — left alone
+        assert_eq!(spell_item_numbers("Item 42"),    "Item 42");
+        // not at word boundary — left alone
+        assert_eq!(spell_item_numbers("Items 71279"), "Items 71279");
+    }
+
+    #[test]
+    fn ellipsis_replaced_with_newline() {
+        assert_eq!(replace_ellipsis("foo...bar"),   "foo\nbar");
+        assert_eq!(replace_ellipsis("foo...\u{2019}bar"), "foo\n\u{2019}bar");
+        // closing quote consumed before checking next char; space after is not consumed
+        assert_eq!(replace_ellipsis(r#"foo..." bar"#), "foo\"\n bar");
+        // trailing comma replaced with ".\n"
+        assert_eq!(replace_ellipsis("foo...,bar"),  "foo.\nbar");
+        // trailing ! preserved (not replaced)
+        assert_eq!(replace_ellipsis("foo...!bar"),  "foo\n!bar");
+        // unicode ellipsis
+        assert_eq!(replace_ellipsis("foo\u{2026}bar"), "foo\nbar");
     }
 
     #[test]
@@ -616,7 +814,8 @@ mod tests {
         // <4b:mi> is defined in tts_overrides.txt; the override key
         // contains ':' not '.', which previously wasn't matched by
         // apply_punctuated_overrides.
-        assert_eq!(normalize("\"<4b:mi>\""), "\"4 b colon M I\"");
+        // Pass 0 strips the surrounding quotes (1 word ≤ 5).
+        assert_eq!(normalize("\"<4b:mi>\""), "4 b colon M I");
     }
 
     #[test]

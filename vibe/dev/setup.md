@@ -35,8 +35,10 @@ cargo run -- new-pod gpu uevkzke51f
 ```
 
 This queries GPU types via GraphQL, picks the cheapest available ≥10GB VRAM,
-and retries down the list if the first choice returns "could not find any
-pods". Prints the selected GPU, price, and pod ID.
+and retries down the list if the first choice returns:
+*  "could not find any pods". 
+*  ""There are no instances currently available"
+Prints the selected GPU, price, and pod ID.
 
 No network volume — attaching one locks the pod to a specific datacenter
 region, which severely limits GPU availability. Generated audio is
