@@ -543,43 +543,10 @@ fn replace_identifier_dots(text: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn replace_ellipsis(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0;
-    while i < chars.len() {
-        let elen = if chars[i] == '\u{2026}' {
-            Some(1)
-        } else if chars[i] == '.'
-            && chars.get(i + 1) == Some(&'.')
-            && chars.get(i + 2) == Some(&'.')
-        {
-            Some(3)
-        } else {
-            None
-        };
-        if let Some(n) = elen {
-            i += n;
-            // Consume a closing quote if present, keeping it in output.
-            if chars.get(i) == Some(&'"') {
-                out.push('"');
-                i += 1;
-            }
-            // Replace trailing punctuation (not ! ? .) with "." then newline;
-            // otherwise just insert a newline.
-            match chars.get(i) {
-                Some(&c) if c.is_ascii_punctuation() && !matches!(c, '!' | '?' | '.') => {
-                    out.push('.');
-                    out.push('\n');
-                    i += 1;
-                }
-                _ => out.push('\n'),
-            }
-        } else {
-            out.push(chars[i]);
-            i += 1;
-        }
-    }
-    out
+    // Strip ellipses entirely — "..." tricks VibeVoice into thinking the
+    // sentence is unfinished, causing looping/echoing artifacts. Adding a
+    // newline or period in their place causes a "taunt" mispronunciation.
+    text.replace("...", "").replace('\u{2026}', "")
 }
 
 // ---------------------------------------------------------------------------
@@ -709,17 +676,12 @@ mod tests {
     }
 
     #[test]
-    fn ellipsis_replaced_with_newline() {
-        assert_eq!(replace_ellipsis("foo...bar"),   "foo\nbar");
-        assert_eq!(replace_ellipsis("foo...\u{2019}bar"), "foo\n\u{2019}bar");
-        // closing quote consumed before checking next char; space after is not consumed
-        assert_eq!(replace_ellipsis(r#"foo..." bar"#), "foo\"\n bar");
-        // trailing comma replaced with ".\n"
-        assert_eq!(replace_ellipsis("foo...,bar"),  "foo.\nbar");
-        // trailing ! preserved (not replaced)
-        assert_eq!(replace_ellipsis("foo...!bar"),  "foo\n!bar");
-        // unicode ellipsis
-        assert_eq!(replace_ellipsis("foo\u{2026}bar"), "foo\nbar");
+    fn ellipsis_stripped() {
+        assert_eq!(replace_ellipsis("foo...bar"),        "foobar");
+        assert_eq!(replace_ellipsis("foo...,bar"),       "foo,bar");
+        assert_eq!(replace_ellipsis(r#"foo..." bar"#),   r#"foo" bar"#);
+        assert_eq!(replace_ellipsis("foo\u{2026}bar"),   "foobar");
+        assert_eq!(replace_ellipsis("foo\u{2026},bar"),  "foo,bar");
     }
 
     #[test]
