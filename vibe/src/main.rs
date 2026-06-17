@@ -201,38 +201,64 @@ async fn main() -> Result<()> {
             info!("using template: {template_id}");
             let network_volume_id = network_volume_id.or_else(|| std::env::var("NETWORK_VOLUME_ID").ok());
 
-            // Auto-select cheapest GPU with >=10GB VRAM if not specified.
-            let (gpu_type_id, gpu_price) = if let Some(id) = gpu_type_id {
-                (Some(id), None)
+            // Build candidate GPU list sorted by price ascending (>=10GB VRAM).
+            // If a specific gpu_type_id was given, use only that one.
+            let candidates: Vec<(f64, String, String, f64)> = if let Some(id) = gpu_type_id {
+                vec![(0.0, id.clone(), id, 0.0)]
             } else if matches!(compute_type, runpod::ComputeType::Gpu) {
                 let gpu_types = client.list_gpu_types().await?;
                 let arr = gpu_types.as_array().context("gpu-types not an array")?;
-                let best = arr.iter()
+                let mut list: Vec<_> = arr.iter()
                     .filter_map(|g| {
                         let vram = g["memoryInGb"].as_f64()?;
                         let price = g["lowestPrice"]["uninterruptablePrice"].as_f64()?;
                         let id = g["id"].as_str()?;
-                        let name = g["displayName"].as_str().unwrap_or(id);
-                        if vram >= 10.0 { Some((price, id.to_string(), name.to_string(), vram)) }
+                        let label = g["displayName"].as_str().unwrap_or(id);
+                        if vram >= 10.0 { Some((price, id.to_string(), label.to_string(), vram)) }
                         else { None }
                     })
-                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-                if let Some((price, id, gpu_label, vram)) = best {
-                    info!("auto-selected GPU: {} ({}GB VRAM, ${:.2}/hr)", gpu_label, vram, price);
-                    (Some(id), Some(price))
-                } else {
-                    warn!("no GPU with >=10GB VRAM found; letting RunPod choose");
-                    (None, None)
-                }
+                    .collect();
+                list.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                list
             } else {
-                (None, None)
+                vec![]
             };
 
-            let pod = client.create_pod(&template_id, compute_type, network_volume_id.as_deref(), &name, gpu_type_id.as_deref()).await?;
+            if candidates.is_empty() && matches!(compute_type, runpod::ComputeType::Gpu) {
+                warn!("no GPU with >=10GB VRAM found; letting RunPod choose");
+            }
+
+            // Try candidates in price order, falling back on "not available" errors.
+            let mut pod = None;
+            let mut chosen_price: Option<f64> = None;
+            let no_candidates = candidates.is_empty();
+            let mut iter = candidates.into_iter().peekable();
+            loop {
+                let gpu_id = iter.next().map(|(price, id, label, vram)| {
+                    info!("trying GPU: {} ({}GB VRAM, ${:.2}/hr)", label, vram, price);
+                    chosen_price = Some(price);
+                    id
+                });
+                match client.create_pod(&template_id, compute_type, network_volume_id.as_deref(), &name, gpu_id.as_deref()).await {
+                    Ok(p) => { pod = Some(p); break; }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("could not find any pods") && iter.peek().is_some() {
+                            warn!("not available, trying next GPU...");
+                        } else if no_candidates {
+                            return Err(e);
+                        } else if iter.peek().is_none() {
+                            anyhow::bail!("no available GPU found after trying all candidates: {e}");
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+            let pod = pod.context("pod creation failed")?;
             let pod_id = pod.get("id").and_then(|v| v.as_str()).context("created pod missing id")?;
             info!("created pod: {pod_id}");
-            if let Some(price) = gpu_price {
+            if let Some(price) = chosen_price {
                 info!("estimated cost: ${price:.2}/hr — pass --gpu-price {price:.2} to listen-test for run log");
             }
         }
