@@ -52,7 +52,8 @@ fn parse_overrides(contents: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for line in contents.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
+        // "# " (hash + space) starts a comment; bare "#x" etc. are valid keys.
+        if line.is_empty() || line.starts_with("# ") { continue; }
         let mut cols = line.splitn(2, |c: char| c.is_whitespace());
         if let (Some(from), Some(to)) = (cols.next(), cols.next()) {
             let to = to.trim().split('#').next().unwrap_or("").trim();
@@ -127,9 +128,13 @@ pub fn list_overrides() -> Vec<(String, String)> {
 pub fn normalize(text: &str) -> String {
     let overrides = read_map();
 
+    // Pass 3: punctuated overrides run first — before quote-stripping — so
+    // keys like `"."` and `"*D"` can match before their quotes are removed.
+    let text = apply_punctuated_overrides(text, &*overrides);
+
     // Pass 0: strip short inline quotes (≤5 words) — prevents TTS mangling
     // of brief quoted phrases by removing the quotation marks.
-    let text = strip_short_quotes(text);
+    let text = strip_short_quotes(&text);
 
     // Pass 1: expand <Tag-N> markers.
     let text = expand_tags(&text);
@@ -143,10 +148,6 @@ pub fn normalize(text: &str) -> String {
     // Pass 2c: spell Item/reference numbers digit-by-digit (Item 71279 →
     // Item seven one two seven nine) so TTS doesn't garble large IDs.
     let text = spell_item_numbers(&text);
-
-    // Pass 3: handle punctuated overrides before token processing, so they
-    // can match across punctuation (e.g. `e.g.`).
-    let text = apply_punctuated_overrides(&text, &*overrides);
 
     // Pass 3b: replace dots between alphanumeric chars with " dot " so link
     // notation like `4b.l` or `Ref.dt` is read correctly.
@@ -522,8 +523,11 @@ fn replace_identifier_dots(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len() + 16);
     for i in 0..chars.len() {
+        // Replace "." with " dot " when followed by alphanumeric and not part
+        // of "..." (i.e. not preceded by another "."). Catches both `4b.l`
+        // (alphanumeric before) and standalone ` .l ` (space before).
         if chars[i] == '.'
-            && i > 0 && chars[i - 1].is_alphanumeric()
+            && (i == 0 || chars[i - 1] != '.')
             && i + 1 < chars.len() && chars[i + 1].is_alphanumeric()
         {
             out.push_str(" dot ");
@@ -684,9 +688,14 @@ mod tests {
         assert_eq!(replace_identifier_dots("4b.dt"),  "4b dot dt");
         assert_eq!(replace_identifier_dots("Ref.l"),  "Ref dot l");
         assert_eq!(replace_identifier_dots("3.14"),   "3 dot 14");
-        // dot at end of sentence (not between alphanumerics) — unchanged
+        // standalone: space before dot, alphanumeric after — also replaced
+        assert_eq!(replace_identifier_dots(" .l "),   "  dot l ");
+        // dot at end of sentence — unchanged (nothing alphanumeric after)
         assert_eq!(replace_identifier_dots("end."),   "end.");
         assert_eq!(replace_identifier_dots(". foo"),  ". foo");
+        // ellipsis — middle dots preceded by ".", not replaced
+        assert_eq!(replace_identifier_dots("..."),    "...");
+        assert_eq!(replace_identifier_dots("foo...bar"), "foo...bar");
     }
 
     #[test]
