@@ -383,7 +383,7 @@ pub fn durations_to_segment(text: &str, durations: &[f32], time_offset: f64) -> 
     } else {
         (time_offset, time_offset)
     };
-    Segment { start, end, text: text.to_string() }
+    Segment { start, end, text: text.to_string(), words: vec![], speaker: None }
 }
 
 fn audio_duration_from_durations(durations: &[f32]) -> f64 {

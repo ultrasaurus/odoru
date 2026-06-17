@@ -1,12 +1,4 @@
-#[derive(Debug, Clone)]
-pub struct Segment {
-    /// Sentence start time in seconds, relative to the full synthesis output.
-    pub start: f64,
-    /// Sentence end time in seconds.
-    pub end: f64,
-    /// The sentence text.
-    pub text: String,
-}
+pub use forced_alignment::transcript::Segment;
 
 /// One synthesized sentence: MP3-encoded audio + transcript segment with timing.
 pub struct AudioSegment {
@@ -16,7 +8,8 @@ pub struct AudioSegment {
     pub audio: Vec<u8>,
     /// Duration in seconds.
     pub duration: f64,
-    /// Sentence text and timing.
+    /// Sentence text and timing. `words` is empty for engines that don't produce
+    /// word-level timestamps; populated after forced alignment for engines that do.
     pub transcript: Segment,
     /// True if this is the last sentence in its paragraph.
     pub paragraph_end: bool,

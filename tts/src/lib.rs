@@ -30,7 +30,7 @@
 pub mod splitter;
 pub mod chunk;
 pub mod backend;
-pub mod transcript;
+pub use forced_alignment::transcript;
 pub mod audio_cache;
 pub mod export;
 pub mod markdown;

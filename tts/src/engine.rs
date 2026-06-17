@@ -264,6 +264,8 @@ fn make_segment(
         start: time_offset,
         end: time_offset + duration,
         text: sentence.text.clone(),
+        words: vec![],
+        speaker: None,
     };
     AudioSegment { index, audio: mp3_bytes, duration, transcript, paragraph_end: sentence.paragraph_end }
 }
