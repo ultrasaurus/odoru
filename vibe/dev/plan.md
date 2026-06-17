@@ -24,7 +24,7 @@ Steps
    paragraph covering Section B in
    [dev/normalize-future.md](../dev/normalize-future.md), create
    audio, listen test.
-4. [ ] `augment_multiparty` (and likely other multi-paragraph files)
+4. [X] `augment_multiparty` (and likely other multi-paragraph files)
    speed up noticeably toward the end at cfg=2.0 — before tackling
    full-file stitching, chunk `augment_multiparty.txt` into its
    individual paragraphs, generate audio per paragraph, and listen to
@@ -34,5 +34,10 @@ Steps
 5. [ ] Create audio file for all of `data/authorship.txt` by dividing
    into text segments (~300 words at paragraph division) then
    stitching audio pieces together.
-   (Needs design when we get there — how segments are split/joined,
-   tooling, etc.)
+   - [x] Split into 21 segments (`data/authorship_seg01-21.txt`) via
+     `split_authorship.py` (250–400 words, paragraph boundaries, headings
+     merged into following paragraph)
+   - [ ] Seed discovery: run seg07–11 without `--seed`, human listener to pick a voice, find seed in
+     `data/runs.jsonl`
+   - [ ] Full run: all 21 segments with chosen seed
+   - [ ] Stitch segments into final audio file

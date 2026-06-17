@@ -73,7 +73,7 @@ enum Command {
         pod_id: String,
         #[arg(long, default_value = "Sarah")]
         speaker: String,
-        #[arg(long, default_value_t = 2.0)]
+        #[arg(long, default_value_t = 1.3)]
         cfg_scale: f64,
         /// Seconds between checks of the inference log
         #[arg(long, default_value_t = 30)]
@@ -243,7 +243,9 @@ async fn main() -> Result<()> {
                     Ok(p) => { pod = Some(p); break; }
                     Err(e) => {
                         let msg = e.to_string();
-                        if msg.contains("could not find any pods") && iter.peek().is_some() {
+                        let unavailable = msg.contains("could not find any pods")
+                            || msg.contains("no instances currently available");
+                        if unavailable && iter.peek().is_some() {
                             warn!("not available, trying next GPU...");
                         } else if no_candidates {
                             return Err(e);
@@ -306,11 +308,6 @@ async fn main() -> Result<()> {
 
             let remote_txt = format!("/workspace/VibeVoice/demo/{name}_normalized.txt");
             run(&runpod::scp_upload_command(&pod_id, &pod, &normalized_path, &remote_txt)?)?;
-
-            info!("ensuring vibevoice installed (/opt/venv)");
-            let setup_cmd = "set -e; \
-                python3 -c 'import vibevoice' 2>/dev/null || pip install -e /workspace/VibeVoice";
-            run(&runpod::ssh_exec_command(&pod_id, &pod, setup_cmd)?)?;
 
             let output_dir = format!("/workspace/output_{name}");
             let log_path = format!("/workspace/output_{name}.log");
