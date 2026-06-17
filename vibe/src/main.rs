@@ -43,7 +43,7 @@ enum Command {
     NewPod {
         compute_type: runpod::ComputeType,
         template_id: Option<String>,
-        /// Network volume to attach (defaults to $NETWORK_VOLUME_ID from vibe/.env)
+        /// Network volume to attach (omit to avoid region lock)
         #[arg(long)]
         network_volume_id: Option<String>,
         /// Pod name
@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
         Command::NewPod { compute_type, template_id, network_volume_id, name, gpu_type_id } => {
             let template_id = client.resolve_template(template_id).await?;
             info!("using template: {template_id}");
-            let network_volume_id = network_volume_id.or_else(|| std::env::var("NETWORK_VOLUME_ID").ok());
+            let network_volume_id = network_volume_id;
 
             // Build candidate GPU list sorted by price ascending (>=10GB VRAM).
             // If a specific gpu_type_id was given, use only that one.

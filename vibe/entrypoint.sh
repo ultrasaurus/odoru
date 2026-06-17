@@ -8,6 +8,7 @@ if [ -n "$PUBLIC_KEY" ]; then
     chmod 600 /root/.ssh/authorized_keys
 fi
 
+ssh-keygen -A
 /usr/sbin/sshd
 
 exec tail -f /dev/null

@@ -36,12 +36,12 @@ async function fetchAnnotations(docId: string): Promise<Annotation[]> {
   } catch { return [] }
 }
 
-async function persistAnnotations(docId: string, annotations: Annotation[]): Promise<void> {
+async function persistAnnotations(docId: string, annotations: Annotation[], voice?: string): Promise<void> {
   try {
     await fetch(`/documents/${docId}/annotations`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(annotations),
+      body: JSON.stringify({ annotations, voice }),
     })
   } catch { /* best-effort */ }
 }
@@ -121,7 +121,7 @@ export async function applyAnnotations(container: HTMLElement, docId: string): P
 }
 
 // Wrap the current selection, save to server. Returns the new annotation or null.
-export async function wrapSelection(docId: string, color: AnnotationColor): Promise<Annotation | null> {
+export async function wrapSelection(docId: string, color: AnnotationColor, voice?: string): Promise<Annotation | null> {
   const sel = window.getSelection()
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
   const range = sel.getRangeAt(0)
@@ -164,7 +164,7 @@ export async function wrapSelection(docId: string, color: AnnotationColor): Prom
 
   // Persist: fetch current list, append, PUT (optimistic — DOM already updated)
   const current = await fetchAnnotations(docId)
-  await persistAnnotations(docId, [...current, ann])
+  await persistAnnotations(docId, [...current, ann], voice)
   return ann
 }
 
@@ -178,7 +178,7 @@ export async function deleteAnnotation(
   const mark = container.querySelector<HTMLElement>(`.annotation[data-id="${annId}"]`)
   if (mark) unwrapMark(mark)
 
-  // Remove from server
+  // Remove from server (no alignment needed on delete)
   const current = await fetchAnnotations(docId)
   await persistAnnotations(docId, current.filter(a => a.id !== annId))
 }
@@ -231,6 +231,7 @@ export function initAnnotationPicker(
   articleArea: HTMLElement,
   getDocId: () => string | null,
   isReadMode: () => boolean,
+  getVoice: () => string | null,
 ): void {
   // Color picker
   const picker = document.createElement('div')
@@ -250,7 +251,7 @@ export function initAnnotationPicker(
     const docId = getDocId()
     if (!docId) { hidePicker(); return }
     lastColor = color
-    wrapSelection(docId, color)
+    wrapSelection(docId, color, getVoice() ?? undefined)
     hidePicker()
   })
 

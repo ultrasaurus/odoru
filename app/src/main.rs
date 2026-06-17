@@ -1082,9 +1082,19 @@ async fn get_annotations(Path(id): Path<String>) -> impl IntoResponse {
     }
 }
 
+#[derive(Deserialize)]
+struct PutAnnotationsBody {
+    annotations: serde_json::Value,
+    /// Currently selected voice ID, e.g. "kokoro:af_heart" or "f5:sarah".
+    /// Used to pre-run forced alignment so word timestamps are ready for playback.
+    #[serde(default)]
+    voice: Option<String>,
+}
+
 async fn put_annotations(
     Path(id): Path<String>,
-    Json(body): Json<serde_json::Value>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PutAnnotationsBody>,
 ) -> impl IntoResponse {
     match documents::lookup_by_id(&id) {
         Ok(None) => return (StatusCode::NOT_FOUND,
@@ -1093,13 +1103,81 @@ async fn put_annotations(
             Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
         Ok(Some(_)) => {}
     }
-    match tokio::task::spawn_blocking(move || documents::write_annotations(&id, &body)).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
-        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
+
+    let annotations = body.annotations.clone();
+    let doc_id = id.clone();
+    match tokio::task::spawn_blocking(move || documents::write_annotations(&doc_id, &annotations)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
-        Err(e)     => (StatusCode::INTERNAL_SERVER_ERROR,
+        Err(e)     => return (StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
     }
+
+    // Spawn background forced-alignment for every annotation against the selected voice.
+    // Fire-and-forget — PUT returns immediately.
+    if let Some(voice_id) = body.voice {
+        if let Ok((engine, voice_name)) = state.engine_for_voice(&voice_id) {
+            if let Some(voice_cache_key) = engine.voice_cache_key(&voice_name) {
+                let is_f5 = voice_id.starts_with("f5:");
+                tokio::spawn(async move {
+                    align_annotations_for_doc(&id, &voice_cache_key, is_f5, &body.annotations).await;
+                });
+            }
+        }
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn align_annotations_for_doc(
+    doc_id: &str,
+    voice_cache_key: &str,
+    is_f5: bool,
+    annotations: &serde_json::Value,
+) {
+    // Load the document's plain text to split into sentences.
+    let doc = match documents::lookup_by_id(doc_id) {
+        Ok(Some(d)) => d,
+        _ => return,
+    };
+    let plain_text = doc.plain_text;
+    if plain_text.is_empty() { return; }
+
+    // Collect annotation texts to match.
+    let ann_texts: Vec<String> = annotations
+        .as_array()
+        .map(|arr| arr.iter()
+            .filter_map(|a| a.get("text")?.as_str().map(|s| s.to_string()))
+            .collect())
+        .unwrap_or_default();
+    if ann_texts.is_empty() { return; }
+
+    let sentences = tts::splitter::split(&plain_text);
+    let vckey = voice_cache_key.to_string();
+
+    tokio::task::spawn_blocking(move || {
+        for sentence in &sentences {
+            let text = sentence.text.trim();
+            if text.is_empty() { continue; }
+
+            // Check if any annotation text falls within this sentence.
+            if !ann_texts.iter().any(|a| text.contains(a.as_str())) { continue; }
+
+            let cache_text = if is_f5 {
+                tts::f5::normalizer::normalize(text)
+            } else {
+                text.to_string()
+            };
+            let key = tts::audio_cache::cache_key(&cache_text, &vckey);
+
+            if let Err(e) = tts::alignment::ensure_words(&key) {
+                tracing::warn!("forced alignment failed for key {key}: {e}");
+            } else {
+                tracing::debug!("forced alignment complete for sentence: {text:.40}");
+            }
+        }
+    }).await.ok();
 }
 
 // ---------------------------------------------------------------------------

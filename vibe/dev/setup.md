@@ -1,67 +1,102 @@
-# Setup notes: pod + VibeVoice checkout
+# Setup notes: pod + VibeVoice
 
-## RunPod pod
+## Docker image
 
-- Created via `cargo run -- new-pod gpu` (template `pqszh5ec2m`,
-  network volume `f6s2dk7onh`, named `vibevoice`) or in the RunPod
-  UI for easier control of pricing.
-- Image: `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`.
-- Connect: `cargo run -- ssh <pod_id>` — prints
-  `ssh -i ~/.ssh/runpod -p <port> root@<publicIp>`. The
-  `<pod_id>@ssh.runpod.io` proxy form returned "Permission denied
-  (publickey)" for this pod — use the direct IP+port form instead.
-- `/workspace` (on the network volume, persists across
-  recreate/terminate of the pod itself):
-  - `VibeVoice/` — the inference checkout (see below)
-  - `hf_cache/` — HuggingFace model cache
-  - `output*/`, `run*.log` — generation outputs/logs from past runs
-    (`output_norm` etc. correspond to the `data/*normalized*.txt`
-    inputs)
-- GPU availability: pod creation/start can fail with "not enough
-  free GPUs on the host machine" — workaround is terminate and
-  recreate from the template (`pqszh5ec2m`). Cost was ~$2/hr while
-  running; terminate when not in use.
-- A stopped pod with a network volume attached often can't be
-  restarted ("not enough free GPUs" even when GPUs are free) —
-  terminate the stopped pod and create a new one instead of trying
-  to restart it. `/workspace` (on the network volume) persists across
-  this terminate+recreate cycle.
+VibeVoice is baked into the image — no manual pip install needed on the pod.
 
-## VibeVoice checkout (`vibe/vv/`)
+Base image: `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
+(PyTorch 2.4, CUDA 12.4, supports sm_50–sm_90 / all pre-Blackwell GPUs)
 
-- `git clone https://github.com/vibevoice-community/VibeVoice.git vv`
-- Commit in use: `07cb79feadd2d3fd7f47530d4c964a12857936a0`
-  ("Update README.md", 2026-06-12). Not pinned via submodule/tag —
-  record this here since `vv/` is gitignored from odoru and the repo
-  could move on.
-- `vv/demo/inference_from_file.py` is the script used to generate the
-  `*_generated.wav` files from `data/*.txt` inputs (one "Speaker N:"
-  line per paragraph). Takes a `--cfg-scale` argument — see
-  [vibevoice.md](vibevoice.md) for how this affects output quality
-  (2.0 fixes silence/crowd-noise for short sections but introduces
-  artifacts over longer full-file runs).
-- `vv/demo/voices/` has sample stock voice wavs (en-Alice_woman,
-  en-Frank_man, etc.), but the runs so far use a custom reference
-  voice instead — placed in that same directory and renamed to match
-  the stock `en-<Name>_<gender>.wav` pattern (`en-Sarah_woman.wav`),
-  since `inference_from_file.py` appears to expect that naming to pick
-  up a custom voice. Earlier notes referred to this file as
-  `voices/sarah/ref.wav`; confirm the actual path/name on `/workspace`
-  before the next run.
+We tried `runpod/pytorch:1.0.6-cu1281-torch271-ubuntu2204` (PyTorch 2.7,
+CUDA 12.8) to get Blackwell (sm_120) support, but most RunPod machines
+have drivers too old for CUDA 12.8 and the container fails to start:
+`nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.8`.
+CUDA 12.4 works on a much wider range of machines, and we haven't needed
+Blackwell in practice.
 
-## Open TODO: pip installs don't survive pod recreation
+Build and push from the **repo root** (bump version tag each time — RunPod
+won't re-pull if the tag is unchanged):
 
-`pip install -e /workspace/VibeVoice` installs into the container's
-site-packages, not `/workspace` (the network volume) — so every time the
-pod is recreated, `vibevoice` has to be reinstalled (~30s) before
-inference will run (`ModuleNotFoundError: No module named 'vibevoice'`).
-Consider creating a venv on `/workspace` or using `pip install
---target=/workspace/...` so the install persists across recreates.
+```
+docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
+docker tag vibe:latest dockersaura/vibe:<vN>
+docker push dockersaura/vibe:<vN>
+```
 
-## Local tooling (`vibe/`)
+Current image: `dockersaura/vibe:v6`
 
-- Standalone Rust CLI/workspace, see [README.md](README.md) for
-  commands (`new-pod`, `ssh`, `download`, `silencedetect`,
-  `normalize`, etc.).
-- `.env` (gitignored, see `.env.example`): `RUNPOD_API_KEY`,
-  `NETWORK_VOLUME_ID`, `$TEMPLATE`.
+After pushing, update the RunPod template via curl (see `runpod.md`) or the
+UI. Current template: `uevkzke51f` ("vibe v6").
+
+## Starting a pod
+
+```
+cargo run -- new-pod gpu uevkzke51f
+```
+
+This queries GPU types via GraphQL, picks the cheapest available ≥10GB VRAM,
+and retries down the list if the first choice returns "could not find any
+pods". Prints the selected GPU, price, and pod ID.
+
+No network volume — attaching one locks the pod to a specific datacenter
+region, which severely limits GPU availability. Generated audio is
+downloaded locally after each run. **Do not restart a stopped pod** —
+terminate and create a new one instead.
+
+SSH connects via direct IP+port (not the `<pod_id>@ssh.runpod.io` proxy):
+
+```
+cargo run -- ssh <pod_id>   # prints the ssh command
+```
+
+Terminate when done to stop billing:
+
+```
+cargo run -- terminate-pod <pod_id>
+```
+
+## Running a listen test
+
+```
+cargo run -- listen-test <segment_name> <pod_id> --gpu-price <price>
+```
+
+- Uploads `vibe/data/<segment_name>.txt` to the pod
+- Runs VibeVoice inference (sequential, one segment at a time)
+- Downloads the generated `.wav` to `vibe/data/`
+- Appends a row to `vibe/data/runs.jsonl` (GPU, price, duration, seed, etc.)
+- Prints timing and the seed used
+
+Pass `--seed <N>` to fix the voice across multiple segments. Omit `--seed`
+to let VibeVoice pick randomly (seed is captured from the log and recorded).
+
+## Segment files
+
+`data/authorship_seg01-21.txt` — the full authorship paper split into
+250–400 word segments at paragraph boundaries (21 total). Each paragraph
+is prefixed with `Speaker 1: `. Generated by `split_authorship.py`.
+
+Short headings/fragments are merged into the following paragraph so they
+don't produce TTS artifacts.
+
+## Seed discovery workflow
+
+Run seg07–11 without `--seed` to collect random seeds, then pick a voice:
+
+```
+for i in 07 08 09 10 11; do
+  cargo run -- listen-test authorship_seg${i} <pod_id> --gpu-price <price>
+done
+```
+
+Check `data/runs.jsonl` for the seed used in each segment. Re-run all 21
+segments with `--seed <chosen>` once a good voice is found.
+
+## VibeVoice details
+
+- Repo: https://github.com/vibevoice-community/VibeVoice
+- Commit pinned in Dockerfile: `07cb79feadd2d3fd7f47530d4c964a12857936a0`
+- Reference voice: `voices/sarah/ref.wav` (copied into image as
+  `en-Sarah_woman.wav`)
+- cfg-scale: default (no override) — 2.0 was tried earlier but introduced
+  artifacts on longer segments

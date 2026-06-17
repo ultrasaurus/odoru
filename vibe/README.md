@@ -30,8 +30,8 @@ time — RunPod won't pull an updated image if the tag hasn't changed):
 
 ```
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
-docker tag vibe:latest dockersaura/vibe:v4
-docker push dockersaura/vibe:v4
+docker tag vibe:latest dockersaura/vibe:v6
+docker push dockersaura/vibe:v6
 ```
 
 Then update the RunPod template to point at the new tag before creating a

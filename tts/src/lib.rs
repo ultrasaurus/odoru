@@ -32,6 +32,7 @@ pub mod chunk;
 pub mod backend;
 pub use forced_alignment::transcript;
 pub mod audio_cache;
+pub mod alignment;
 pub mod export;
 pub mod markdown;
 

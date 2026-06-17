@@ -963,7 +963,7 @@ export function mount(onReader: () => void): () => void {
   const player   = new Player(articleContent)
   const editCore = new ReaderCore(articleContent, editOutlineList)
 
-  initAnnotationPicker(articleArea, () => currentDocId, () => !isEditMode)
+  initAnnotationPicker(articleArea, () => currentDocId, () => !isEditMode, () => selectedVoice)
 
   player.onError(msg => {
     setJobStatus(`Error: ${msg}`)

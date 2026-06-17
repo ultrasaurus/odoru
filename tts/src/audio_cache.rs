@@ -16,18 +16,22 @@ use mp3lame_encoder::{Builder, FlushNoGap, MonoPcm};
 use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 
+use forced_alignment::transcript::Word;
+
 // ---------------------------------------------------------------------------
 // Metadata sidecar
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize)]
-struct Meta {
-    text: String,
-    duration: f64,
+pub struct Meta {
+    pub text: String,
+    pub duration: f64,
     #[serde(default)]
-    invalid: bool,
+    pub invalid: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    invalid_reason: Option<String>,
+    pub invalid_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub words: Option<Vec<Word>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +115,7 @@ fn store_in(dir: &PathBuf, key: &str, text: &str, mp3_bytes: &[u8], duration: f6
     }
 
     let json_path = dir.join(format!("{key}.json"));
-    let meta = Meta { text: text.to_string(), duration, invalid: false, invalid_reason: None };
+    let meta = Meta { text: text.to_string(), duration, invalid: false, invalid_reason: None, words: None };
     if let Ok(json) = serde_json::to_string(&meta) {
         if let Err(e) = std::fs::write(&json_path, json) {
             error!("audio cache: failed to write metadata: {e}");
@@ -123,6 +127,33 @@ fn store_in(dir: &PathBuf, key: &str, text: &str, mp3_bytes: &[u8], duration: f6
 pub fn cache_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(PathBuf::from(home).join(".odoru").join("audio"))
+}
+
+/// Path to the `.json` sidecar for a cache key, or `None` if home is unset.
+pub fn meta_path(key: &str) -> Option<PathBuf> {
+    Some(cache_dir()?.join(format!("{key}.json")))
+}
+
+/// Path to the `.mp3` for a cache key, or `None` if home is unset.
+pub fn mp3_path(key: &str) -> Option<PathBuf> {
+    Some(cache_dir()?.join(format!("{key}.mp3")))
+}
+
+/// Read the metadata sidecar for a cache key. Returns `None` if absent or unparseable.
+pub fn read_meta(key: &str) -> Option<Meta> {
+    let path = meta_path(key)?;
+    let s = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
+/// Write a `Meta` back to its sidecar atomically.
+pub fn write_meta(key: &str, meta: &Meta) {
+    let Some(path) = meta_path(key) else { return };
+    let tmp = path.with_extension("json.tmp");
+    let Ok(json) = serde_json::to_string(meta) else { return };
+    if std::fs::write(&tmp, &json).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
 }
 
 /// Mark all cache entries whose stored text contains `word` (case-insensitive) as invalid.

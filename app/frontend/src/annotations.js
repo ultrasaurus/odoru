@@ -26,12 +26,12 @@ async function fetchAnnotations(docId) {
         return [];
     }
 }
-async function persistAnnotations(docId, annotations) {
+async function persistAnnotations(docId, annotations, voice) {
     try {
         await fetch(`/documents/${docId}/annotations`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(annotations),
+            body: JSON.stringify({ annotations, voice }),
         });
     }
     catch { /* best-effort */ }
@@ -111,7 +111,7 @@ export async function applyAnnotations(container, docId) {
     }
 }
 // Wrap the current selection, save to server. Returns the new annotation or null.
-export async function wrapSelection(docId, color) {
+export async function wrapSelection(docId, color, voice) {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed)
         return null;
@@ -151,7 +151,7 @@ export async function wrapSelection(docId, color) {
     sel.removeAllRanges();
     // Persist: fetch current list, append, PUT (optimistic — DOM already updated)
     const current = await fetchAnnotations(docId);
-    await persistAnnotations(docId, [...current, ann]);
+    await persistAnnotations(docId, [...current, ann], voice);
     return ann;
 }
 // Delete an annotation by id: remove from server and unwrap from DOM.
@@ -160,7 +160,7 @@ export async function deleteAnnotation(container, docId, annId) {
     const mark = container.querySelector(`.annotation[data-id="${annId}"]`);
     if (mark)
         unwrapMark(mark);
-    // Remove from server
+    // Remove from server (no alignment needed on delete)
     const current = await fetchAnnotations(docId);
     await persistAnnotations(docId, current.filter(a => a.id !== annId));
 }
@@ -194,7 +194,7 @@ function showContextMenu(x, y, annId, container, getDocId) {
     contextMenuEl = menu;
 }
 // ── Init ─────────────────────────────────────────────────────────────────────
-export function initAnnotationPicker(articleArea, getDocId, isReadMode) {
+export function initAnnotationPicker(articleArea, getDocId, isReadMode, getVoice) {
     // Color picker
     const picker = document.createElement('div');
     picker.className = 'annotation-picker';
@@ -214,7 +214,7 @@ export function initAnnotationPicker(articleArea, getDocId, isReadMode) {
             return;
         }
         lastColor = color;
-        wrapSelection(docId, color);
+        wrapSelection(docId, color, getVoice() ?? undefined);
         hidePicker();
     });
     // Show picker on mouseup within article area

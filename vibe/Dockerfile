@@ -6,10 +6,10 @@
 #   docker push dockersaura/vibe:<vN>
 # Bump the version tag each time — RunPod won't pull an updated image otherwise.
 
-# RunPod base image: PyTorch 2.7.1, CUDA 12.8.1, Ubuntu 22.04.
+# RunPod base image: PyTorch 2.4.0, CUDA 12.4.1, Ubuntu 22.04.
 # Includes torch, CUDA drivers, and Python — no need to install them separately.
-# Supports all GPU architectures up to and including Blackwell (sm_120).
-FROM runpod/pytorch:1.0.6-cu1281-torch271-ubuntu2204
+# Supports sm_50–sm_90 (all pre-Blackwell GPUs); requires driver ≥ 525.85.
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 WORKDIR /workspace
 RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
