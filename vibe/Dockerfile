@@ -1,19 +1,15 @@
 # syntax=docker/dockerfile:1
 #
 # Build from the odoru repo root:
-#   docker build -f vibe/Dockerfile -t vibe .
+#   docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
+#   docker tag vibe:latest dockersaura/vibe:<vN>
+#   docker push dockersaura/vibe:<vN>
+# Bump the version tag each time — RunPod won't pull an updated image otherwise.
 
-FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv git \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python3 -m venv /opt/venv
-ENV VIRTUAL_ENV=/opt/venv
-ENV PATH="/opt/venv/bin:${PATH}"
-
-RUN pip install --no-cache-dir torch==2.4.0 --index-url https://download.pytorch.org/whl/cu124
+# RunPod base image: PyTorch 2.7.1, CUDA 12.8.1, Ubuntu 22.04.
+# Includes torch, CUDA drivers, and Python — no need to install them separately.
+# Supports all GPU architectures up to and including Blackwell (sm_120).
+FROM runpod/pytorch:1.0.6-cu1281-torch271-ubuntu2204
 
 WORKDIR /workspace
 RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
@@ -22,9 +18,6 @@ RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
     && pip install --no-cache-dir -e .
 
 COPY voices/sarah/ref.wav /workspace/VibeVoice/demo/voices/en-Sarah_woman.wav
-
-# debug tools, kept as a separate late layer per project convention
-RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
 
 # sshd, so RunPod can expose a direct ssh/scp port into the container
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* \

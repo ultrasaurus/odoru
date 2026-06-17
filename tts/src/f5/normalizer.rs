@@ -156,7 +156,11 @@ pub fn normalize(text: &str) -> String {
 
     // Pass 6: strip bracket characters (keeping their contents) — VibeVoice
     // hallucinates on tokens with `<>`/`()`/`[]` next to other punctuation.
-    out.chars().filter(|c| !matches!(c, '(' | ')' | '<' | '>' | '[' | ']')).collect()
+    let out: String = out.chars().filter(|c| !matches!(c, '(' | ')' | '<' | '>' | '[' | ']')).collect();
+
+    // Pass 7: remove ellipses — trailing "..." tricks VibeVoice into thinking
+    // the sentence is unfinished, causing looping/echoing artifacts.
+    out.replace("...", "")
 }
 
 // ---------------------------------------------------------------------------

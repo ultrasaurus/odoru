@@ -29,6 +29,23 @@ else:
     body = paragraphs
     refs = []
 
+def ends_sentence(p):
+    return p.rstrip().endswith(('.', '?', '!'))
+
+# Merge headings and short fragments into the following paragraph.
+# Any paragraph not ending with sentence-ending punctuation (.?!) is
+# chained forward (space-joined, no added punctuation) until one does.
+merged_body = []
+i = 0
+while i < len(body):
+    p = body[i]
+    while not ends_sentence(p) and i + 1 < len(body):
+        i += 1
+        p = p + ' ' + body[i]
+    merged_body.append(p)
+    i += 1
+body = merged_body
+
 def word_count(p):
     return len(p.split())
 

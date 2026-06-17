@@ -3,6 +3,7 @@ mod runpod;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use tracing::{info, warn};
 
 #[derive(Parser)]
 #[command(allow_negative_numbers = true)]
@@ -37,7 +38,8 @@ enum Command {
         local_path: Option<String>,
     },
     /// Create a new pod from a template (uses the only template if
-    /// none specified)
+    /// none specified). Auto-selects cheapest GPU with >=10GB VRAM
+    /// unless --gpu-type-id is given.
     NewPod {
         compute_type: runpod::ComputeType,
         template_id: Option<String>,
@@ -47,7 +49,8 @@ enum Command {
         /// Pod name
         #[arg(short, long, default_value = "vibevoice")]
         name: String,
-        /// GPU type id (see `gpu-types`), e.g. "NVIDIA A40"
+        /// GPU type id (see `gpu-types`), e.g. "NVIDIA A40". If omitted,
+        /// auto-selects cheapest GPU with >=10GB VRAM.
         #[arg(long)]
         gpu_type_id: Option<String>,
     },
@@ -78,12 +81,18 @@ enum Command {
         /// Give up waiting for inference after this many minutes
         #[arg(long, default_value_t = 60)]
         timeout_mins: u64,
+        /// Random seed for reproducibility (omit for random)
+        #[arg(long)]
+        seed: Option<u64>,
+        /// GPU price per hour (from new-pod output), stored in run log
+        #[arg(long)]
+        gpu_price: Option<f64>,
     },
 }
 
 /// Run a command, streaming its output, and bail if it fails.
 fn run(argv: &[String]) -> Result<()> {
-    println!("running: {}", argv.join(" "));
+    info!("running: {}", argv.join(" "));
     let status = std::process::Command::new(&argv[0])
         .args(&argv[1..])
         .status()?;
@@ -109,8 +118,29 @@ fn run_output(argv: &[String]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Append a JSON line to data/runs.jsonl for later cost/perf analysis.
+fn append_run_log(entry: serde_json::Value) -> Result<()> {
+    let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+    let path = format!("{data_dir}/runs.jsonl");
+    let line = serde_json::to_string(&entry)? + "\n";
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?
+        .write_all(line.as_bytes())?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let cli = Cli::parse();
     let api_key = config::runpod_api_key()?;
     let client = runpod::Client::new(api_key);
@@ -142,7 +172,7 @@ async fn main() -> Result<()> {
         }
         Command::TerminatePod { pod_id } => {
             client.terminate_pod(&pod_id).await?;
-            println!("Terminated pod {pod_id}");
+            info!("Terminated pod {pod_id}");
         }
         Command::Ssh { pod_id } => {
             let pod = client.get_pod(&pod_id).await?;
@@ -163,22 +193,48 @@ async fn main() -> Result<()> {
                 )
             });
             let argv = runpod::scp_download_command(&pod_id, &pod, &remote_path, &local_path)?;
-            println!("running: {}", argv.join(" "));
-            let status = std::process::Command::new(&argv[0])
-                .args(&argv[1..])
-                .status()?;
-            if !status.success() {
-                anyhow::bail!("scp failed: {status}");
-            }
-            println!("downloaded to {local_path}");
+            run(&argv)?;
+            info!("downloaded to {local_path}");
         }
         Command::NewPod { compute_type, template_id, network_volume_id, name, gpu_type_id } => {
             let template_id = client.resolve_template(template_id).await?;
-            println!("Using template: {template_id}");
+            info!("using template: {template_id}");
             let network_volume_id = network_volume_id.or_else(|| std::env::var("NETWORK_VOLUME_ID").ok());
+
+            // Auto-select cheapest GPU with >=10GB VRAM if not specified.
+            let (gpu_type_id, gpu_price) = if let Some(id) = gpu_type_id {
+                (Some(id), None)
+            } else if matches!(compute_type, runpod::ComputeType::Gpu) {
+                let gpu_types = client.list_gpu_types().await?;
+                let arr = gpu_types.as_array().context("gpu-types not an array")?;
+                let best = arr.iter()
+                    .filter_map(|g| {
+                        let vram = g["memoryInGb"].as_f64()?;
+                        let price = g["lowestPrice"]["uninterruptablePrice"].as_f64()?;
+                        let id = g["id"].as_str()?;
+                        let name = g["displayName"].as_str().unwrap_or(id);
+                        if vram >= 10.0 { Some((price, id.to_string(), name.to_string(), vram)) }
+                        else { None }
+                    })
+                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+                if let Some((price, id, gpu_label, vram)) = best {
+                    info!("auto-selected GPU: {} ({}GB VRAM, ${:.2}/hr)", gpu_label, vram, price);
+                    (Some(id), Some(price))
+                } else {
+                    warn!("no GPU with >=10GB VRAM found; letting RunPod choose");
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
             let pod = client.create_pod(&template_id, compute_type, network_volume_id.as_deref(), &name, gpu_type_id.as_deref()).await?;
             let pod_id = pod.get("id").and_then(|v| v.as_str()).context("created pod missing id")?;
-            println!("Created pod: {pod_id}");
+            info!("created pod: {pod_id}");
+            if let Some(price) = gpu_price {
+                info!("estimated cost: ${price:.2}/hr — pass --gpu-price {price:.2} to listen-test for run log");
+            }
         }
         Command::Normalize { text } => {
             println!("{}", tts::f5::normalizer::normalize(&text));
@@ -190,13 +246,15 @@ async fn main() -> Result<()> {
             cfg_scale,
             poll_secs,
             timeout_mins,
+            seed,
+            gpu_price,
         } => {
             let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
             let input_path = format!("{data_dir}/{name}.txt");
             let normalized_path = format!("{data_dir}/{name}_normalized.txt");
             let wav_path = format!("{data_dir}/{name}_generated.wav");
 
-            println!("normalizing {input_path}");
+            info!("normalizing {input_path}");
             let input = std::fs::read_to_string(&input_path)
                 .with_context(|| format!("reading {input_path}"))?;
             let normalized: String = input
@@ -209,32 +267,47 @@ async fn main() -> Result<()> {
 
             let pod = client.get_pod(&pod_id).await?;
 
+            // Capture GPU info before inference for the run log.
+            let gpu_info_cmd = "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo unknown";
+            let gpu_info = run_output(&runpod::ssh_exec_command(&pod_id, &pod, gpu_info_cmd)?).unwrap_or_else(|_| "unknown".into());
+            info!("GPU: {gpu_info}");
+            let (gpu_name, gpu_vram_mb) = {
+                let mut parts = gpu_info.splitn(2, ',');
+                let n = parts.next().unwrap_or("unknown").trim().to_string();
+                let v = parts.next().and_then(|s| s.trim().trim_end_matches(" MiB").parse::<u64>().ok());
+                (n, v)
+            };
+
             let remote_txt = format!("/workspace/VibeVoice/demo/{name}_normalized.txt");
             run(&runpod::scp_upload_command(&pod_id, &pod, &normalized_path, &remote_txt)?)?;
 
-            println!("ensuring vibevoice installed (/opt/venv)");
+            info!("ensuring vibevoice installed (/opt/venv)");
             let setup_cmd = "set -e; \
-                /opt/venv/bin/python3 -c 'import vibevoice' 2>/dev/null || /opt/venv/bin/pip install -e /workspace/VibeVoice";
+                python3 -c 'import vibevoice' 2>/dev/null || pip install -e /workspace/VibeVoice";
             run(&runpod::ssh_exec_command(&pod_id, &pod, setup_cmd)?)?;
 
             let output_dir = format!("/workspace/output_{name}");
             let log_path = format!("/workspace/output_{name}.log");
-            println!("starting inference (cfg_scale={cfg_scale}, speaker={speaker})");
+            let seed_arg = seed.map(|s| format!("--seed {s}")).unwrap_or_default();
+            info!("starting inference (cfg_scale={cfg_scale}, speaker={speaker}{seed_display})",
+                seed_display = seed.map(|s| format!(", seed={s}")).unwrap_or_default());
             let start_cmd = format!(
                 "cd /workspace/VibeVoice && \
                  rm -f {log_path} && \
-                 nohup /opt/venv/bin/python3 demo/inference_from_file.py \
+                 nohup python3 demo/inference_from_file.py \
                    --model_path vibevoice/VibeVoice-1.5B \
                    --txt_path demo/{name}_normalized.txt \
                    --speaker_names {speaker} \
                    --cfg_scale {cfg_scale} \
+                   {seed_arg} \
                    --output_dir {output_dir} > {log_path} 2>&1 < /dev/null & disown"
             );
             run(&runpod::ssh_exec_command(&pod_id, &pod, &start_cmd)?)?;
 
-            println!("polling {log_path} every {poll_secs}s (timeout {timeout_mins}m)");
+            info!("polling {log_path} every {poll_secs}s (timeout {timeout_mins}m)");
             let inference_start = std::time::Instant::now();
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_mins * 60);
+            let mut seed_used: Option<u64> = seed;
             loop {
                 if tokio::time::Instant::now() >= deadline {
                     anyhow::bail!("timed out waiting for inference after {timeout_mins} minutes");
@@ -244,11 +317,20 @@ async fn main() -> Result<()> {
                     "test -f {log_path} && (grep -q 'RTF (Real' {log_path} && echo DONE || (grep -iq 'Traceback' {log_path} && echo ERROR || echo RUNNING)) || echo MISSING"
                 );
                 let status = run_output(&runpod::ssh_exec_command(&pod_id, &pod, &check_cmd)?)?;
-                println!("status: {status}");
+                info!("status: {status}");
                 match status.as_str() {
                     "DONE" => {
                         let elapsed = inference_start.elapsed();
-                        println!("inference time: {:.1}s", elapsed.as_secs_f64());
+                        info!("inference time: {:.1}s", elapsed.as_secs_f64());
+                        let seed_cmd = format!("grep 'Seed used:' {log_path} || true");
+                        let seed_line = run_output(&runpod::ssh_exec_command(&pod_id, &pod, &seed_cmd)?)?;
+                        if !seed_line.is_empty() {
+                            info!("{seed_line}");
+                            // parse "Seed used: 12345"
+                            if let Some(n) = seed_line.split_whitespace().last().and_then(|s| s.parse().ok()) {
+                                seed_used = Some(n);
+                            }
+                        }
                         break;
                     }
                     "ERROR" => {
@@ -261,19 +343,39 @@ async fn main() -> Result<()> {
                 }
             }
 
-            println!("downloading wav to {wav_path}");
+            info!("downloading wav to {wav_path}");
             let remote_wav = format!("{output_dir}/*.wav");
             run(&runpod::scp_download_command(&pod_id, &pod, &remote_wav, &wav_path)?)?;
 
-            // print audio duration and RTF
+            let mut audio_duration_secs: Option<f64> = None;
+            let wall = inference_start.elapsed().as_secs_f64();
             if let Ok(meta) = hound::WavReader::open(&wav_path) {
                 let spec = meta.spec();
-                let duration_secs = meta.len() as f64 / spec.sample_rate as f64 / spec.channels as f64;
-                let wall = inference_start.elapsed().as_secs_f64();
-                println!("audio duration: {:.1}s  RTF: {:.2}x", duration_secs, wall / duration_secs);
+                let dur = meta.len() as f64 / spec.sample_rate as f64 / spec.channels as f64;
+                audio_duration_secs = Some(dur);
+                info!("audio duration: {:.1}s  RTF: {:.2}x", dur, wall / dur);
             }
 
-            println!("done: {wav_path}");
+            // Append structured run log entry.
+            let entry = serde_json::json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "segment": name,
+                "pod_id": pod_id,
+                "gpu_name": gpu_name,
+                "gpu_vram_mb": gpu_vram_mb,
+                "gpu_price_per_hr": gpu_price,
+                "speaker": speaker,
+                "cfg_scale": cfg_scale,
+                "seed": seed_used,
+                "inference_wall_secs": wall,
+                "audio_duration_secs": audio_duration_secs,
+                "rtf": audio_duration_secs.map(|d| wall / d),
+            });
+            if let Err(e) = append_run_log(entry) {
+                warn!("failed to write run log: {e}");
+            }
+
+            info!("done: {wav_path}");
         }
         Command::Silencedetect {
             wav_path,

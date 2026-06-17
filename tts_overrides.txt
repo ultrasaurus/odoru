@@ -31,3 +31,6 @@ zzz             zee zee zee
 move	        moove
 delete	        deeleet
 <OAD,2237,>     O A D comma 2 2 3 7 comma
+# TODO: quoted punctuation always sounds wrong; ":" → "colon" is a stopgap.
+# Consider a general quoted-punctuation-to-spoken-word pass in the normalizer.
+":"             colon
