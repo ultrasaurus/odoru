@@ -16,9 +16,7 @@ RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
     && cd VibeVoice \
     && git checkout 07cb79feadd2d3fd7f47530d4c964a12857936a0
 
-RUN pip install --no-cache-dir -r /workspace/VibeVoice/requirements.txt
-
-RUN pip install --no-cache-dir --no-deps -e /workspace/VibeVoice
+RUN pip install --no-cache-dir -e /workspace/VibeVoice
 
 COPY voices/sarah/ref.wav /workspace/VibeVoice/demo/voices/en-Sarah_woman.wav
 
