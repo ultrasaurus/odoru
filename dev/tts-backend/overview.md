@@ -36,6 +36,8 @@ Voices are identified by prefixed strings: `"f5:sarah"`, `"kokoro:am_puck"`.
 The prefix is required in all API calls — unprefixed names are rejected.
 `GET /voices` returns a flat list ordered F5 first, then Kokoro.
 
+# TTS Shared 
+
 ## TtsEngine API
 ```rust
 let engine = TtsEngine::builder()
@@ -66,11 +68,3 @@ pub trait TtsBackend: Send + Sync {
 }
 ```
 
-## Audio disk cache (`tts/src/audio_cache.rs`)
-- Location: `~/.odoru/audio/`
-- Files: `<hash>.f32` (raw f32le samples) + `<hash>.json` (metadata)
-- Key: SHA-256(normalized_text + "|" + voice_cache_key)
-- Only used for F5 — Kokoro does not yet opt in (seeking in long Kokoro articles re-synthesizes)
-- `exists(key)` checks file presence only (no reads) — used by `all_audio_cached`
-- `lookup(key)` reads full samples — used during synthesis
-- Enables resumable synthesis: Ctrl+C and restart, completed sentences load instantly

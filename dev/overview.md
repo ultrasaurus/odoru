@@ -85,7 +85,8 @@ See [protocol.md](protocol.md).
 - `VOICES_DIR` env var: path to voices directory
 - `KOKORO_MODEL_DIR` env var: path to Kokoro model (default: `~/.kokoro`)
 - Both engines held in AppState simultaneously when `ODORU_BACKEND=both`
-- In-memory segment cache: SHA-256(voice_id + "|" + text) → Vec<CachedSegment>
+- Audio caches (in-memory segment cache + disk cache): see
+  [tts-backend/cache.md](tts-backend/cache.md)
 - `doc_index`: in-memory `DocumentIndex`
 - `voice_locks`: per-document `RwLock` for `voices.json` writes, keyed by UUID
 - Pronunciation overrides: live-reloadable `RwLock<HashMap>` (see below)

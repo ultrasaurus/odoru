@@ -61,21 +61,14 @@ Long sentences can exceed the voice file's max token count, causing a
 
 ## Performance
 
-- ~0.2 sec/word on M1 (fast enough that disk caching was thought to be not needed for Kokoro, but with long documents needed for seeking and upcoming export feature)
+- ~0.2 sec/word on M1
 - G2P (misaki) is the main latency contributor for short sentences
 - ONNX session is shared across sentences via `Mutex<KokoroInference>`
 
 ## Disk cache
 
-Kokoro sentences are written to the shared audio disk cache (`~/.odoru/audio/`) in
-`tts/src/engine.rs`, the same infrastructure used by F5.
-
-- **Cache key**: raw sentence text + voice cache key (unlike F5 which uses *normalized* text)
-- **Lookup**: checked before synthesis; on hit, inference is skipped entirely
-- **Store**: written after successful synthesis via `spawn_blocking` (blocking I/O)
-
-The key difference from F5: Kokoro uses the original sentence text, not the normalizer
-output, because Kokoro's G2P (misaki) handles raw text directly.
+See [cache.md](cache.md) for the shared audio disk cache. Kokoro uses raw
+sentence text as the cache key (unlike F5 which uses normalised text).
 
 ## Known issues / constraints
 - **Single voice per backend instance**: `KokoroBackend` is initialized with one voice;

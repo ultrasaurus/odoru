@@ -25,14 +25,8 @@
 
 # Open questions / future work
 
-## Audio disk cache: no eviction — grows unbounded
-needs a cleanup strategy (mark-and-sweep; entries already support `invalid: bool` / `invalid_reason` fields for this)
-
-**Idea:** a mark-and-sweep GC pass should scan `~/.odoru/audio/` for `invalid: true` entries
-(and optionally entries older than a TTL) and delete the `.mp3` + `.json` pair. The `invalid_reason`
-field leaves room for additional invalidation sources (`("manual"`, `"ttl"`).
-
 ## Mutable text and audio cache invalidation
+See [tts-backend/cache.md](tts-backend/cache.md) for cache details.
 
 If the user edits a sentence, the cached audio for that sentence is stale.
 The audio cache key is SHA-256(normalized_text + voice_cache_key) — it will
