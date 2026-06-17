@@ -1225,6 +1225,73 @@ html, body {
   pointer-events: none;
 }
 
+/* Author annotations (word/phrase highlights) */
+.annotation {
+  border-radius: 3px;
+  padding: 0.05em 0.1em;
+  cursor: text;
+}
+.annotation-yellow   { background: #fde68a; color: #78350f; }
+.annotation-coral    { background: #fca5a5; color: #7f1d1d; }
+.annotation-mint     { background: #6ee7b7; color: #064e3b; }
+.annotation-blue     { background: #93c5fd; color: #1e3a5f; }
+.annotation-lavender { background: #c4b5fd; color: #3b1f6e; }
+
+/* Annotation color picker popover */
+.annotation-picker {
+  position: fixed;
+  z-index: 1001;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  display: flex;
+  gap: 0.4rem;
+}
+.annotation-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.annotation-swatch:hover          { transform: scale(1.15); }
+.annotation-swatch-active         { border-color: var(--text); }
+.annotation-swatch-yellow         { background: #fde68a; }
+.annotation-swatch-coral          { background: #fca5a5; }
+.annotation-swatch-mint           { background: #6ee7b7; }
+.annotation-swatch-blue           { background: #93c5fd; }
+.annotation-swatch-lavender       { background: #c4b5fd; }
+
+/* Annotation context menu */
+.annotation-context-menu {
+  position: fixed;
+  z-index: 1002;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.25rem 0;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  min-width: 150px;
+}
+.annotation-context-item {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.85rem;
+  text-align: left;
+}
+.annotation-context-item:hover {
+  background: var(--active-bg);
+  color: var(--highlight);
+}
+
 .placeholder {
   font-family: var(--font-mono);
   font-size: 0.85rem;

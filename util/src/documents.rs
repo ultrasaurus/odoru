@@ -603,6 +603,40 @@ pub fn delete_document_in(base: &PathBuf, id: &str) -> Result<()> {
 // Voice state helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Annotation helpers
+// ---------------------------------------------------------------------------
+
+/// Read `annotations.json` for a document, returning an empty array if absent.
+pub fn read_annotations(id: &str) -> Result<serde_json::Value> {
+    let path = doc_dir(&documents_dir()?, id).join("annotations.json");
+    if !path.exists() {
+        return Ok(serde_json::json!([]));
+    }
+    let src = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_str(&src)
+        .with_context(|| format!("failed to parse {}", path.display()))
+}
+
+/// Write `annotations.json` atomically.
+pub fn write_annotations(id: &str, annotations: &serde_json::Value) -> Result<()> {
+    let dir = doc_dir(&documents_dir()?, id);
+    let path = dir.join("annotations.json");
+    let tmp  = dir.join("annotations.json.tmp");
+    let json = serde_json::to_string_pretty(annotations)
+        .context("failed to serialize annotations")?;
+    std::fs::write(&tmp, &json)
+        .with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to rename {} → {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Voice state helpers
+// ---------------------------------------------------------------------------
+
 /// Read `voices.json` for a document directory.
 pub fn read_voices(id: &str) -> Result<VoicesMap> {
     read_voices_in(&doc_dir(&documents_dir()?, id))

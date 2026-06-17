@@ -1,10 +1,11 @@
 # Planned improvements
 
 ## Authoring
-- build incrementally to support word-level timestamps, pre-req for transclusion
-- author may highlight portions of text for their own use (not published)
+build incrementally to support word-level timestamps, pre-req for transclusion
+- author may highlight portions of text for their own use (not published) 
+  see [annotation.md](annotation.md)
 - highlighted text may be played back crossing sentence boundaries
-  - requires word-level timestamps
+  (equires word-level timestamps)
 
 
 ## Polish / small bugs

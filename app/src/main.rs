@@ -1061,6 +1061,48 @@ fn restart_pending_jobs(state: Arc<AppState>) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /documents/:id/annotations — read annotations
+// PUT /documents/:id/annotations — replace annotations
+// ---------------------------------------------------------------------------
+
+async fn get_annotations(Path(id): Path<String>) -> impl IntoResponse {
+    match documents::lookup_by_id(&id) {
+        Ok(None) => return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Ok(Some(_)) => {}
+    }
+    match tokio::task::spawn_blocking(move || documents::read_annotations(&id)).await {
+        Ok(Ok(v))  => Json(v).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Err(e)     => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+async fn put_annotations(
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    match documents::lookup_by_id(&id) {
+        Ok(None) => return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "document not found" }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Ok(Some(_)) => {}
+    }
+    match tokio::task::spawn_blocking(move || documents::write_annotations(&id, &body)).await {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Err(e)     => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // GET /overrides  — list all pronunciation overrides
 // POST /overrides — add or update an override
 // DELETE /overrides/:word — remove an override
@@ -1547,6 +1589,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/documents", get(list_documents).post(create_document))
         .route("/documents/:id", get(get_document).patch(patch_document).delete(delete_document))
         .route("/documents/:id/voices/:voice_id", delete(delete_voice))
+        .route("/documents/:id/annotations", get(get_annotations).put(put_annotations))
         .route("/voices", get(get_voices))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/:id", get(get_job))

@@ -8,6 +8,7 @@ import {
   wireControls, controlsHtml, grabControlEls,
 } from './ui'
 import { pollJob } from './jobs'
+import { applyAnnotations, initAnnotationPicker } from './annotations'
 
 export function mount(onReader: () => void): () => void {
   const app = document.getElementById('app')!
@@ -780,7 +781,7 @@ export function mount(onReader: () => void): () => void {
     isEditMode = edit
     editArea.style.display = edit ? '' : 'none'
     articleArea.style.display = edit ? 'none' : ''
-    editToggleBtn.textContent = edit ? 'Preview' : 'Edit'
+    editToggleBtn.textContent = edit ? 'Read' : 'Edit'
     if (edit) {
       player.stop()
     } else {
@@ -796,6 +797,7 @@ export function mount(onReader: () => void): () => void {
             currentHeadings = headings
             editCore.renderOutline(headings, i => player.seekTo(i))
             editOutlineSection.style.display = headings.length ? '' : 'none'
+            if (currentDocId) applyAnnotations(articleContent, currentDocId)
           } else {
             articleContent.innerHTML = '<div class="placeholder">Nothing to preview.</div>'
             editOutlineSection.style.display = 'none'
@@ -933,7 +935,7 @@ export function mount(onReader: () => void): () => void {
         isEditMode = true
         editArea.style.display = ''
         articleArea.style.display = 'none'
-        editToggleBtn.textContent = 'Preview'
+        editToggleBtn.textContent = 'Read'
       } else {
         // No doc — blank edit slate
         editArea.style.display = ''
@@ -960,6 +962,8 @@ export function mount(onReader: () => void): () => void {
 
   const player   = new Player(articleContent)
   const editCore = new ReaderCore(articleContent, editOutlineList)
+
+  initAnnotationPicker(articleArea, () => currentDocId, () => !isEditMode)
 
   player.onError(msg => {
     setJobStatus(`Error: ${msg}`)
@@ -1147,6 +1151,7 @@ export function mount(onReader: () => void): () => void {
       currentHeadings = headings
       editCore.renderOutline(headings, _i => { /* seek wired in startListen */ })
       editOutlineSection.style.display = headings.length ? '' : 'none'
+      if (currentDocId) applyAnnotations(articleContent, currentDocId)
       updateEstimate(state.plain_text ?? '')
       const suffix = wasDedup ? ' (previously fetched)' : ''
       fetchStatus.textContent = `✔ ${state.title ?? url}${suffix}`
@@ -1358,6 +1363,7 @@ export function mount(onReader: () => void): () => void {
       currentHeadings = headings
       editCore.renderOutline(headings, _i => {})
       editOutlineSection.style.display = headings.length ? '' : 'none'
+      applyAnnotations(articleContent, currentDocId!)
 
       const voice = pickVoice(data.voices)
       const voiceEntry = voice ? data.voices[voice] : undefined
