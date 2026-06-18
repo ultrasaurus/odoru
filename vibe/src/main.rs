@@ -54,6 +54,15 @@ enum Command {
         #[arg(long)]
         gpu_type_id: Option<String>,
     },
+    /// Poll a pod every 10 minutes and send a macOS notification while it
+    /// is still running. Exits when the pod is gone. Auto-launched by
+    /// listen-test on completion.
+    WatchPod {
+        pod_id: String,
+        /// Poll interval in seconds (default 600)
+        #[arg(long, default_value_t = 600)]
+        interval_secs: u64,
+    },
     /// Normalize text (calls tts::f5::normalizer::normalize)
     Normalize { text: String },
     /// Run ffmpeg silencedetect on a local wav file
@@ -399,6 +408,45 @@ async fn main() -> Result<()> {
             }
 
             info!("done: {wav_path}");
+
+            // Spawn watch-pod in the background so the user gets a macOS
+            // notification if the pod is still running after the test ends.
+            let exe = std::env::current_exe().unwrap_or_else(|_| "vibe".into());
+            match std::process::Command::new(&exe)
+                .args(["watch-pod", &pod_id])
+                .spawn()
+            {
+                Ok(_) => info!("watch-pod spawned for {pod_id}"),
+                Err(e) => warn!("failed to spawn watch-pod: {e}"),
+            }
+        }
+        Command::WatchPod { pod_id, interval_secs } => {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
+                match client.get_pod(&pod_id).await {
+                    Ok(pod) => {
+                        let desired = pod["desiredStatus"].as_str().unwrap_or("");
+                        let runtime = &pod["runtime"];
+                        let is_running = desired == "RUNNING" && !runtime.is_null();
+                        if !is_running {
+                            info!("watch-pod: {pod_id} is no longer running, exiting");
+                            break;
+                        }
+                        let msg = format!("Pod {} is still running — remember to terminate it!", pod_id);
+                        let _ = std::process::Command::new("osascript")
+                            .args(["-e", &format!(
+                                "display notification \"{}\" with title \"RunPod\" sound name \"Basso\"",
+                                msg
+                            )])
+                            .status();
+                        info!("watch-pod: notified (pod {pod_id} still running)");
+                    }
+                    Err(e) => {
+                        warn!("watch-pod: failed to get pod status: {e}");
+                        break;
+                    }
+                }
+            }
         }
         Command::Silencedetect {
             wav_path,

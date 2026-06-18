@@ -40,8 +40,9 @@ Steps
      chosen as preferred voice (see `vibe/dev/voices.md`)
    - [x] Full run: seg01–seg26 with seed 71463
    - [x] Stitch: seg12–16, seg16–25 stitched; seg26 (References) separate
-   - [ ] **Ongoing**: investigate seg10 repeated-phrase hallucination on
-     24GB+ VRAM GPU (was observed on RTX A4000 16GB)
+   - [x] **Resolved**: repeated-phrase hallucination on seg10 was VRAM-related
+     (RTX A4000 16GB). Re-run on RTX A6000 48GB — clean. Fixed by enforcing
+     >=24GB VRAM minimum in `new-pod`.
 
 ## Known TTS truncation cases
 

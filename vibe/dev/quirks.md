@@ -47,18 +47,23 @@ RTF varies significantly by GPU. Higher VRAM cards are noticeably faster:
 |---------------|-------|-------------|
 | RTX A5000     | 24GB  | 0.29–0.30x  |
 | RTX 3090      | 24GB  | 0.29–0.40x  |
+| RTX A6000     | 48GB  | 0.36x       |
 | RTX A4000     | 16GB  | 0.45–0.87x  |
+
+**Conclusion**: 24GB+ VRAM is the threshold for good performance. The A4000
+(16GB) is significantly slower and may contribute to hallucinations. The
+>=24GB VRAM filter is now the default in `new-pod`.
 
 Hypothesis: cramped VRAM (16GB) may also contribute to truncation, but
 seg07 truncated on a 3090 (24GB), so VRAM alone does not explain it.
 
 ## Repeated/Similar Phrases
 
-seg09 content has repeated similar phrases that cause the model to
-hallucinate or skip ahead. Observed on RTX A4000 (16GB) during seed
-discovery run (no explicit seed). Not a normalization issue — possible
-workaround is splitting the segment at that point. Investigating whether
-minimum 24GB VRAM prevents this.
+seg09/seg10 content has repeated similar phrases that caused the model to
+hallucinate or skip ahead. Observed on RTX A4000 (16GB). Re-run on RTX
+A6000 (48GB) with >=24GB VRAM filter — **no hallucination**. Confirmed
+VRAM-related, not content-related. Fixed by enforcing 24GB+ minimum in
+`new-pod`.
 
 ## Punctuation Issues
 
