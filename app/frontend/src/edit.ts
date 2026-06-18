@@ -8,7 +8,7 @@ import {
   wireControls, controlsHtml, grabControlEls,
 } from './ui'
 import { pollJob } from './jobs'
-import { applyAnnotations, initAnnotationPicker } from './annotations'
+import { applyAnnotations, initAnnotationPicker, listenAnnotation } from './annotations'
 
 export function mount(onReader: () => void): () => void {
   const app = document.getElementById('app')!
@@ -964,6 +964,17 @@ export function mount(onReader: () => void): () => void {
   const editCore = new ReaderCore(articleContent, editOutlineList)
 
   initAnnotationPicker(articleArea, () => currentDocId, () => !isEditMode, () => selectedVoice)
+
+  // Delegated click on annotation marks — play sentence up to the highlighted word.
+  // Capture phase so this fires before the segment's direct bubble listener (seekTo),
+  // and stopPropagation() prevents the segment seek from also triggering.
+  articleContent.addEventListener('click', e => {
+    const mark = (e.target as HTMLElement).closest<HTMLElement>('.annotation')
+    if (!mark || !mark.dataset.id) return
+    e.stopPropagation()
+    const annText = mark.textContent ?? ''
+    listenAnnotation(mark, annText, player, () => selectedVoice)
+  }, { capture: true })
 
   player.onError(msg => {
     setJobStatus(`Error: ${msg}`)

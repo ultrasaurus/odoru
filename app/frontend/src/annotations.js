@@ -128,12 +128,22 @@ export async function wrapSelection(docId, color, voice) {
     if (range.compareBoundaryPoints(Range.END_TO_END, segRange) > 0) {
         range.setEnd(segRange.endContainer, segRange.endOffset);
     }
-    const text = range.toString().trim();
-    if (!text)
+    const rawText = range.toString().trim();
+    if (!rawText)
         return null;
     const segText = seg.textContent ?? '';
-    const idx = segText.indexOf(text);
-    const context = idx !== -1 ? makeContext(segText, idx, text.length) : '';
+    let idx = segText.indexOf(rawText);
+    if (idx === -1)
+        return null;
+    let len = rawText.length;
+    // Expand to word boundaries
+    const wordChar = /\w/;
+    while (idx > 0 && wordChar.test(segText[idx - 1]))
+        idx--;
+    while (idx + len < segText.length && wordChar.test(segText[idx + len]))
+        len++;
+    const text = segText.slice(idx, idx + len);
+    const context = makeContext(segText, idx, len);
     const ann = {
         id: generateId(),
         text,
@@ -141,14 +151,9 @@ export async function wrapSelection(docId, color, voice) {
         color,
         created_at: new Date().toISOString(),
     };
-    try {
-        range.surroundContents(createMarkEl(ann));
-    }
-    catch {
-        sel.removeAllRanges();
-        return null;
-    }
     sel.removeAllRanges();
+    if (!wrapInSegment(seg, idx, len, ann))
+        return null;
     // Persist: fetch current list, append, PUT (optimistic — DOM already updated)
     const current = await fetchAnnotations(docId);
     await persistAnnotations(docId, [...current, ann], voice);
@@ -163,6 +168,73 @@ export async function deleteAnnotation(container, docId, annId) {
     // Remove from server (no alignment needed on delete)
     const current = await fetchAnnotations(docId);
     await persistAnnotations(docId, current.filter(a => a.id !== annId));
+}
+// ── Listen to annotation ─────────────────────────────────────────────────────
+let listenGen = 0;
+function findAnnotationWordRange(annText, words) {
+    const needle = annText.toLowerCase().trim();
+    const joined = words.map(w => w.word).join(' ');
+    const idx = joined.toLowerCase().indexOf(needle);
+    if (idx === -1)
+        return null;
+    let charOffset = 0;
+    let lastEnd;
+    for (const w of words) {
+        const wordEnd = charOffset + w.word.length;
+        if (wordEnd > idx && charOffset < idx + needle.length) {
+            if (w.end !== undefined)
+                lastEnd = w.end;
+        }
+        charOffset = wordEnd + 1; // +1 for the space
+    }
+    if (lastEnd === undefined)
+        return null;
+    return { end: lastEnd + 0.15 }; // 150ms buffer so the word has time to finish
+}
+export async function listenAnnotation(mark, annText, player, getVoice) {
+    if (!player.hasAudio)
+        return;
+    const seg = mark.closest('.segment');
+    if (!seg)
+        return;
+    const segIndex = player.segmentIndexForEl(seg);
+    if (segIndex === -1)
+        return;
+    const voice = getVoice();
+    if (!voice)
+        return;
+    const gen = ++listenGen;
+    mark.classList.add('annotation-loading');
+    try {
+        const res = await fetch(`/voices/${encodeURIComponent(voice)}/words`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sentence: seg.textContent ?? '' }),
+        });
+        if (!res.ok) {
+            console.error('listenAnnotation: words fetch failed', res.status, await res.text());
+            mark.classList.add('annotation-error');
+            return;
+        }
+        const data = await res.json();
+        const words = data.words ?? [];
+        if (gen !== listenGen)
+            return; // superseded by a later click
+        const range = findAnnotationWordRange(annText, words);
+        if (!range) {
+            console.error('listenAnnotation: could not match annotation text in words', { annText, words });
+            mark.classList.add('annotation-error');
+            return;
+        }
+        player.listenTo(segIndex, range.end);
+    }
+    catch (err) {
+        console.error('listenAnnotation error:', err);
+        mark.classList.add('annotation-error');
+    }
+    finally {
+        mark.classList.remove('annotation-loading');
+    }
 }
 // ── Color picker popover ─────────────────────────────────────────────────────
 let lastColor = 'yellow';

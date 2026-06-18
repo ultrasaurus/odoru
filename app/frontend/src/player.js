@@ -74,6 +74,7 @@ export class Player {
     // Index to seek to once that segment arrives, or -1 if no pending seek.
     pendingSeekIndex = -1;
     pendingSeekWasPlaying = false;
+    stopAt = null;
     // Incremented by reset(). Captured at the start of each synthesize() call and
     // checked after every decodeAudioData() await. If the user switches documents
     // while a decode is in flight, reset() fires and bumps the generation before
@@ -221,6 +222,21 @@ export class Player {
     segmentStartTime(index) {
         return this.segments[index]?.startTime ?? null;
     }
+    /** Index of a segment DOM element in the internal array, or -1 if not found. */
+    segmentIndexForEl(el) {
+        return this.segmentEls.indexOf(el);
+    }
+    /**
+     * Seek to the start of `segIndex` and play, stopping automatically when
+     * `endOffsetSecs` seconds into that segment have elapsed.
+     * No-op if audio is not loaded or the segment is out of range.
+     */
+    listenTo(segIndex, endOffsetSecs) {
+        if (!this.hasAudio || segIndex >= this.segments.length)
+            return;
+        this.stopAt = this.segments[segIndex].startTime + endOffsetSecs;
+        this._doSeek(segIndex, true);
+    }
     get synthesizedWordCount() {
         return this.segments
             .map(s => s.transcript.text.trim().split(/\s+/).filter(Boolean).length)
@@ -270,6 +286,7 @@ export class Player {
         this.decodeChain = Promise.resolve();
         this.pendingSeekIndex = -1;
         this.pendingSeekWasPlaying = false;
+        this.stopAt = null;
     }
     renderSegment(transcript, index) {
         const clickHandler = () => { this.seekTo(index); };
@@ -308,6 +325,11 @@ export class Player {
             const pos = this.position;
             this.timeUpdateCbs.forEach(cb => cb(pos));
             this.highlightCurrent();
+            if (this.stopAt !== null && pos >= this.stopAt) {
+                this.stopAt = null;
+                this.pause();
+                return;
+            }
             // Detect end of playback — only after synthesis is complete
             const last = this.segments[this.segments.length - 1];
             if (this.done && last && this.queue.currentTime >= this.queue.firstStartTime +

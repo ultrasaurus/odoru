@@ -1237,6 +1237,17 @@ html, body {
 .annotation-blue     { background: #93c5fd; color: #1e3a5f; }
 .annotation-lavender { background: #c4b5fd; color: #3b1f6e; }
 
+/* Loading state: dotted border drawn inside the highlight */
+.annotation-loading { cursor: wait; }
+.annotation-yellow.annotation-loading   { outline: 2px dotted #b45309; outline-offset: -2px; }
+.annotation-coral.annotation-loading    { outline: 2px dotted #b91c1c; outline-offset: -2px; }
+.annotation-mint.annotation-loading     { outline: 2px dotted #047857; outline-offset: -2px; }
+.annotation-blue.annotation-loading     { outline: 2px dotted #1d4ed8; outline-offset: -2px; }
+.annotation-lavender.annotation-loading { outline: 2px dotted #6d28d9; outline-offset: -2px; }
+
+/* Error state (debugging) */
+.annotation-error { outline: 2px dotted red; outline-offset: -2px; cursor: default; }
+
 /* Annotation color picker popover */
 .annotation-picker {
   position: fixed;

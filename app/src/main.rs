@@ -293,6 +293,51 @@ async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 // ---------------------------------------------------------------------------
+// POST /voices/:voice_id/words — word timestamps for a sentence
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct WordsRequest {
+    sentence: String,
+}
+
+async fn get_words(
+    Path(voice_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<WordsRequest>,
+) -> impl IntoResponse {
+    let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
+        Ok(pair) => pair,
+        Err(e) => return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e }))).into_response(),
+    };
+
+    let voice_cache_key = match engine.voice_cache_key(&voice_name) {
+        Some(k) => k,
+        None => return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "unknown voice" }))).into_response(),
+    };
+
+    if voice_id.starts_with("f5:") {
+        warn!("POST /voices/{voice_id}/words: forced alignment for F5 not yet implemented");
+        return (StatusCode::NOT_IMPLEMENTED,
+            Json(serde_json::json!({ "error": "word timestamps not yet implemented for F5" })))
+            .into_response();
+    }
+
+    let sentence = body.sentence.clone();
+    let key = tts::audio_cache::cache_key(&sentence, &voice_cache_key);
+
+    match tokio::task::spawn_blocking(move || tts::alignment::ensure_words(&key)).await {
+        Ok(Ok(words)) => Json(serde_json::json!({ "words": words })).into_response(),
+        Ok(Err(e)) => (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // POST /documents — fetch-or-create, returns { id } immediately
 // ---------------------------------------------------------------------------
 
@@ -1669,6 +1714,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/documents/:id/voices/:voice_id", delete(delete_voice))
         .route("/documents/:id/annotations", get(get_annotations).put(put_annotations))
         .route("/voices", get(get_voices))
+        .route("/voices/:voice_id/words", post(get_words))
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/:id", get(get_job))
         .route("/jobs/:id/pause", post(pause_job))

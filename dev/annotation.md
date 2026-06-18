@@ -95,20 +95,57 @@ Stage 2 may add a margin listen button alongside this.
 ### Stage 1 ✓ done
 
 - Add `annotations.json` sidecar file per document (server-side)
-- `GET /documents/:id/annotations` and `PATCH /documents/:id/annotations`
+- `GET /documents/:id/annotations` and `PUT /documents/:id/annotations`
+  (body: `{ annotations, voice }` — voice triggers background alignment on save)
 - Replace localStorage calls in `annotations.ts` with API calls
 - Context-menu delete: right-click `.annotation` span → call delete API
 
-### Stage 2
+### Stage 2 ✓ done (Kokoro; F5 returns 501)
 
-- Listen to highlighted text: play only the audio segments that overlap with annotated spans
-- Margin button per annotation as alternate entry point for delete / listen
+**Click an annotation mark → plays from sentence start, stops at word end.**
+
+- `POST /voices/:voice_id/words` — body `{ sentence: string }`, returns `{ words: [...] }`
+  - Kokoro: runs forced alignment (lazy, cached in audio cache sidecar `.json`)
+  - F5: returns 501 NOT_IMPLEMENTED (alignment requires normalizer merge; deferred)
+- `tts/src/alignment.rs` — `ensure_words(key)`: reads cached words or runs
+  forced alignment via `../forced-alignment` crate, writes result back to sidecar
+- `app/frontend/src/player.ts`:
+  - `segmentIndexForEl(el)` — maps segment DOM element → index
+  - `listenTo(segIndex, endOffsetSecs)` — seeks to segment start, stops at offset
+  - `stopAt` — checked each RAF tick; pauses when playback position reaches it
+- `app/frontend/src/annotations.ts`:
+  - `listenAnnotation(mark, annText, player, getVoice)` — POSTs to words endpoint,
+    matches annotation text in word list, calls `player.listenTo`
+  - Loading state: dotted border in darker shade of annotation color (drawn inside
+    highlight via `outline-offset: -2px`), cursor `wait`
+  - Error state: red dotted border + `console.error` (debugging aid)
+  - Generation counter (`listenGen`) discards stale fetch results if user clicks again
+- `app/frontend/src/edit.ts`:
+  - Delegated click handler on `articleContent` (capture phase) for `.annotation` marks
+  - Capture phase prevents the segment's `seekTo` from also firing on the same click
+
+**Word boundary snapping:** `wrapSelection` expands the selection left/right to
+full word boundaries before saving and wrapping in the DOM. Prevents highlights
+that clip the first or last letter of a word.
+
+**Known limitations / deferred:**
+- F5 alignment not yet implemented (needs normalizer merge to map word timestamps
+  back to original text)
+- Listen starts from sentence start (no per-word start offset yet)
+- Cross-sentence annotations not yet supported
+- Margin listen button not yet added
 
 ## Key files
 
-- `app/frontend/src/annotations.ts` — new module (all annotation logic)
-- `app/frontend/src/reader-author.ts` — wire in applyAnnotations + mouseup handler
-- `app/frontend/src/edit.ts` — rename Preview → Read
-- `app/frontend/src/style.css` — `.annotation` styles + color variants + popover
-- `util/src/documents.rs` — (Stage 1) annotations sidecar file path
-- `app/src/` — (Stage 1) REST endpoints for annotations
+- `app/frontend/src/annotations.ts` — annotation logic: create, apply, delete, listen
+- `app/frontend/src/edit.ts` — wires annotation picker and click-to-listen handler
+- `app/frontend/src/player.ts` — `listenTo`, `segmentIndexForEl`, `stopAt`
+- `app/frontend/src/style.css` — `.annotation` styles, loading/error states
+- `util/src/documents.rs` — `read_annotations` / `write_annotations` sidecar helpers
+- `tts/src/alignment.rs` — `ensure_words`: lazy forced alignment, cached in sidecar
+- `tts/src/audio_cache.rs` — `Meta` struct (now public, includes `words` field),
+  `meta_path`, `mp3_path`, `read_meta`, `write_meta` helpers
+- `tts/src/lib.rs` — exports `pub mod alignment`
+- `app/src/main.rs` — REST endpoints: annotations CRUD + `POST /voices/:id/words`,
+  background `align_annotations_for_doc` task on annotation save
+- `dev/annotation.md` — this file
