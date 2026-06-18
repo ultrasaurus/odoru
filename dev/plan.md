@@ -2,7 +2,7 @@
 
 ## Authoring
 build incrementally to support word-level timestamps, pre-req for transclusion
-- author may highlight portions of text for their own use (not published) 
+- author may highlight portions of text for their own use (not published)
   see [annotation.md](annotation.md)
 - highlighted text may be played back crossing sentence boundaries
   (equires word-level timestamps)
@@ -20,9 +20,16 @@ build incrementally to support word-level timestamps, pre-req for transclusion
 - upload text/markdown docs to synthesize
 - Open button in Documents panel: navigate to reader (or editor?) for that document
 
-
 ## TTS improvements
 - Abbreviation edge cases: `D. C.`, `pp.` not yet handled in sentence splitter
+- Move common code into forced-alignment crate (rename audio-text):
+  - `tts` crate has its own sentence splitter (also implemented client-side),
+    which is more document-aware. The client-side could be address by
+    compilation to WASM. Would be nice to consolidate this code in one place
+    that might also receive future attention from open source developers.
+    Deferred until implementation is more mature.
+  - normalize is another candidate for audio-text crate. Deferred until we have
+    per document normalization, so we move cruft out of `tts_overrides.txt`
 
 # Open questions / future work
 

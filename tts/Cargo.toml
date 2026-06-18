@@ -35,7 +35,7 @@ unicode-segmentation = "1"
 util = { path = "../util" }
 
 # Word-level transcript types and forced alignment
-forced-alignment = { path = "../../forced-alignment" }
+forced-alignment = { git = "https://github.com/ultrasaurus/forced-alignment-rs", tag = "v0.1.0" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
