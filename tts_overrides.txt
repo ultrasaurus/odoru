@@ -38,3 +38,4 @@ delete	        deeleet
 "."             Baseline dot symbol
 "*D"            asterisk dee
 #s              marker S
+printer/graohic printer or graphic

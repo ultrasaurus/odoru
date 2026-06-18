@@ -32,3 +32,17 @@ curl --request POST \
 
 The response JSON includes `"id"` — copy that value into `TEMPLATE` in
 `vibe/.env` so `new-pod` picks it up automatically.
+
+## modify a template for new container version
+
+```
+VERSION=v7
+curl --request PATCH \
+  --url https://rest.runpod.io/v1/templates/$TEMPLATE_ID \
+  --header "Authorization: Bearer $RUNPOD_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data "{
+  \"imageName\": \"dockersaura/vibe:$VERSION\",
+  \"name\": \"vibe $VERSION\"
+}"
+```

@@ -12,10 +12,10 @@ After units test past, verify by listening with authorship.txt sections
   Scope the rule to 3-letter acronyms, with an override mechanism for
   exceptions.
   FYI: this was intended behavior. Added more test cases.
-- ✅ **Em dash "--"**: tried changing from spaces to "," for a pause cue,
-  but listening to the multiparty section showed several `--` occurrences
-  produced hallucinated/garbled words ("prawned", "prawnnd") in VibeVoice.
-  Reverted back to spaces (each `-` of `--` becomes a space, as before).
+- ✅ **Em dash "--"**: initially reverted to spaces after "prawned"
+  hallucinations in VibeVoice. Later re-tested with segmented approach;
+  extra whitespace caused vocalization artifacts between words. Changed to
+  `, ` (comma-space) as of 2026-06-18 — confirmed improvement on seg14/15.
 - ✅ **Detect ref/code patterns and fix normalization.** Patterns like
   `<Ref-1.l>`, `<Ref-1.l:i;LL>`, `(4b "*D" .l)`, `<OAD,2237,>`,
   `(DDD,xxx,bb)` (number.letter refs, angle-bracket tags,
@@ -116,17 +116,7 @@ Notes:
   above: lowercase letter-runs left as-is aren't reliably spelled out by
   VibeVoice.
 
-**Next steps** (pending pod restart):
-- Re-normalize `vibe/data/odoru_multiparty.txt` and
-  `vibe/data/odoru_traveling.txt` with the `--`→space revert and the
-  current `tts_overrides.txt` (`<4b:mi>`, `<ref-1.l:i;ll>`).
-- Regenerate audio for both and listen again — check whether the
-  "prawned"/"prawnnd" hallucinations are gone.
-- If `<OAD,2237,>` and `(EEE,yy,cc)` still garble, investigate trailing
-  punctuation / large-number-next-to-code patterns separately.
-- The 22 pre-chunked segments in `vibe/data/segments/` (seg01-seg22,
-  normalized) are ready but not yet run through VibeVoice — run once the
-  above listen tests look good.
+**Next steps** — ✅ all completed 2026-06-14/15:
 
 ## E. `augment_multiparty`/`augment_traveling` listen-test findings
 (2026-06-14, two runs: 7:30pm and 10pm, GPU pod `ypl1py60u8knen`)
@@ -163,6 +153,29 @@ themselves, keeping their contents) at the end of normalization, fixed
 as a fraction). Not yet known whether these cause hallucinations;
 revisit if found in future listen tests, likely via
 `apply_punctuated_overrides` or a dedicated fraction pass.
+
+## G. Fixes added 2026-06-17/18 (authorship segmented listen tests)
+
+All confirmed working via listen tests on seg01–seg26 of `authorship.txt`.
+
+- ✅ **`strip_short_quotes`** (Pass 0): strip `"content"` where content is
+  ≤5 words. Prevents TTS mangling of brief quoted phrases.
+- ✅ **`spell_item_numbers`** (Pass 2c): `Item 71279` → `Item seven one
+  two seven nine`. Applies to 4+ digit numbers after `Item` or `Ref`.
+  Excludes comma-grouped numbers like `2,345`.
+- ✅ **`replace_identifier_dots`** (Pass 3b): `.` followed by alphanumeric,
+  not preceded by `.` → ` dot `. Catches `4b.l`, `Ref.dt`, standalone
+  `.l`. General rule covers any link-notation suffix.
+- ✅ **Leading-zero digit sequences** (Pass 4f): tokens like `0609` →
+  `zero six zero nine`. Previously misread as "zero b ol nine".
+- ✅ **Ellipsis stripping with leading space** (Pass 7): ` ...` → `` (empty)
+  so `every ...,` → `every,` not `every ,`. Avoids orphaned punctuation.
+- ✅ **`parse_overrides` `#` fix**: was skipping any line starting with `#`,
+  silently dropping override keys like `#x` and `#s`. Fixed to require
+  `# ` (hash + space) for comments.
+- ✅ **Em-dash → `, `** (Pass 2a): ` -- ` and `—` now become `, ` rather
+  than extra spaces. Extra whitespace caused audible vocalization artifacts
+  in VibeVoice (confirmed seg14/15 improvement 2026-06-18).
 
 ## F. Re-test after bracket-stripping + colon-override fix
 (2026-06-14, pod `kdkms4m3d7opyt`, RTX A4000, GPU)

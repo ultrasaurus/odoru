@@ -20,6 +20,9 @@ RUN pip install --no-cache-dir -e /workspace/VibeVoice
 
 COPY voices/sarah/ref.wav /workspace/VibeVoice/demo/voices/en-Sarah_woman.wav
 
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('vibevoice/VibeVoice-1.5B')"
+RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-1.5B')"
+
 # sshd, so RunPod can expose a direct ssh/scp port into the container
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd

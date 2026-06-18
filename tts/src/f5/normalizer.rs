@@ -142,6 +142,10 @@ pub fn normalize(text: &str) -> String {
     // Pass 2: expand year ranges (4-digit year, hyphen, 2+ digits).
     let text = expand_year_ranges(&text);
 
+    // Pass 2a: replace em-dashes and double-hyphens with comma so TTS gets a
+    // clean pause cue instead of extra whitespace that causes vocalisation artifacts.
+    let text = text.replace('\u{2014}', ",").replace(" -- ", ", ");
+
     // Pass 2b: expand comma-grouped numbers (2,000 -> "two thousand").
     let text = expand_comma_numbers(&text);
 
@@ -546,6 +550,9 @@ fn replace_ellipsis(text: &str) -> String {
     // Strip ellipses entirely — "..." tricks VibeVoice into thinking the
     // sentence is unfinished, causing looping/echoing artifacts. Adding a
     // newline or period in their place causes a "taunt" mispronunciation.
+    // Also consume any leading whitespace so `every ...,` → `every,` rather
+    // than leaving an orphaned ` ,` that TTS mispronounces.
+    let text = text.replace(" ...", "").replace(" \u{2026}", "");
     text.replace("...", "").replace('\u{2026}', "")
 }
 
@@ -682,6 +689,9 @@ mod tests {
         assert_eq!(replace_ellipsis(r#"foo..." bar"#),   r#"foo" bar"#);
         assert_eq!(replace_ellipsis("foo\u{2026}bar"),   "foobar");
         assert_eq!(replace_ellipsis("foo\u{2026},bar"),  "foo,bar");
+        // leading space consumed so orphaned ` ,` doesn't remain
+        assert_eq!(replace_ellipsis("every ..., and"),   "every, and");
+        assert_eq!(replace_ellipsis("every \u{2026}, and"), "every, and");
     }
 
     #[test]
@@ -762,10 +772,10 @@ mod tests {
     }
 
     #[test]
-    fn em_dash_becomes_space() {
+    fn em_dash_becomes_comma() {
         assert_eq!(
             normalize("Statement 4b -- or, to conceptualize"),
-            "Statement 4 b    or, to conceptualize"
+            "Statement 4 b, or, to conceptualize"
         );
     }
 

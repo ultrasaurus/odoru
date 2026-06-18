@@ -38,7 +38,7 @@ enum Command {
         local_path: Option<String>,
     },
     /// Create a new pod from a template (uses the only template if
-    /// none specified). Auto-selects cheapest GPU with >=10GB VRAM
+    /// none specified). Auto-selects cheapest GPU with >=24GB VRAM
     /// unless --gpu-type-id is given.
     NewPod {
         compute_type: runpod::ComputeType,
@@ -50,7 +50,7 @@ enum Command {
         #[arg(short, long, default_value = "vibevoice")]
         name: String,
         /// GPU type id (see `gpu-types`), e.g. "NVIDIA A40". If omitted,
-        /// auto-selects cheapest GPU with >=10GB VRAM.
+        /// auto-selects cheapest GPU with >=24GB VRAM.
         #[arg(long)]
         gpu_type_id: Option<String>,
     },
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
             info!("using template: {template_id}");
             let network_volume_id = network_volume_id;
 
-            // Build candidate GPU list sorted by price ascending (>=10GB VRAM).
+            // Build candidate GPU list sorted by price ascending (>=24GB VRAM).
             // If a specific gpu_type_id was given, use only that one.
             let candidates: Vec<(f64, String, String, f64)> = if let Some(id) = gpu_type_id {
                 vec![(0.0, id.clone(), id, 0.0)]
@@ -214,7 +214,7 @@ async fn main() -> Result<()> {
                         let price = g["lowestPrice"]["uninterruptablePrice"].as_f64()?;
                         let id = g["id"].as_str()?;
                         let label = g["displayName"].as_str().unwrap_or(id);
-                        if vram >= 10.0 { Some((price, id.to_string(), label.to_string(), vram)) }
+                        if vram >= 24.0 { Some((price, id.to_string(), label.to_string(), vram)) }
                         else { None }
                     })
                     .collect();
@@ -225,7 +225,7 @@ async fn main() -> Result<()> {
             };
 
             if candidates.is_empty() && matches!(compute_type, runpod::ComputeType::Gpu) {
-                warn!("no GPU with >=10GB VRAM found; letting RunPod choose");
+                warn!("no GPU with >=24GB VRAM found; letting RunPod choose");
             }
 
             // Try candidates in price order, falling back on "not available" errors.
