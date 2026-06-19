@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 pub const WATCHDOG_INTERVAL: Duration = Duration::from_secs(60);
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 #[derive(Clone, Default)]
 pub struct ActivityTracker {

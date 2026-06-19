@@ -31,18 +31,7 @@ Fill in:
 
 ## Docker image
 
-Build and push (must be run from the repo root, bump the version tag each
-time — RunPod won't pull an updated image if the tag hasn't changed):
-
-```
-VERSION=v8
-docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
-docker tag vibe:latest dockersaura/vibe:$VERSION
-docker push dockersaura/vibe:$VERSION
-```
-
-Then update the RunPod template to point at the new tag before creating a
-new pod (see `runpod.md`).
+see [setup.md](setup.md)
 
 ## Usage
 
@@ -65,7 +54,7 @@ for seg in seg01 seg02 seg03; do
   cargo run -- synthesize authorship_$seg <pod_id> --seed 71463 --gpu-price <price>
 done
 
-# The idle watchdog auto-stops the pod after 15 min of inactivity.
+# The idle watchdog auto-stops the pod after 3 min of inactivity.
 # To terminate immediately:
 cargo run -- terminate-pod <pod_id>
 

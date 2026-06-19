@@ -151,10 +151,10 @@ fn run_output(argv: &[String]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Append a JSON line to data/runs.jsonl for later cost/perf analysis.
+/// Append a JSON line to runs.jsonl for later cost/perf analysis.
 fn append_run_log(entry: serde_json::Value) -> Result<()> {
-    let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-    let path = format!("{data_dir}/runs.jsonl");
+    let vibe_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{vibe_dir}/runs.jsonl");
     let line = serde_json::to_string(&entry)? + "\n";
     use std::io::Write;
     std::fs::OpenOptions::new()

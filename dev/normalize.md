@@ -40,9 +40,11 @@ Normalization is applied per-sentence, after sentence splitting.
 to the current working directory. Edits take effect on the next run — no
 recompile needed.
 
-Format: two whitespace-separated columns. Lines starting with `# ` (hash
-space) are comments; lines starting with `#` followed by a non-space are
-valid override keys (e.g. `#x`, `#s`).
+Format: two tab-separated columns. Using a tab (not spaces) as the
+delimiter allows keys to contain spaces (e.g. multi-word punctuated
+phrases like `I. INTRODUCTION`). Lines starting with `# ` (hash space)
+are comments; lines starting with `#` followed by a non-space are valid
+override keys (e.g. `#x`, `#s`).
 
 Keys containing any non-alphanumeric character are applied as full-text
 find-and-replace before tokenization. Single-word (alphanumeric-only) keys

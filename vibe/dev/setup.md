@@ -14,20 +14,22 @@ have drivers too old for CUDA 12.8 and the container fails to start:
 `nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.8`.
 CUDA 12.4 works on a much wider range of machines.
 
+### Docker image build
 Build and push from the **repo root** (bump version tag each time — RunPod
 won't re-pull if the tag is unchanged):
 
+These are build instructions for the *next* version
 ```
-VERSION=v11
+VERSION=v13
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
 docker tag vibe:latest dockersaura/vibe:$VERSION
 docker push dockersaura/vibe:$VERSION
 ```
 
-Current image: `dockersaura/vibe:v10`
+Current image: v12  (updated manually, check DockerHub to be sure)
 
 After pushing, update the RunPod template via the PATCH curl in
-`runpod.md`. Current template: `e6qma5uqam` ("vibe v10").
+`runpod.md`. We keep current template in: `$TEMPLATE`
 
 The template must include `containerRegistryAuthId` for DockerHub auth —
 without it, pulls fail with `IMAGE_AUTH_ERROR: toomanyrequests`.
@@ -84,7 +86,7 @@ cargo run -- synthesize <segment_name> <pod_id> [--seed N] [--gpu-price P]
 Pass `--seed <N>` to fix the voice across multiple segments. Preferred seed
 is **71463** — see [voices.md](voices.md) for seed evaluations.
 
-The idle watchdog in `vibe-service` auto-stops the pod after 15 minutes of
+The idle watchdog in `vibe-service` auto-stops the pod after 3 minutes of
 inactivity — no need to manually terminate after a run completes.
 
 ### Running multiple segments
@@ -130,9 +132,13 @@ don't produce TTS artifacts.
 Use ffmpeg with a file list (the `concat:` protocol only reads the first
 file for WAV):
 
+The generated filename includes the full segment name (e.g.
+`augment_seg01_generated.wav`). Build the list from whatever prefix
+matches your segments:
+
 ```bash
 cd vibe/data
-printf "file '%s'\n" seg01_generated.wav seg02_generated.wav ... > concat_list.txt
+printf "file '%s'\n" augment_seg01_generated.wav augment_seg02_generated.wav ... > concat_list.txt
 ffmpeg -y -f concat -safe 0 -i concat_list.txt -acodec copy stitched.wav
 ```
 

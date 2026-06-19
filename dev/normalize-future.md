@@ -87,6 +87,14 @@ After units test past, verify by listening with authorship.txt sections
   * "Please read the last three sections (IX, XX, XI) of my research paper."
     should be read as roman numerals, but hard to specify detect the difference
     of context.
+- **Single-letter Roman numerals (`I.`, `V.`, `X.`) as outline headings** —
+  the auto-expansion requires ≥2 letters to avoid ambiguity with name initials
+  (`I. Smith` = Isiah Smith vs. `I. INTRODUCTION` = Section 1). There is no
+  reliable heuristic to distinguish these without deeper text analysis.
+  Workaround: add per-document overrides in `tts_overrides.txt`, e.g.:
+  `I. INTRODUCTION  Section one Introduction`
+  The heuristic of "all-caps word follows" could work for documents that use
+  all-caps headings, but was not implemented since not all docs use that style.
 
 ## D. Multiparty listen-test findings (unresolved)
 

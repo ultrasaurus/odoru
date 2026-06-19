@@ -96,11 +96,16 @@ async fn synthesize_handler(
     state.tracker.touch();
     state.tracker.increment();
 
+    // Guard ensures decrement fires even if the client drops the connection
+    // and axum cancels this future mid-inference.
+    struct DecrementGuard(ActivityTracker);
+    impl Drop for DecrementGuard {
+        fn drop(&mut self) { self.0.touch(); self.0.decrement(); }
+    }
+    let _guard = DecrementGuard(state.tracker.clone());
+
     let start = std::time::Instant::now();
     let result = run_inference(&req, &txt_path, &out_dir, &log_path, &request_id).await;
-
-    state.tracker.touch();
-    state.tracker.decrement();
 
     match result {
         Err(e) => {

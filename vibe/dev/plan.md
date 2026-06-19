@@ -2,7 +2,8 @@
 
 ## Goal
 - To see if we can generate 15-20 minutes of text that Sarah can listen to
-  without triggering a migraine .
+  without triggering a migraine.  If so, integrate into CLI. Consider how to
+  integrate into Odoru.
 
 Steps
 1. [x] Section A issues from [dev/normalize-future.md](../dev/normalize-future.md):
@@ -43,6 +44,27 @@ Steps
    - [x] **Resolved**: repeated-phrase hallucination on seg10 was VRAM-related
      (RTX A4000 16GB). Re-run on RTX A6000 48GB — clean. Fixed by enforcing
      >=24GB VRAM minimum in `new-pod`.
+6. Update docs and investigate error from last run
+   - [ ] update docs
+   - [ ] seg33 -- `vibe/data/authorship_seg33.txt` No log was downloaded — 
+     the client got the 524 error before
+     inference completed (or before it could fetch the log). The pod was
+     terminated so we can't retrieve it now. The 524 means the RunPod proxy 
+     closed the connection after its timeout, but inference may well have
+     finished on the pod afterwards — 
+     we just weren't there to receive it. Consistent with the pattern we saw 
+     with a prior job (338 words): completes on the pod, client never gets the
+     response. To confirm the theory, next time a 524 happens we could SSH in 
+     immediately after and check /tmp/ for the wav.
+
+7. Improve tooling to improve workflow
+   - [ ] consider additional synthesize/vibe-service testing needed before
+     removing listen-test-ssh (recently vibe-service failed -- need to
+     investigate)
+   - [ ] consider QA pass with forced-alignment AlignReport
+8. Consider additional improvements
+   - background noise removal
+   - use forced-alignment to find original headers and add silence
 
 ## Known TTS truncation cases
 
@@ -52,8 +74,3 @@ find general normalizer fixes rather than document-specific patches.
 | Segment | Words | Suspected cause |
 |---------|-------|-----------------|
 | seg20   | 247   | Paragraph 2 contains quoted CLI commands with `!!` and uneven quote stripping — model may bail early on malformed quoted text |
-
-## Normalizer TODOs
-
-- **Fractions**: `1/2` → `one half`, `3/4` → `three quarters` etc. Currently the
-  tokenizer splits on `/` producing `1 2` which is wrong.

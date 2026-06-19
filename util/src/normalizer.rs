@@ -54,12 +54,20 @@ fn parse_overrides(contents: &str) -> HashMap<String, String> {
         let line = line.trim();
         // "# " (hash + space) starts a comment; bare "#x" etc. are valid keys.
         if line.is_empty() || line.starts_with("# ") { continue; }
-        let mut cols = line.splitn(2, |c: char| c.is_whitespace());
-        if let (Some(from), Some(to)) = (cols.next(), cols.next()) {
-            let to = to.trim().split('#').next().unwrap_or("").trim();
-            if !to.is_empty() {
-                map.insert(from.to_lowercase(), to.to_owned());
+        // Tab is the required delimiter so that keys can contain spaces
+        // (e.g. multi-word punctuated keys like "I. INTRODUCTION").
+        let mut cols = line.splitn(2, '\t');
+        match (cols.next(), cols.next()) {
+            (Some(from), Some(to)) => {
+                let to = to.trim().split('#').next().unwrap_or("").trim();
+                if !to.is_empty() {
+                    map.insert(from.to_lowercase(), to.to_owned());
+                }
             }
+            (Some(from), None) => {
+                tracing::warn!("tts_overrides.txt: no tab on line {:?} — entry ignored (use tab to separate key from value)", from);
+            }
+            _ => {}
         }
     }
     map
@@ -442,7 +450,15 @@ fn process_alpha_token(token: &str) -> String {
             let result = spelled.join(" ");
             if suffix.is_empty() { result } else { format!("{}{}", result, suffix.to_lowercase()) }
         } else {
-            format!("{}{}", stem.to_lowercase(), suffix.to_lowercase())
+            // Title-case: capitalize first letter so "INTRODUCTION" → "Introduction"
+            // rather than "introduction". Sounds the same to TTS but reads more
+            // naturally and avoids issues when preceded by punctuation (e.g. "I. Introduction").
+            let mut chars = stem.chars();
+            let titled = match chars.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+            };
+            format!("{}{}", titled, suffix.to_lowercase())
         }
     } else {
         token.to_owned()
@@ -614,8 +630,8 @@ mod tests {
     #[test]
     fn non_roman_allcaps_unchanged() {
         // These fail the canonical re-encoding check and fall through to all-caps handling.
-        assert_eq!(process_alpha_token("CIVIL"),  "civil");
-        assert_eq!(process_alpha_token("MILL"),   "mill");
+        assert_eq!(process_alpha_token("CIVIL"),  "Civil");
+        assert_eq!(process_alpha_token("MILL"),   "Mill");
         // MIX is a genuine Roman numeral (1009 = M + IX) — converted, not lowercased.
         assert_eq!(process_alpha_token("MIX"),    "one thousand nine");
     }
@@ -703,9 +719,9 @@ mod tests {
     }
 
     #[test]
-    fn long_allcaps_lowercased() {
-        assert_eq!(process_alpha_token("AUGMENT"), "augment");
-        assert_eq!(process_alpha_token("IMPORTANT"), "important");
+    fn long_allcaps_title_cased() {
+        assert_eq!(process_alpha_token("AUGMENT"), "Augment");
+        assert_eq!(process_alpha_token("IMPORTANT"), "Important");
     }
 
     #[test]
@@ -716,9 +732,9 @@ mod tests {
     }
 
     #[test]
-    fn four_char_allcaps_lowercased() {
-        assert_eq!(process_alpha_token("NASA"), "nasa");
-        assert_eq!(process_alpha_token("HTTP"), "http");
+    fn four_char_allcaps_title_cased() {
+        assert_eq!(process_alpha_token("NASA"), "Nasa");
+        assert_eq!(process_alpha_token("HTTP"), "Http");
     }
 
     #[test]
@@ -729,7 +745,7 @@ mod tests {
 
     #[test]
     fn possessive_allcaps_lowercased() {
-        assert_eq!(process_alpha_token("AUGMENT's"), "augment's");
+        assert_eq!(process_alpha_token("AUGMENT's"), "Augment's");
         assert_eq!(process_alpha_token("TTS's"), "T T S's");
     }
 
