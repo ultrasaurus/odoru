@@ -332,16 +332,17 @@ async fn main() -> Result<()> {
             std::fs::write(&normalized_path, normalized.clone() + "\n")
                 .with_context(|| format!("writing {normalized_path}"))?;
 
-            let base_url = format!("https://{pod_id}-{port}.proxy.runpod.net");
+            let proxy_base_url = format!("https://{pod_id}-{port}.proxy.runpod.net");
             let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
 
-            // Poll /health until ready (replaces the fixed 60s wait after new-pod).
-            info!("waiting for vibe-service at {base_url}/health ...");
+            // Poll /health via proxy until ready (proxy URL works before the pod
+            // IP/portMappings are populated, so we use it here).
+            info!("waiting for vibe-service at {proxy_base_url}/health ...");
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()?;
             loop {
-                match http.get(format!("{base_url}/health")).send().await {
+                match http.get(format!("{proxy_base_url}/health")).send().await {
                     Ok(r) if r.status().is_success() => {
                         let body: serde_json::Value = r.json().await.unwrap_or_default();
                         if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
@@ -359,11 +360,24 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
 
-            // POST /synthesize (blocking — connection held open until wav ready).
+            // After health is confirmed, fetch pod details for direct IP.
+            let pod = client.get_pod(&pod_id).await?;
+            let (synth_base_url, via) = match runpod::http_direct_url(&pod, port) {
+                Some(direct) => {
+                    info!("using direct IP: {direct}");
+                    (direct, "http-direct")
+                }
+                None => {
+                    warn!("no portMappings[{port}] found — falling back to proxy (may timeout on long segments)");
+                    (proxy_base_url, "http-proxy")
+                }
+            };
+
+            // POST /synthesize — long timeout since inference can take minutes.
             info!("synthesizing {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker})");
             let start = std::time::Instant::now();
             let mut req = http
-                .post(format!("{base_url}/synthesize"))
+                .post(format!("{synth_base_url}/synthesize"))
                 .json(&serde_json::json!({
                     "text": normalized,
                     "seed": seed,
@@ -419,7 +433,7 @@ async fn main() -> Result<()> {
 
             // Always fetch the log so it's preserved before pod terminates.
             let log_path = format!("{data_dir}/{name}_{request_id}.log");
-            let mut log_req = http.get(format!("{base_url}/log/{request_id}"));
+            let mut log_req = http.get(format!("{synth_base_url}/log/{request_id}"));
             if let Some(ref s) = secret {
                 log_req = log_req.bearer_auth(s);
             }
@@ -448,7 +462,7 @@ async fn main() -> Result<()> {
                 "inference_wall_secs": wall,
                 "audio_duration_secs": audio_duration_secs,
                 "rtf": rtf,
-                "via": "http",
+                "via": via,
             });
             if let Err(e) = append_run_log(entry) {
                 warn!("failed to write run log: {e}");

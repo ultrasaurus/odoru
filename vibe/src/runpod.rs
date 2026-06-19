@@ -3,6 +3,15 @@ use serde_json::Value;
 
 const BASE_URL: &str = "https://rest.runpod.io/v1";
 
+/// Return `http://<publicIp>:<mapped_port>` for a direct HTTP connection to
+/// a pod port, bypassing the RunPod proxy. Returns `None` if the pod has no
+/// public IP or no mapping for the requested port.
+pub fn http_direct_url(pod: &Value, port: u16) -> Option<String> {
+    let ip = pod.get("publicIp").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?;
+    let mapped = pod.get("portMappings").and_then(|m| m.get(port.to_string())).and_then(|v| v.as_u64())?;
+    Some(format!("http://{ip}:{mapped}"))
+}
+
 /// Get the (publicIp, sshPort) for a running pod's direct SSH access
 /// (`root@<publicIp> -p <port>`, mapped from the pod's port 22).
 fn ssh_endpoint(pod_id: &str, pod: &Value) -> Result<(String, u64)> {
