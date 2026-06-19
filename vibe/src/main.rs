@@ -319,7 +319,14 @@ async fn main() -> Result<()> {
                 .with_context(|| format!("reading {input_path}"))?;
             let normalized: String = input
                 .lines()
-                .map(|line| util::normalizer::normalize(line))
+                .map(|line| {
+                    // Preserve "Speaker N: " prefix — normalize only the content.
+                    if let Some(rest) = line.strip_prefix("Speaker 1: ") {
+                        format!("Speaker 1: {}", util::normalizer::normalize(rest))
+                    } else {
+                        util::normalizer::normalize(line)
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             std::fs::write(&normalized_path, normalized.clone() + "\n")
@@ -468,7 +475,14 @@ async fn main() -> Result<()> {
                 .with_context(|| format!("reading {input_path}"))?;
             let normalized: String = input
                 .lines()
-                .map(|line| util::normalizer::normalize(line))
+                .map(|line| {
+                    // Preserve "Speaker N: " prefix — normalize only the content.
+                    if let Some(rest) = line.strip_prefix("Speaker 1: ") {
+                        format!("Speaker 1: {}", util::normalizer::normalize(rest))
+                    } else {
+                        util::normalizer::normalize(line)
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             std::fs::write(&normalized_path, normalized + "\n")
