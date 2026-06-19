@@ -1,0 +1,8 @@
+target/
+**/target/
+.venv/
+**/node_modules/
+vibe/data/
+out/
+docs/
+**/*.mp3

@@ -18,7 +18,8 @@ curl --request POST \
   \"dockerEntrypoint\": [],
   \"dockerStartCmd\": [],
   \"env\": {
-    \"RUNPOD_USER_API_KEY\": \"$RUNPOD_API_KEY\"
+    \"RUNPOD_USER_API_KEY\": \"$RUNPOD_API_KEY\",
+    \"VIBE_SERVICE_SECRET\": \"$VIBE_SERVICE_SECRET\"
   },
   \"imageName\": \"dockersaura/vibe:$VERSION\",
   \"isPublic\": false,
@@ -35,14 +36,22 @@ The response JSON includes `"id"` — copy that value into `TEMPLATE` in
 
 ## modify a template for new container version
 
-```
-VERSION=v7
+```bash
+VERSION=v8
+source vibe/.env
 curl --request PATCH \
-  --url https://rest.runpod.io/v1/templates/$TEMPLATE_ID \
+  --url https://rest.runpod.io/v1/templates/$TEMPLATE \
   --header "Authorization: Bearer $RUNPOD_API_KEY" \
   --header 'Content-Type: application/json' \
   --data "{
   \"imageName\": \"dockersaura/vibe:$VERSION\",
-  \"name\": \"vibe $VERSION\"
+  \"name\": \"vibe $VERSION\",
+  \"env\": {
+    \"RUNPOD_USER_API_KEY\": \"$RUNPOD_API_KEY\",
+    \"VIBE_SERVICE_SECRET\": \"$VIBE_SERVICE_SECRET\"
+  }
 }"
 ```
+
+Note: `source vibe/.env` first so `$RUNPOD_API_KEY`, `$TEMPLATE`, and
+`$VIBE_SERVICE_SECRET` are all in scope.

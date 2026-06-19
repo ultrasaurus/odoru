@@ -1,5 +1,6 @@
 mod config;
 mod runpod;
+mod watchdog;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -63,7 +64,7 @@ enum Command {
         #[arg(long, default_value_t = 600)]
         interval_secs: u64,
     },
-    /// Normalize text (calls tts::f5::normalizer::normalize)
+    /// Normalize text (calls util::normalizer::normalize)
     Normalize { text: String },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
@@ -73,10 +74,33 @@ enum Command {
         #[arg(long, default_value_t = 0.5)]
         duration: f64,
     },
-    /// Run the full listen-test loop: normalize data/<name>.txt, upload,
-    /// run VibeVoice inference on the pod, wait for completion, and
-    /// download the resulting wav to data/<name>_generated.wav.
-    ListenTest {
+    /// Run VibeVoice inference via the vibe-service HTTP API running on
+    /// the pod. Normalizes data/<name>.txt, POSTs to /synthesize (blocking
+    /// until done), downloads the wav, fetches the log, and appends runs.jsonl.
+    /// Use this in preference to listen-test-ssh when the service is running.
+    Synthesize {
+        /// Stem of vibe/data/<name>.txt (no extension)
+        name: String,
+        pod_id: String,
+        #[arg(long, default_value = "Sarah")]
+        speaker: String,
+        #[arg(long, default_value_t = 1.3)]
+        cfg_scale: f64,
+        /// Random seed (default: 71463)
+        #[arg(long, default_value_t = 71463)]
+        seed: u64,
+        /// GPU price per hour (from new-pod output), stored in run log
+        #[arg(long)]
+        gpu_price: Option<f64>,
+        /// Override the service port (default: 3000)
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+    },
+    /// Run the full listen-test loop via SSH/SCP (fallback when vibe-service
+    /// is not running). Normalize data/<name>.txt, upload, run VibeVoice
+    /// inference on the pod, wait for completion, and download the resulting
+    /// wav to data/<name>_generated.wav.
+    ListenTestSsh {
         /// Stem of vibe/data/<name>.txt (no extension)
         name: String,
         pod_id: String,
@@ -274,9 +298,157 @@ async fn main() -> Result<()> {
             }
         }
         Command::Normalize { text } => {
-            println!("{}", tts::f5::normalizer::normalize(&text));
+            println!("{}", util::normalizer::normalize(&text));
         }
-        Command::ListenTest {
+        Command::Synthesize {
+            name,
+            pod_id,
+            speaker,
+            cfg_scale,
+            seed,
+            gpu_price,
+            port,
+        } => {
+            let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let input_path = format!("{data_dir}/{name}.txt");
+            let normalized_path = format!("{data_dir}/{name}_normalized.txt");
+            let wav_path = format!("{data_dir}/{name}_generated.wav");
+
+            info!("normalizing {input_path}");
+            let input = std::fs::read_to_string(&input_path)
+                .with_context(|| format!("reading {input_path}"))?;
+            let normalized: String = input
+                .lines()
+                .map(|line| util::normalizer::normalize(line))
+                .collect::<Vec<_>>()
+                .join("\n");
+            std::fs::write(&normalized_path, normalized.clone() + "\n")
+                .with_context(|| format!("writing {normalized_path}"))?;
+
+            let base_url = format!("https://{pod_id}-{port}.proxy.runpod.net");
+            let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
+
+            // Poll /health until ready (replaces the fixed 60s wait after new-pod).
+            info!("waiting for vibe-service at {base_url}/health ...");
+            let http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()?;
+            loop {
+                match http.get(format!("{base_url}/health")).send().await {
+                    Ok(r) if r.status().is_success() => {
+                        let body: serde_json::Value = r.json().await.unwrap_or_default();
+                        if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
+                            let gpu = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
+                            info!("service ready — GPU: {gpu}");
+                            break;
+                        }
+                        if let Some(msg) = body.get("message").and_then(|v| v.as_str()) {
+                            anyhow::bail!("service reported error: {msg}");
+                        }
+                    }
+                    Ok(r) => info!("health: HTTP {} — retrying", r.status()),
+                    Err(e) => info!("health: {e} — retrying"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+
+            // POST /synthesize (blocking — connection held open until wav ready).
+            info!("synthesizing {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker})");
+            let start = std::time::Instant::now();
+            let mut req = http
+                .post(format!("{base_url}/synthesize"))
+                .json(&serde_json::json!({
+                    "text": normalized,
+                    "seed": seed,
+                    "speaker": speaker,
+                    "cfg_scale": cfg_scale,
+                }))
+                .timeout(std::time::Duration::from_secs(600));
+            if let Some(ref s) = secret {
+                req = req.bearer_auth(s);
+            }
+            let resp = req.send().await.context("POST /synthesize")?;
+            if !resp.status().is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("synthesize failed: {body}");
+            }
+
+            let resp_headers = resp.headers().clone();
+            let request_id = resp_headers
+                .get("x-vibe-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("unknown")
+                .to_string();
+            let seed_used: u64 = resp_headers
+                .get("x-vibe-seed")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(seed);
+            let gpu_name = resp_headers
+                .get("x-vibe-gpu")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("unknown")
+                .to_string();
+            let wall: f64 = resp_headers
+                .get("x-vibe-wall-secs")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| start.elapsed().as_secs_f64());
+            let audio_duration_secs: Option<f64> = resp_headers
+                .get("x-vibe-audio-secs")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok());
+            let rtf: Option<f64> = resp_headers
+                .get("x-vibe-rtf")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok());
+
+            let wav_bytes = resp.bytes().await.context("reading wav bytes")?;
+            std::fs::write(&wav_path, &wav_bytes).with_context(|| format!("writing {wav_path}"))?;
+            info!("saved wav to {wav_path} ({} bytes)", wav_bytes.len());
+            if let Some(d) = audio_duration_secs {
+                info!("audio: {d:.1}s  RTF: {:.2}x", rtf.unwrap_or(wall / d));
+            }
+
+            // Always fetch the log so it's preserved before pod terminates.
+            let log_path = format!("{data_dir}/{name}_{request_id}.log");
+            let mut log_req = http.get(format!("{base_url}/log/{request_id}"));
+            if let Some(ref s) = secret {
+                log_req = log_req.bearer_auth(s);
+            }
+            match log_req.send().await {
+                Ok(r) if r.status().is_success() => {
+                    let log_text = r.text().await.unwrap_or_default();
+                    std::fs::write(&log_path, &log_text)
+                        .with_context(|| format!("writing {log_path}"))?;
+                    info!("saved log to {log_path}");
+                }
+                Ok(r) => warn!("GET /log/{request_id}: HTTP {}", r.status()),
+                Err(e) => warn!("GET /log/{request_id}: {e}"),
+            }
+
+            // Append run log.
+            let entry = serde_json::json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "segment": name,
+                "pod_id": pod_id,
+                "request_id": request_id,
+                "gpu_name": gpu_name,
+                "gpu_price_per_hr": gpu_price,
+                "speaker": speaker,
+                "cfg_scale": cfg_scale,
+                "seed": seed_used,
+                "inference_wall_secs": wall,
+                "audio_duration_secs": audio_duration_secs,
+                "rtf": rtf,
+                "via": "http",
+            });
+            if let Err(e) = append_run_log(entry) {
+                warn!("failed to write run log: {e}");
+            }
+            info!("done: {wav_path}");
+        }
+        Command::ListenTestSsh {
             name,
             pod_id,
             speaker,
@@ -296,7 +468,7 @@ async fn main() -> Result<()> {
                 .with_context(|| format!("reading {input_path}"))?;
             let normalized: String = input
                 .lines()
-                .map(|line| tts::f5::normalizer::normalize(line))
+                .map(|line| util::normalizer::normalize(line))
                 .collect::<Vec<_>>()
                 .join("\n");
             std::fs::write(&normalized_path, normalized + "\n")

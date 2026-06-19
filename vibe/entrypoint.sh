@@ -11,4 +11,4 @@ fi
 ssh-keygen -A
 /usr/sbin/sshd
 
-exec tail -f /dev/null
+exec /usr/local/bin/vibe-service

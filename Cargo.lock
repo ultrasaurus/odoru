@@ -4061,7 +4061,9 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "num2words",
  "reqwest",
+ "roman",
  "serde",
  "serde_json",
  "serde_yaml",

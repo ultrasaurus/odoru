@@ -10,6 +10,7 @@
 //! - [`export`] — shared data types for static SPA export
 
 pub mod frontmatter;
+pub mod normalizer;
 pub mod voice;
 pub mod documents;
 pub mod index;

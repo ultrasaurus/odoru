@@ -6,6 +6,23 @@
 #   docker push dockersaura/vibe:<vN>
 # Bump the version tag each time — RunPod won't pull an updated image otherwise.
 
+# ── Stage 1: cross-compile vibe-service for linux/amd64 ────────────────────
+FROM rust:slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy the full workspace. The root Cargo.toml lists all members so cargo
+# needs all of them present even when building only the vibe binary.
+COPY . .
+
+# Build only the vibe-service binary.
+RUN cargo build --release --manifest-path vibe/service/Cargo.toml --bin vibe-service
+
+# ── Stage 2: RunPod GPU image ───────────────────────────────────────────────
 # RunPod base image: PyTorch 2.4.0, CUDA 12.4.1, Ubuntu 22.04.
 # Includes torch, CUDA drivers, and Python — no need to install them separately.
 # Supports sm_50–sm_90 (all pre-Blackwell GPUs); requires driver ≥ 525.85.
@@ -27,8 +44,10 @@ RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd
 
+COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-service
+
 COPY vibe/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 22
+EXPOSE 22 3000
 ENTRYPOINT ["/entrypoint.sh"]
