@@ -6,7 +6,7 @@ inclusion in Odoru
 Two binaries:
 - `vibe` — CLI for RunPod pod management and TTS helpers
 - `vibe-service` — Axum HTTP service that runs on the pod, wraps VibeVoice
-  inference, and exposes `/health`, `/synthesize`, and `/log/:id`
+  inference, and exposes `/health`, `/jobs`, and `/log/:id`
 
 Standalone Cargo workspace — separate `Cargo.lock`, doesn't affect the
 root `odoru` build/Dockerfile.
@@ -44,9 +44,11 @@ cargo run -- <command> --help
 
 ```bash
 # Start a pod (auto-selects cheapest >=24GB GPU)
-cargo run -- new-pod gpu
+# If multiple templates exist, pass the template id explicitly
+cargo run -- new-pod gpu e6qma5uqam
 
-# Synthesize a segment — polls /health automatically, no manual wait needed
+# Synthesize a segment — polls /health, submits async job, polls until done,
+# downloads wav. No proxy timeout risk.
 cargo run -- synthesize authorship_seg01 <pod_id> --seed 71463 --gpu-price <price>
 
 # Run multiple segments in sequence
@@ -70,13 +72,7 @@ Base URL: `https://<pod_id>-3000.proxy.runpod.net`
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Returns `{"status":"ready","gpu":"..."}` once service is up |
-| `/synthesize` | POST | Body: `{"text","seed","speaker","cfg_scale"}`. Blocks until done. Returns WAV bytes + `X-Vibe-*` headers. |
+| `/jobs` | POST | Body: `{"text","seed","speaker","cfg_scale","name?"}`. Returns `{"job_id","name"}` immediately; inference runs in background. |
+| `/jobs/:job_id` | GET | Returns `{"status","seed?","wall_secs?","audio_secs?","rtf?","name?"}`. Status: `pending\|running\|done\|error`. |
+| `/jobs/:job_id/wav` | GET | Returns WAV bytes when done; 404 if unknown, 409 if not yet done. Fetch-once: wav is freed from memory after download. |
 | `/log/:request_id` | GET | Full stdout/stderr from the inference run. |
-
-Response headers from `/synthesize`:
-- `X-Vibe-Request-Id` — use to fetch the log
-- `X-Vibe-Seed` — seed actually used
-- `X-Vibe-Gpu` — GPU name from `nvidia-smi`
-- `X-Vibe-Wall-Secs` — inference wall time in seconds
-- `X-Vibe-Audio-Secs` — duration of generated audio in seconds
-- `X-Vibe-Rtf` — real-time factor (wall / audio duration)

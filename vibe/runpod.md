@@ -55,3 +55,21 @@ curl --request PATCH \
 
 Note: `source vibe/.env` first so `$RUNPOD_API_KEY`, `$TEMPLATE`, and
 `$VIBE_SERVICE_SECRET` are all in scope.
+
+
+## delete template
+
+```
+export TEMPLATE_ID=put-your-template-id-here
+curl --request DELETE \
+  --url https://rest.runpod.io/v1/templates/$TEMPLATE_ID \
+  --header "Authorization: Bearer $RUNPOD_API_KEY"
+```
+
+## list templates (find name/id pairs)
+
+```
+curl --request GET \
+  --url https://rest.runpod.io/v1/templates \
+  --header "Authorization: Bearer $RUNPOD_API_KEY"
+```

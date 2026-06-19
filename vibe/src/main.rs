@@ -373,79 +373,87 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // POST /synthesize — long timeout since inference can take minutes.
-            info!("synthesizing {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker})");
-            let start = std::time::Instant::now();
-            let mut req = http
-                .post(format!("{synth_base_url}/synthesize"))
+            // POST /jobs — returns immediately with job_id.
+            info!("submitting job: {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker})");
+            let mut submit_req = http
+                .post(format!("{synth_base_url}/jobs"))
                 .json(&serde_json::json!({
                     "text": normalized,
                     "seed": seed,
                     "speaker": speaker,
                     "cfg_scale": cfg_scale,
-                }))
-                .timeout(std::time::Duration::from_secs(600));
+                    "name": name,
+                }));
             if let Some(ref s) = secret {
-                req = req.bearer_auth(s);
+                submit_req = submit_req.bearer_auth(s);
             }
-            let resp = req.send().await.context("POST /synthesize")?;
-            if !resp.status().is_success() {
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("synthesize failed: {body}");
+            let submit_resp = submit_req.send().await.context("POST /jobs")?;
+            if !submit_resp.status().is_success() {
+                let body = submit_resp.text().await.unwrap_or_default();
+                anyhow::bail!("job submission failed: {body}");
             }
+            let job: serde_json::Value = submit_resp.json().await.context("reading job response")?;
+            let job_id_remote = job["job_id"].as_str().context("missing job_id in response")?.to_string();
+            info!("job submitted: job_id={job_id_remote} name={name}");
 
-            let resp_headers = resp.headers().clone();
-            let request_id = resp_headers
-                .get("x-vibe-request-id")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("unknown")
-                .to_string();
-            let seed_used: u64 = resp_headers
-                .get("x-vibe-seed")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(seed);
-            let gpu_name = resp_headers
-                .get("x-vibe-gpu")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("unknown")
-                .to_string();
-            let wall: f64 = resp_headers
-                .get("x-vibe-wall-secs")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_else(|| start.elapsed().as_secs_f64());
-            let audio_duration_secs: Option<f64> = resp_headers
-                .get("x-vibe-audio-secs")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse().ok());
-            let rtf: Option<f64> = resp_headers
-                .get("x-vibe-rtf")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse().ok());
+            // Poll GET /jobs/:id until done or error.
+            let poll_client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()?;
+            let job_url = format!("{synth_base_url}/jobs/{job_id_remote}");
+            let synth_start = std::time::Instant::now();
+            let (seed_used, wall, audio_duration_secs, rtf) = loop {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                let mut poll_req = poll_client.get(&job_url);
+                if let Some(ref s) = secret {
+                    poll_req = poll_req.bearer_auth(s);
+                }
+                match poll_req.send().await {
+                    Err(e) => {
+                        warn!("poll job_id={job_id_remote} name={name}: {e} — retrying");
+                        continue;
+                    }
+                    Ok(r) if !r.status().is_success() => {
+                        anyhow::bail!("GET /jobs/{job_id_remote} returned HTTP {}", r.status());
+                    }
+                    Ok(r) => {
+                        let j: serde_json::Value = r.json().await.context("reading job status")?;
+                        let status = j["status"].as_str().unwrap_or("unknown");
+                        info!("job_id={job_id_remote} name={name} status={status}");
+                        match status {
+                            "done" => {
+                                let seed_used = j["seed"].as_u64().unwrap_or(seed);
+                                let wall = j["wall_secs"].as_f64()
+                                    .unwrap_or_else(|| synth_start.elapsed().as_secs_f64());
+                                let audio_secs = j["audio_secs"].as_f64();
+                                let rtf = j["rtf"].as_f64();
+                                break (seed_used, wall, audio_secs, rtf);
+                            }
+                            "error" => {
+                                let err = j["error"].as_str().unwrap_or("unknown error");
+                                anyhow::bail!("job failed: {err}");
+                            }
+                            _ => continue,
+                        }
+                    }
+                }
+            };
 
-            let wav_bytes = resp.bytes().await.context("reading wav bytes")?;
+            // Fetch wav.
+            let mut wav_req = http.get(format!("{synth_base_url}/jobs/{job_id_remote}/wav"))
+                .timeout(std::time::Duration::from_secs(120));
+            if let Some(ref s) = secret {
+                wav_req = wav_req.bearer_auth(s);
+            }
+            let wav_resp = wav_req.send().await.context("GET /jobs/:id/wav")?;
+            if !wav_resp.status().is_success() {
+                anyhow::bail!("wav fetch failed: HTTP {}", wav_resp.status());
+            }
+            let wav_bytes = wav_resp.bytes().await.context("reading wav bytes")?;
             std::fs::write(&wav_path, &wav_bytes).with_context(|| format!("writing {wav_path}"))?;
             info!("saved wav to {wav_path} ({} bytes)", wav_bytes.len());
             if let Some(d) = audio_duration_secs {
                 info!("audio: {d:.1}s  RTF: {:.2}x", rtf.unwrap_or(wall / d));
-            }
-
-            // Always fetch the log so it's preserved before pod terminates.
-            let log_path = format!("{data_dir}/{name}_{request_id}.log");
-            let mut log_req = http.get(format!("{synth_base_url}/log/{request_id}"));
-            if let Some(ref s) = secret {
-                log_req = log_req.bearer_auth(s);
-            }
-            match log_req.send().await {
-                Ok(r) if r.status().is_success() => {
-                    let log_text = r.text().await.unwrap_or_default();
-                    std::fs::write(&log_path, &log_text)
-                        .with_context(|| format!("writing {log_path}"))?;
-                    info!("saved log to {log_path}");
-                }
-                Ok(r) => warn!("GET /log/{request_id}: HTTP {}", r.status()),
-                Err(e) => warn!("GET /log/{request_id}: {e}"),
             }
 
             // Append run log.
@@ -453,8 +461,7 @@ async fn main() -> Result<()> {
                 "timestamp": chrono::Utc::now().to_rfc3339(),
                 "segment": name,
                 "pod_id": pod_id,
-                "request_id": request_id,
-                "gpu_name": gpu_name,
+                "job_id": job_id_remote,
                 "gpu_price_per_hr": gpu_price,
                 "speaker": speaker,
                 "cfg_scale": cfg_scale,

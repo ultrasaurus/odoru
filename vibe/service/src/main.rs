@@ -9,8 +9,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 use uuid::Uuid;
 use watchdog::ActivityTracker;
@@ -20,10 +22,36 @@ struct AppState {
     secret: Option<String>,
     gpu_info: Arc<String>,
     tracker: ActivityTracker,
+    jobs: Arc<RwLock<HashMap<String, JobState>>>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum JobState {
+    Pending {
+        name: Option<String>,
+    },
+    Running {
+        name: Option<String>,
+    },
+    Done {
+        name: Option<String>,
+        seed: u64,
+        wall_secs: f64,
+        audio_secs: Option<f64>,
+        rtf: Option<f64>,
+        #[serde(skip)]
+        wav_bytes: Arc<Vec<u8>>,
+    },
+    Error {
+        name: Option<String>,
+        error: String,
+    },
+}
+
+
 #[derive(Deserialize)]
-struct SynthesizeRequest {
+struct JobRequest {
     text: String,
     #[serde(default = "default_seed")]
     seed: u64,
@@ -31,6 +59,13 @@ struct SynthesizeRequest {
     speaker: String,
     #[serde(default = "default_cfg_scale")]
     cfg_scale: f64,
+    name: Option<String>,
+}
+
+#[derive(Serialize)]
+struct JobCreated {
+    job_id: String,
+    name: Option<String>,
 }
 
 fn default_seed() -> u64 { 71463 }
@@ -53,7 +88,6 @@ async fn log_handler(
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    // Sanitize: only allow UUID-shaped request IDs to prevent path traversal.
     if !request_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') || request_id.len() > 64 {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -70,81 +104,172 @@ async fn log_handler(
     }
 }
 
-async fn synthesize_handler(
+async fn create_job_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<SynthesizeRequest>,
+    Json(req): Json<JobRequest>,
 ) -> Response {
     if !authorized(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    let request_id = Uuid::new_v4().to_string();
-    let txt_path = format!("/tmp/{request_id}.txt");
-    let out_dir = format!("/tmp/{request_id}_out");
-    let log_path = format!("/tmp/{request_id}.log");
+    let job_id = Uuid::new_v4().to_string();
+    let name = req.name.clone();
 
-    if let Err(e) = tokio::fs::write(&txt_path, &req.text).await {
-        warn!("failed to write input text: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    info!(job_id = %job_id, name = ?name, "job created");
+
+    state.jobs.write().await.insert(job_id.clone(), JobState::Pending { name: name.clone() });
+
+    let state2 = state.clone();
+    let job_id2 = job_id.clone();
+    tokio::spawn(async move {
+        run_job(state2, job_id2, req).await;
+    });
+
+    Json(JobCreated { job_id, name }).into_response()
+}
+
+async fn get_job_handler(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
     }
-    if let Err(e) = tokio::fs::create_dir_all(&out_dir).await {
-        warn!("failed to create output dir: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+
+    let jobs = state.jobs.read().await;
+    match jobs.get(&job_id) {
+        None => StatusCode::NOT_FOUND.into_response(),
+        Some(job) => Json(job.clone()).into_response(),
     }
+}
+
+async fn get_job_wav_handler(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let wav_bytes = {
+        let jobs = state.jobs.read().await;
+        match jobs.get(&job_id) {
+            None => return StatusCode::NOT_FOUND.into_response(),
+            Some(JobState::Done { wav_bytes, .. }) => wav_bytes.clone(),
+            Some(other) => {
+                let status_str = match other {
+                    JobState::Pending { .. } => "pending",
+                    JobState::Running { .. } => "running",
+                    JobState::Error { .. } => "error",
+                    JobState::Done { .. } => unreachable!(),
+                };
+                return (
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({ "status": status_str })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    // Drop wav bytes from job store after fetch (fetch-once-then-drop).
+    {
+        let mut jobs = state.jobs.write().await;
+        if let Some(JobState::Done { name, seed, wall_secs, audio_secs, rtf, .. }) =
+            jobs.remove(&job_id)
+        {
+            info!(job_id = %job_id, name = ?name, "wav fetched, job removed from memory");
+            jobs.insert(job_id, JobState::Done {
+                name,
+                seed,
+                wall_secs,
+                audio_secs,
+                rtf,
+                wav_bytes: Arc::new(vec![]),
+            });
+        }
+    }
+
+    (
+        [(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("audio/wav"))],
+        Body::from(wav_bytes.as_ref().clone()),
+    )
+        .into_response()
+}
+
+async fn run_job(state: AppState, job_id: String, req: JobRequest) {
+    let name = req.name.as_deref().unwrap_or("(unnamed)");
+
+    {
+        let mut jobs = state.jobs.write().await;
+        if let Some(j) = jobs.get_mut(&job_id) {
+            *j = JobState::Running { name: req.name.clone() };
+        }
+    }
+
+    info!(job_id = %job_id, name = %name, seed = req.seed, cfg = req.cfg_scale, "job running");
 
     state.tracker.touch();
     state.tracker.increment();
 
-    // Guard ensures decrement fires even if the client drops the connection
-    // and axum cancels this future mid-inference.
     struct DecrementGuard(ActivityTracker);
     impl Drop for DecrementGuard {
         fn drop(&mut self) { self.0.touch(); self.0.decrement(); }
     }
     let _guard = DecrementGuard(state.tracker.clone());
 
+    let request_id = Uuid::new_v4().to_string();
+    let txt_path = format!("/tmp/{request_id}.txt");
+    let out_dir = format!("/tmp/{request_id}_out");
+    let log_path = format!("/tmp/{request_id}.log");
+
     let start = std::time::Instant::now();
-    let result = run_inference(&req, &txt_path, &out_dir, &log_path, &request_id).await;
+
+    let result = async {
+        tokio::fs::write(&txt_path, &req.text).await?;
+        tokio::fs::create_dir_all(&out_dir).await?;
+        run_inference_inner(&req, &txt_path, &out_dir, &log_path, &request_id).await
+    }
+    .await;
 
     match result {
         Err(e) => {
-            warn!("inference failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            warn!(job_id = %job_id, name = %name, error = %e, "job failed");
+            let mut jobs = state.jobs.write().await;
+            if let Some(j) = jobs.get_mut(&job_id) {
+                *j = JobState::Error { name: req.name.clone(), error: e.to_string() };
+            }
         }
         Ok((wav_bytes, seed_used)) => {
             let wall = start.elapsed().as_secs_f64();
-            let audio_dur = wav_duration_secs(&wav_bytes);
-            let rtf = audio_dur.map(|d| wall / d);
-
-            let mut response_headers = HeaderMap::new();
-            response_headers.insert("X-Vibe-Request-Id", hv(&request_id));
-            response_headers.insert("X-Vibe-Seed", hv(&seed_used.to_string()));
-            response_headers.insert("X-Vibe-Gpu", hv(&state.gpu_info));
-            response_headers.insert("X-Vibe-Wall-Secs", hv(&format!("{wall:.2}")));
-            if let Some(d) = audio_dur {
-                response_headers.insert("X-Vibe-Audio-Secs", hv(&format!("{d:.2}")));
-            }
-            if let Some(r) = rtf {
-                response_headers.insert("X-Vibe-Rtf", hv(&format!("{r:.3}")));
-            }
-            response_headers.insert(
-                axum::http::header::CONTENT_TYPE,
-                HeaderValue::from_static("audio/wav"),
-            );
-
+            let audio_secs = wav_duration_secs(&wav_bytes);
+            let rtf = audio_secs.map(|d| wall / d);
             info!(
-                "synthesize done: request_id={request_id} seed={seed_used} wall={wall:.1}s{}",
-                rtf.map(|r| format!(" rtf={r:.3}")).unwrap_or_default()
+                job_id = %job_id, name = %name, seed = seed_used,
+                wall = format!("{wall:.1}s"),
+                rtf = rtf.map(|r| format!("{r:.3}")).unwrap_or_default(),
+                "job done"
             );
-
-            (response_headers, Body::from(wav_bytes)).into_response()
+            let mut jobs = state.jobs.write().await;
+            if let Some(j) = jobs.get_mut(&job_id) {
+                *j = JobState::Done {
+                    name: req.name.clone(),
+                    seed: seed_used,
+                    wall_secs: wall,
+                    audio_secs,
+                    rtf,
+                    wav_bytes: Arc::new(wav_bytes),
+                };
+            }
         }
     }
 }
 
-async fn run_inference(
-    req: &SynthesizeRequest,
+async fn run_inference_inner(
+    req: &JobRequest,
     txt_path: &str,
     out_dir: &str,
     log_path: &str,
@@ -174,7 +299,6 @@ async fn run_inference(
         anyhow::bail!("inference process exited {status}\n{tail}");
     }
 
-    // Parse seed from log ("Seed used: 12345")
     let log_contents = tokio::fs::read_to_string(log_path).await.unwrap_or_default();
     let seed_used = log_contents
         .lines()
@@ -183,7 +307,6 @@ async fn run_inference(
         .and_then(|s| s.parse().ok())
         .unwrap_or(req.seed);
 
-    // Find the output wav
     let mut entries = tokio::fs::read_dir(out_dir).await?;
     let mut wav_path = None;
     while let Some(entry) = entries.next_entry().await? {
@@ -231,9 +354,6 @@ fn authorized(state: &AppState, headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-fn hv(s: &str) -> HeaderValue {
-    HeaderValue::from_str(s).unwrap_or_else(|_| HeaderValue::from_static("?"))
-}
 
 fn query_gpu_info() -> String {
     std::process::Command::new("nvidia-smi")
@@ -272,11 +392,14 @@ async fn main() -> Result<()> {
         secret,
         gpu_info: Arc::new(gpu_info),
         tracker,
+        jobs: Arc::new(RwLock::new(HashMap::new())),
     };
 
     let app = Router::new()
         .route("/health", get(health_handler))
-        .route("/synthesize", post(synthesize_handler))
+        .route("/jobs", post(create_job_handler))
+        .route("/jobs/:job_id", get(get_job_handler))
+        .route("/jobs/:job_id/wav", get(get_job_wav_handler))
         .route("/log/:request_id", get(log_handler))
         .with_state(state);
 

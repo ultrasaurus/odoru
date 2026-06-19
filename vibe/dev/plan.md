@@ -45,17 +45,14 @@ Steps
      (RTX A4000 16GB). Re-run on RTX A6000 48GB — clean. Fixed by enforcing
      >=24GB VRAM minimum in `new-pod`.
 6. Update docs and investigate error from last run
-   - [ ] update docs
-   - [ ] seg33 -- `vibe/data/authorship_seg33.txt` No log was downloaded — 
-     the client got the 524 error before
-     inference completed (or before it could fetch the log). The pod was
-     terminated so we can't retrieve it now. The 524 means the RunPod proxy 
-     closed the connection after its timeout, but inference may well have
-     finished on the pod afterwards — 
-     we just weren't there to receive it. Consistent with the pattern we saw 
-     with a prior job (338 words): completes on the pod, client never gets the
-     response. To confirm the theory, next time a 524 happens we could SSH in 
-     immediately after and check /tmp/ for the wav.
+   - [x] update docs
+   - [x] seg33 — root cause was RunPod proxy 524 timeout on long segments
+     (blocking `/synthesize` held connection open during inference).
+     Fixed by replacing blocking `/synthesize` with async job API:
+     `POST /jobs` returns immediately, CLI polls `GET /jobs/:id`,
+     fetches wav via `GET /jobs/:id/wav`. seg33 (284 words, RTF 1.04x
+     on RTX 3090) completed successfully on 2026-06-19. Docker image
+     bumped to v13.
 
 7. Improve tooling to improve workflow
    - [ ] consider additional synthesize/vibe-service testing needed before
