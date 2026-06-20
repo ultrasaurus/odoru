@@ -118,3 +118,27 @@ In general, if anything works, consider it a happy surprise.
 ### CLI
 - Segfault on exit when `--audio` is used. This is a PyO3/tokio shutdown
   ordering issue. All output is written successfully before the crash occurs.
+
+## Code coverage (Rust)
+
+Install `cargo-llvm-cov` (one-time setup):
+
+```bash
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
+```
+
+Run coverage for the whole repo:
+
+```bash
+cargo llvm-cov
+```
+
+Run coverage for just the `normalize` function's unit tests (in `util/src/normalizer.rs`):
+
+```bash
+cargo llvm-cov --package util --lib -- normalizer::
+```
+
+Add `--html` to either command to generate a browsable report at
+`target/llvm-cov/html/index.html`.
