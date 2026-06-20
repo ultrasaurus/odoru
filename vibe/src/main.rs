@@ -341,18 +341,17 @@ async fn main() -> Result<()> {
             }
 
             // Try candidates in price order, falling back on "not available" errors.
-            let mut pod = None;
             let mut chosen_price: Option<f64> = None;
             let no_candidates = candidates.is_empty();
             let mut iter = candidates.into_iter().peekable();
-            loop {
+            let pod = loop {
                 let gpu_id = iter.next().map(|(price, id, label, vram)| {
                     info!("trying GPU: {} ({}GB VRAM, ${:.2}/hr)", label, vram, price);
                     chosen_price = Some(price);
                     id
                 });
                 match client.create_pod(&template_id, compute_type, network_volume_id.as_deref(), &name, gpu_id.as_deref()).await {
-                    Ok(p) => { pod = Some(p); break; }
+                    Ok(p) => break p,
                     Err(e) => {
                         let msg = e.to_string();
                         let unavailable = msg.contains("could not find any pods")
@@ -368,8 +367,7 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-            }
-            let pod = pod.context("pod creation failed")?;
+            };
             let pod_id = pod.get("id").and_then(|v| v.as_str()).context("created pod missing id")?;
             info!("created pod: {pod_id}");
             if let Some(price) = chosen_price {
@@ -448,9 +446,7 @@ async fn main() -> Result<()> {
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()?;
-            let mut gpu_name = "unknown".to_string();
-            let mut gpu_vram_mb: Option<u64> = None;
-            loop {
+            let (gpu_name, gpu_vram_mb) = loop {
                 match http.get(format!("{proxy_base_url}/health")).send().await {
                     Ok(r) if r.status().is_success() => {
                         let body: serde_json::Value = r.json().await.unwrap_or_default();
@@ -458,10 +454,10 @@ async fn main() -> Result<()> {
                             let gpu_info = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
                             info!("service ready — GPU: {gpu_info}");
                             let mut parts = gpu_info.splitn(2, ',');
-                            gpu_name = parts.next().unwrap_or("unknown").trim().to_string();
-                            gpu_vram_mb = parts.next()
+                            let gpu_name = parts.next().unwrap_or("unknown").trim().to_string();
+                            let gpu_vram_mb = parts.next()
                                 .and_then(|s| s.trim().trim_end_matches(" MiB").parse::<u64>().ok());
-                            break;
+                            break (gpu_name, gpu_vram_mb);
                         }
                         if let Some(msg) = body.get("message").and_then(|v| v.as_str()) {
                             anyhow::bail!("service reported error: {msg}");
@@ -471,7 +467,7 @@ async fn main() -> Result<()> {
                     Err(e) => info!("health: {e} — retrying"),
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            }
+            };
 
             // After health is confirmed, fetch pod details for direct IP.
             let pod = client.get_pod(&pod_id).await?;
