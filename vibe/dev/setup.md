@@ -20,13 +20,13 @@ won't re-pull if the tag is unchanged):
 
 These are build instructions for the *next* version
 ```
-VERSION=v13
+VERSION=v15
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
 docker tag vibe:latest dockersaura/vibe:$VERSION
 docker push dockersaura/vibe:$VERSION
 ```
 
-Current image: v12  (updated manually, check DockerHub to be sure)
+Current image: v14  (updated manually, check DockerHub to be sure)
 
 After pushing, update the RunPod template via the PATCH curl in
 `runpod.md`. We keep current template in: `$TEMPLATE`
@@ -56,7 +56,10 @@ automatically until the service is ready.
 No network volume — attaching one locks the pod to a specific datacenter
 region, limiting GPU availability. Generated audio is downloaded locally
 after each run. **Do not restart a stopped pod** — terminate and create a
-new one instead.
+new one instead. If you try anyway, expect `start-pod` to fail with
+`HTTP 500: "There are not enough free GPUs on the host machine to start
+this pod."` — the host machine reallocates the GPU once a pod exits, so
+there's nothing to resume even if the UI still shows the old template/image.
 
 SSH connects via direct IP+port (not the `<pod_id>@ssh.runpod.io` proxy):
 
@@ -73,7 +76,7 @@ cargo run -- terminate-pod <pod_id>
 ## Synthesizing segments
 
 ```
-cargo run -- synthesize segment <segment_name> <pod_id> [--seed N] [--gpu-price P]
+cargo run -- synthesize <pod_id> [--seed N] [--gpu-price P] segment <segment_name>
 ```
 
 - Normalizes `vibe/data/<segment_name>.txt`
@@ -93,7 +96,7 @@ inactivity — no need to manually terminate after a run completes.
 
 ```bash
 for seg in seg01 seg02 seg03; do
-  cargo run -- synthesize segment augment_$seg <pod_id> --seed 71463 --gpu-price <price>
+  cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> segment augment_$seg
 done
 ```
 
@@ -150,7 +153,7 @@ voice by listening:
 
 ```bash
 for i in 07 08 09 10 11; do
-  cargo run -- synthesize segment authorship_seg${i} <pod_id> --gpu-price <price>
+  cargo run -- synthesize <pod_id> --gpu-price <price> segment authorship_seg${i}
 done
 ```
 

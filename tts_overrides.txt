@@ -3,8 +3,8 @@ ave	Avenue
 blvd	Boulevard
 dr	Doctor
 e.g.	for example
-pp. pages
-p.  page
+pp.	pages
+p.	page
 etc	et cetera
 html	HTML
 http	HTTP
@@ -87,11 +87,17 @@ printer/graohic	printer or graphic
 
 # Authorship paper artifacts (seg references in artifact-authorship.md)
 (4b.l)	4 b point L
-Shared-Screen Conferencing	Shared Screen Con frencing
+Shared-Screen Conferencing	Shared Screen Con fren sing
 AFIPS	A. Fips
 yyy	why why why
-CO  Colorado
 
 # Single Roman-numeral letters can't be auto-detected (ambiguous with name
 # initials like "I. Smith"). See dev/normalize-future.md §Roman Numerals.
 I. INTRODUCTION	One Introduction
+
+SMITH!	Smith exclamation point
+OF12!	O F 12 exclamation point
+(other display)!!"	other display exclamation point exclamation point
+(this display)!!"	this display exclamation point exclamation point
+JONES!	Jones exclamation point
+OF4!	O F four exclamation point

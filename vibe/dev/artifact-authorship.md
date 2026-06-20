@@ -73,13 +73,63 @@ synthesis runs even with the same seed; see vibevoice.md).
 
 ---
 
+## Re-test findings (2026-06-20)
+
+Re-synthesized the three skip segments (text/wav copied to
+`vibe/data/authorship/authorship-skips/`) on the v14 Docker image to check
+whether the skips reproduce.
+
+**Note on segment numbers:** the file currently named `authorship_seg28.txt`
+(in `authorship-full-doc-1/` and copied to `authorship-skips/`) is the one
+containing the Smith/Jones Shared-Screen Conferencing commands and the
+trailing "provisions for passing control..." skip — i.e. the content this
+doc's tables above describe as **Seg 27**. Segment numbering has apparently
+shifted by one somewhere between when this doc was written and the current
+`authorship-full-doc-1` files. Treat the seg numbers in the tables above as
+approximate; match by trigger text, not number, when reproducing.
+
+Results:
+
+| Seg (this doc's numbering) | File tested | Result | Notes |
+|---|---|---|---|
+| 24 | `authorship_seg24.txt` | Clean — no skip | Same text, same seed (71463), same GPU model (RTX A5000) as the original skip run; only the synthesis transport differed (old blocking `/synthesize` → new async `/jobs` polling). No normalizer/override/segmenter change touched this segment's text. |
+| 27 (file `seg28.txt`, see numbering note) | `authorship_seg28.txt` | First re-run: truncated, reproducing the exact same dropped passage ("so that Smith can show him some material...participants."). Second re-run (after adding `tts_overrides.txt` entries replacing the `!`/`!!`-heavy command strings with spoken words): clean, no truncation flagged. | Inconclusive whether the override fix caused the clean run — seg24 and the trailing-skip case for "27" both went clean with *no* corresponding change, suggesting plain run-to-run stochasticity may explain all of these rather than any fix. One repeat clean run is not enough to confirm the override actually helped. |
+
+**Conclusion:** treat the override-based fix for the `!`/`!!` command syntax
+as unconfirmed. The skips/truncations documented in this file may simply be
+inherent run-to-run non-determinism in VibeVoice (consistent with the
+existing note above that voice varies slightly between runs even with the
+same seed) rather than something reliably triggered by specific text
+patterns. Further repeat runs (with and without the override) would be
+needed to get a real signal, and even then quantifying "inconclusive" is
+hard — a handful of clean runs doesn't rule out an intermittent issue.
+
 ## Notes
 
 - **Seg 25: 376 words** — longest segment by a significant margin (next is seg 14
   at 338, most others 200–260). Reviewer observed "fast voice"; segment length is
   a plausible cause and worth investigating.
-- `!` in commands should be verbalized as "exclamation point"; plan is to override
-  the whole command string in `tts_overrides.txt`.
+- [x] `!` in commands should be verbalized as "exclamation point"; override the
+  whole command string in `tts_overrides.txt`. Done 2026-06-20 — see
+  `SMITH!`/`OF12!`/`(other display)!!"`/`(this display)!!"`/`JONES!`/`OF4!`
+  entries.
 - Review stopped at Ref-4 in Seg 33; Ref-5 through Ref-8 not yet verified.
-- Fixes proposed by reviewer: add months/states/`pp.`/`AFIPS` to `tts_overrides.txt`;
-  suppress or expand parenthesized name-delimiter examples in seg 10.
+- Fixes proposed by reviewer:
+  - [x] add months/`pp.`/`AFIPS` to `tts_overrides.txt`. Done.
+  - [x] add states to handle the `City, ST` pattern. Done 2026-06-20, but as a
+    normalizer rule (`expand_state_abbrevs` in `util/src/normalizer.rs`)
+    rather than `tts_overrides.txt` entries — many two-letter codes (`IN`,
+    `OR`, `ME`, `HI`, `OK`, `OH`, ...) collide with common English words, so a
+    flat word-list override would mangle those words everywhere they appear.
+    The normalizer rule only fires when the code immediately follows a comma
+    (e.g. "Denver, CO" → "Denver, Colorado"), leaving standalone occurrences
+    of "in", "or", "oh", etc. untouched. All 50 states + DC covered. The
+    standalone `CO` entry in `tts_overrides.txt` was removed as redundant.
+  - [x] expand quited parenthesis in seg 10 —
+    the trigger text is `if "(" and ")" are set by the author as name
+    delimiters`, where `"("` and `")"` are the literal quoted characters
+    being discussed (not parenthetical content to suppress). Verified with
+    `cargo run -- normalize`: the existing generic `"("` and `")"` →
+    "open/close parenthesis" punctuated overrides in `tts_overrides.txt`
+    already produce "if open parenthesis and close parenthesis are set by
+    the author as name delimiters" — correct, no seg-10-specific fix needed.

@@ -168,6 +168,13 @@ pub fn normalize(text: &str) -> String {
     // are consumed as part of the pattern.
     let text = expand_journal_links(&text);
 
+    // Pass 2e: expand US state postal abbreviations in "City, ST" position
+    // (e.g. "Denver, CO" → "Denver, Colorado"). Only fires on the comma-led
+    // pattern, not as a standalone word override, because many codes (IN, OR,
+    // ME, HI, OK, OH, ...) collide with common English words — a flat
+    // word-list override would mangle those everywhere they appear.
+    let text = expand_state_abbrevs(&text);
+
     // Pass 3b: replace dots between alphanumeric chars with " dot " so link
     // notation like `4b.l` or `Ref.dt` is read correctly.
     let text = replace_identifier_dots(&text);
@@ -457,9 +464,9 @@ fn process_alpha_token(token: &str) -> String {
             let result = spelled.join(" ");
             if suffix.is_empty() { result } else { format!("{}{}", result, suffix.to_lowercase()) }
         } else {
-            // Title-case: capitalize first letter so "INTRODUCTION" → "Introduction"
-            // rather than "introduction". Sounds the same to TTS but reads more
-            // naturally and avoids issues when preceded by punctuation (e.g. "I. Introduction").
+            // Title-case: capitalize first letter so "GENERAL" → "General"
+            // rather than "general". Sounds the same to TTS but reads more
+            // naturally and avoids issues when preceded by punctuation (e.g. "A. General").
             let mut chars = stem.chars();
             let titled = match chars.next() {
                 None => String::new(),
@@ -558,6 +565,45 @@ fn expand_journal_links(text: &str) -> String {
         let spoken_name = process_alpha_token(name);
         let spelled: Vec<&str> = digits.chars().map(digit_word).collect();
         format!("{} {}", spoken_name, spelled.join(" "))
+    }).into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// Pass 2e: expand US state postal abbreviations ("City, ST" pattern only)
+// ---------------------------------------------------------------------------
+
+fn state_full_name(abbr: &str) -> Option<&'static str> {
+    Some(match abbr {
+        "AL" => "Alabama", "AK" => "Alaska", "AZ" => "Arizona", "AR" => "Arkansas",
+        "CA" => "California", "CO" => "Colorado", "CT" => "Connecticut", "DE" => "Delaware",
+        "FL" => "Florida", "GA" => "Georgia", "HI" => "Hawaii", "ID" => "Idaho",
+        "IL" => "Illinois", "IN" => "Indiana", "IA" => "Iowa", "KS" => "Kansas",
+        "KY" => "Kentucky", "LA" => "Louisiana", "ME" => "Maine", "MD" => "Maryland",
+        "MA" => "Massachusetts", "MI" => "Michigan", "MN" => "Minnesota", "MS" => "Mississippi",
+        "MO" => "Missouri", "MT" => "Montana", "NE" => "Nebraska", "NV" => "Nevada",
+        "NH" => "New Hampshire", "NJ" => "New Jersey", "NM" => "New Mexico", "NY" => "New York",
+        "NC" => "North Carolina", "ND" => "North Dakota", "OH" => "Ohio", "OK" => "Oklahoma",
+        "OR" => "Oregon", "PA" => "Pennsylvania", "RI" => "Rhode Island", "SC" => "South Carolina",
+        "SD" => "South Dakota", "TN" => "Tennessee", "TX" => "Texas", "UT" => "Utah",
+        "VT" => "Vermont", "VA" => "Virginia", "WA" => "Washington", "WV" => "West Virginia",
+        "WI" => "Wisconsin", "WY" => "Wyoming", "DC" => "District of Columbia",
+        _ => return None,
+    })
+}
+
+/// Expand a two-letter state code only when it appears right after a comma
+/// (the "City, ST" pattern), e.g. "Denver, CO" → "Denver, Colorado". Codes
+/// elsewhere in the text (e.g. as ordinary words) are left untouched.
+fn expand_state_abbrevs(text: &str) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r",\s([A-Z]{2})\b").unwrap());
+
+    re.replace_all(text, |caps: &regex::Captures| {
+        let code = &caps[1];
+        match state_full_name(code) {
+            Some(name) => format!(", {name}"),
+            None => caps[0].to_string(),
+        }
     }).into_owned()
 }
 

@@ -37,15 +37,29 @@ the repo root)
 
 3. Synthesize the segment:
    ```
-   cargo run -- synthesize segment <segment_name> <pod_id> --seed 71463 --gpu-price <price>
+   cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> segment <segment_name>
    ```
    This normalizes `vibe/data/<segment_name>.txt`, sends it to the pod,
    and saves `vibe/data/<segment_name>_generated.wav`. No manual wait
    needed — it polls until the pod is ready.
 
-4. Listen to `vibe/data/<segment_name>_generated.wav`.
+4. Check the AlignReport verdict before you even listen. Synthesize also
+   writes `<segment_name>_transcript.json` and `<segment_name>_report.json`,
+   and logs a one-line verdict:
+   - `QA <name>: clean` — no issues detected.
+   - `QA <name>: N filtered word(s)` — low-confidence alignment matches,
+     usually just numbers/IDs; check `_report.json`'s `filtered` list, but
+     this is typically benign noise, not an audible problem.
+   - `QA <name>: ⚠ TRUNCATED — ...` — `suspect` words with `"reason":
+     "Truncated"` in `_report.json`; in practice this has correlated with a
+     real, audible skip both times we've checked it against the wav.
+   `_transcript.json` is minified (no trailing newline) — some editors flag
+   it as "invalid JSON" purely on that formatting quirk; verify with
+   `python3 -m json.tool` before assuming it's actually broken.
 
-5. Note any mispronunciations — segment number, what was said vs. expected.
+5. Listen to `vibe/data/<segment_name>_generated.wav`.
+
+6. Note any mispronunciations — segment number, what was said vs. expected.
    Add findings to `dev/normalize-future.md` and/or `dev/quirks.md` 
    and fix as needed.
 
@@ -88,7 +102,7 @@ Note the pod ID and price. Requires ≥24GB VRAM — enforced automatically.
 
 ```bash
 for seg in seg01 seg02 seg03 ...; do
-  cargo run -- synthesize segment authorship_$seg <pod_id> --seed 71463 --gpu-price <price>
+  cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> segment authorship_$seg
 done
 ```
 
@@ -143,3 +157,12 @@ immediately with no rebuild. Only rebuild when `vibe-service` itself changes
   cheapest available automatically.
 - **Don't restart stopped pods** — terminate and create a new one instead.
   Under some conditions, it's probably ok -- just good practice in testing.
+  In practice, restarting a stopped pod fails outright once the host
+  reallocates the GPU (`HTTP 500: not enough free GPUs`) — see
+  [setup.md § Starting a pod](setup.md#starting-a-pod).
+- **A single clean re-run does not confirm a fix.** Truncation/skip behavior
+  has reproduced inconsistently even with identical text, seed, and GPU
+  model across runs — VibeVoice's output isn't fully deterministic given a
+  fixed seed. Before crediting a normalizer/override change with fixing a
+  skip, do several repeat runs with and without the change; one before/after
+  pair isn't a reliable signal.

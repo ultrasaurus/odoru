@@ -15,7 +15,7 @@
 
 const MIN: usize = 50;
 const MAX: usize = 250;
-const QUOTE_MIN_WORDS: usize = 12;
+const QUOTE_MIN_WORDS: usize = 8;
 
 /// Split `text` into TTS segments. Each returned string contains one or more
 /// paragraphs joined with `\n`.
