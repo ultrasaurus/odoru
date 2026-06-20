@@ -18,7 +18,8 @@ Steps
    3. [x] Ref/code patterns (A3): bracket-stripping + punctuated-override
       fixes, confirmed passing in normalize-future.md sections E/F.
 2. [x] Listen test: create audio wav files for sections of
-   `data/authorship.txt`:
+   `odoru/data/authorship.txt` (workspace-root source doc, distinct from
+   `vibe/data/` segment output):
     * [x] Markers
     * [x] Traveling Through the Working Files (`augment_traveling`)
     * [x] Supporting Multi-Party Collaboration (`augment_multiparty`)
@@ -33,7 +34,7 @@ Steps
    see whether each paragraph alone stays at normal speed (i.e.
    confirm the speed-up is a function of cumulative generation length,
    not the content itself).
-5. [x] Create audio file for all of `data/authorship.txt` by dividing
+5. [x] Create audio file for all of `odoru/data/authorship.txt` by dividing
    into text segments at paragraph division then stitching audio together.
    - [x] Split into segments via `split_authorship.py` (250–400 words),
      then resplit from seg12 onward at 150–250 words via

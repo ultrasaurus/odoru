@@ -1,6 +1,6 @@
 # Authorship Paper TTS Artifact Review
 
-Test audio: `vibe/data/authorship_seg*.wav` (33 segments, stitched)
+Test audio: `vibe/data/authorship/authorship-full-doc-1/authorship_seg*.wav` (33 segments, stitched)
 
 Issues are grouped by type: **TTS artifacts** (hallucinated non-speech audio) vs.
 **pronunciation/text-processing issues** (wrong or skipped words).

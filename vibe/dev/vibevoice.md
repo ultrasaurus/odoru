@@ -12,9 +12,13 @@ See [listen-test.md](listen-test.md) for the current procedure (uses the
 preserved in [old-listen-test-ssh.md](old-listen-test-ssh.md) and will
 be deleted once the new path is confirmed reliable.
 
-## Test inputs (`data/*.txt`)
+## Test inputs (`odoru/data/*.txt`)
 
-All derived from `data/authorship.txt` (the augment/NLS "Authorship
+Source documents (raw, unsegmented) live in the **workspace root**
+`odoru/data/` — not `vibe/data/`. `vibe/data/` holds generated
+segments/audio/logs (see `dev/setup.md` § Segment files).
+
+All derived from `odoru/data/authorship.txt` (the augment/NLS "Authorship
 Provisions" paper) via `tts/examples/normalize_dump.rs`
 (`cargo run --example normalize_dump < input.txt > output.txt`):
 
@@ -25,8 +29,8 @@ Provisions" paper) via `tts/examples/normalize_dump.rs`
   Used as a quick smoke test before running the full file.
 - `odoru_markers_normalized.txt` — just the "Markers" section (12
   lines), normalized. Used to compare normalizer output against the
-  raw source (`data/markers.txt`) and find the issues now tracked in
-  `dev/normalize-future.md`.
+  raw source (`odoru/data/markers.txt`) and find the issues now tracked
+  in `dev/normalize-future.md`.
 
 Corresponding `*_generated.wav` files are the VibeVoice output for
 each — gitignored (large binary), live in `vibe/data/` locally.
