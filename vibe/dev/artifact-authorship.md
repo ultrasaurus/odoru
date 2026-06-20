@@ -1,4 +1,4 @@
-# AUGMENT Paper TTS Artifact Review
+# Authorship Paper TTS Artifact Review
 
 Test audio: `vibe/data/authorship_seg*.wav` (33 segments, stitched)
 

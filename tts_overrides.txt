@@ -24,6 +24,7 @@ yaml	yamel
 # aren't handled by the general <Tag-N> expansion (try_expand_tag requires
 # an all-digit suffix). See dev/normalize-future.md section A.
 # TODO: migrate to per-document overrides once that mechanism exists.
+
 <ref-1.l>	Ref 1 point L
 <ref-1.l:i;ll>	Ref 1 point L colon I semi-colon L L
 <4b:mi>	4 b colon M I
@@ -31,16 +32,17 @@ zzz	zee zee zee
 move	moove
 delete	deeleet
 <OAD,2237,>	O A D comma 2 2 3 7 comma
-# TODO: quoted punctuation always sounds wrong; ":" → "colon" is a stopgap.
-# Consider a general quoted-punctuation-to-spoken-word pass in the normalizer.
-":"	colon
 #x	marker X
-"."	Baseline dot symbol
 "*D"	asterisk dee
 #s	marker S
 printer/graohic	printer or graphic
 
-# Per-document overrides (TODO: migrate to per-document override mechanism)
+# TODO: quoted punctuation always sounds wrong; ":" → "colon" is a stopgap.
+# Consider a general quoted-punctuation-to-spoken-word pass in the normalizer.
+":"	colon
+"."	Baseline dot symbol
+
+
 # Single Roman-numeral letters can't be auto-detected (ambiguous with name
 # initials like "I. Smith"). See dev/normalize-future.md §Roman Numerals.
 I. INTRODUCTION	One Introduction
