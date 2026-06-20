@@ -6,6 +6,7 @@
 ///   2. Expand year ranges: 1976-77 → "1976 to 77".
 ///   2b. Expand comma-grouped numbers: 2,000 → "two thousand".
 ///   2c. Spell item/reference numbers digit-by-digit: Item 71279 → Item seven one …
+///   2d. Expand journal links: (AUGMENT,71279,) → Augment seven one two seven nine
 ///   3. Load `tts_overrides.txt` and apply punctuated overrides (e.g. "e.g.").
 ///   3b. Replace dots between alphanumeric chars with " dot ": 4b.l → 4b dot l.
 ///   4. Tokenize on word boundaries:
@@ -21,6 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 use tracing::error;
+use regex::Regex;
 
 // ---------------------------------------------------------------------------
 // Override table
@@ -160,6 +162,11 @@ pub fn normalize(text: &str) -> String {
     // Pass 2c: spell Item/reference numbers digit-by-digit (Item 71279 →
     // Item seven one two seven nine) so TTS doesn't garble large IDs.
     let text = spell_item_numbers(&text);
+
+    // Pass 2d: expand journal links like (AUGMENT,71279,) or <OAD,2237,> →
+    // "Augment 7 1 2 7 9". Runs before bracket-stripping so the delimiters
+    // are consumed as part of the pattern.
+    let text = expand_journal_links(&text);
 
     // Pass 3b: replace dots between alphanumeric chars with " dot " so link
     // notation like `4b.l` or `Ref.dt` is read correctly.
@@ -536,6 +543,25 @@ fn digit_word(c: char) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
+// Pass 2d: expand journal links — (AUGMENT,71279,) → "Augment 7 1 2 7 9"
+// ---------------------------------------------------------------------------
+
+fn expand_journal_links(text: &str) -> String {
+    // Matches optional open bracket, 2+ uppercase letters, comma, digits, comma,
+    // optional close bracket. e.g. (AUGMENT,71279,) or <OAD,2237,>
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"[(<]?([A-Z]{2,}),(\d+),[)>]?").unwrap());
+
+    re.replace_all(text, |caps: &regex::Captures| {
+        let name = &caps[1];
+        let digits = &caps[2];
+        let spoken_name = process_alpha_token(name);
+        let spelled: Vec<&str> = digits.chars().map(digit_word).collect();
+        format!("{} {}", spoken_name, spelled.join(" "))
+    }).into_owned()
+}
+
+// ---------------------------------------------------------------------------
 // Pass 3b: replace dots between alphanumeric chars with " dot "
 // ---------------------------------------------------------------------------
 
@@ -799,6 +825,17 @@ mod tests {
     fn acronym_without_override_spells_out() {
         let overrides = HashMap::new();
         assert_eq!(process_token("SID", &overrides), "S I D");
+    }
+
+    #[test]
+    fn journal_links_expanded() {
+        assert_eq!(expand_journal_links("(AUGMENT,71279,)"), "Augment seven one two seven nine");
+        assert_eq!(expand_journal_links("<OAD,2237,>"),      "O A D two two three seven");
+        assert_eq!(expand_journal_links("(AUGMENT,14724,)"), "Augment one four seven two four");
+        // lowercase name — not matched (DDD,xxx,bb style placeholders)
+        assert_eq!(expand_journal_links("(DDD,xxx,bb)"),     "(DDD,xxx,bb)");
+        // digits in second field required — not matched if non-digit
+        assert_eq!(expand_journal_links("(DDD,xxx,)"),       "(DDD,xxx,)");
     }
 
     #[test]

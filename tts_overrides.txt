@@ -80,7 +80,6 @@ Dec.	December
 zzz	zee zee zee
 move	moove
 delete	deeleet
-<OAD,2237,>	O A D comma 2 2 3 7 comma
 #x	marker X
 "*D"	asterisk dee
 #s	marker S
