@@ -37,7 +37,7 @@ the repo root)
 
 3. Synthesize the segment:
    ```
-   cargo run -- synthesize <segment_name> <pod_id> --seed 71463 --gpu-price <price>
+   cargo run -- synthesize segment <segment_name> <pod_id> --seed 71463 --gpu-price <price>
    ```
    This normalizes `vibe/data/<segment_name>.txt`, sends it to the pod,
    and saves `vibe/data/<segment_name>_generated.wav`. No manual wait
@@ -58,16 +58,23 @@ Use this to validate changes across an entire document.
 
 ### 1. Generate segment files
 
-If segment files don't exist yet or the document/segmenting has changed, 
-regenerate segment files. Run from the `vibe/` directory:
+If segment files don't exist yet or the document/segmenting has changed,
+regenerate segment files. Run from `vibe/`:
 
-For `authorship.txt` (all 150–250 word segments, seg01–33):
 ```bash
-python3 split_authorship_all.py
+cargo run -- segment authorship
 ```
-Output: `vibe/data/authorship_seg01.txt` … `authorship_seg33.txt`
 
-For `augment` segments, use `split_augment.py`.
+Output: `vibe/data/authorship_seg01.txt` … `authorship_segNN.txt`
+
+Segments are 50–250 words each, split at paragraph boundaries. Long inline
+quotes (≥12 words) and parenthetical asides (≥12 words) are broken out as
+their own speaker turns, giving the model cleaner synthesis units.
+
+For other documents in `odoru/data/`, pass the stem name:
+```bash
+cargo run -- segment augment
+```
 
 ### 2. Start a pod
 
@@ -81,7 +88,7 @@ Note the pod ID and price. Requires ≥24GB VRAM — enforced automatically.
 
 ```bash
 for seg in seg01 seg02 seg03 ...; do
-  cargo run -- synthesize authorship_$seg <pod_id> --seed 71463 --gpu-price <price>
+  cargo run -- synthesize segment authorship_$seg <pod_id> --seed 71463 --gpu-price <price>
 done
 ```
 

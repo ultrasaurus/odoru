@@ -66,6 +66,13 @@ enum Command {
     },
     /// Normalize text (calls util::normalizer::normalize)
     Normalize { text: String },
+    /// Split a document into TTS segments and write them as numbered files.
+    /// Reads vibe/data/<name>.txt, writes vibe/data/<name>_seg01.txt etc.
+    /// with Speaker 1: prefix per paragraph.
+    Segment {
+        /// Stem of vibe/data/<name>.txt (no extension)
+        name: String,
+    },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
         wav_path: String,
@@ -75,12 +82,13 @@ enum Command {
         duration: f64,
     },
     /// Run VibeVoice inference via the vibe-service HTTP API running on
-    /// the pod. Normalizes data/<name>.txt, POSTs to /synthesize (blocking
-    /// until done), downloads the wav, fetches the log, and appends runs.jsonl.
-    /// Use this in preference to listen-test-ssh when the service is running.
+    /// the pod. Normalizes and synthesizes a pre-split segment or a whole
+    /// document (--doc splits it first). Downloads the wav and appends
+    /// runs.jsonl.
     Synthesize {
-        /// Stem of vibe/data/<name>.txt (no extension)
-        name: String,
+        /// What to synthesize: a pre-split segment file or a whole document.
+        #[command(subcommand)]
+        input: SynthInput,
         pod_id: String,
         #[arg(long, default_value = "Sarah")]
         speaker: String,
@@ -120,6 +128,23 @@ enum Command {
         /// GPU price per hour (from new-pod output), stored in run log
         #[arg(long)]
         gpu_price: Option<f64>,
+    },
+}
+
+/// What to synthesize: a pre-split segment file or a whole document.
+#[derive(Subcommand)]
+enum SynthInput {
+    /// Synthesize a pre-split segment file: reads vibe/data/<name>.txt.
+    Segment {
+        /// Stem of vibe/data/<name>.txt (no extension, e.g. authorship_seg01)
+        name: String,
+    },
+    /// Segment a whole document and synthesize each part in sequence.
+    /// Reads vibe/data/<name>.txt, writes vibe/data/<name>_seg*.txt, then
+    /// synthesizes each segment in order.
+    Doc {
+        /// Stem of vibe/data/<name>.txt (no extension, e.g. authorship)
+        name: String,
     },
 }
 
@@ -300,8 +325,30 @@ async fn main() -> Result<()> {
         Command::Normalize { text } => {
             println!("{}", util::normalizer::normalize(&text));
         }
+        Command::Segment { name } => {
+            // Source documents live in the workspace data/ dir (odoru/data/).
+            // Segment files are written to vibe/data/ for synthesis.
+            let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
+            let seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let input_path = format!("{src_dir}/{name}.txt");
+            let text = std::fs::read_to_string(&input_path)
+                .with_context(|| format!("reading {input_path}"))?;
+            let segments = util::segmenter::segment(&text);
+            info!("{} → {} segments", name, segments.len());
+            for (i, seg) in segments.iter().enumerate() {
+                let seg_name = format!("{name}_seg{:02}", i + 1);
+                let seg_path = format!("{seg_dir}/{seg_name}.txt");
+                let content: String = seg.lines()
+                    .map(|p| format!("Speaker 1: {p}\n"))
+                    .collect();
+                std::fs::write(&seg_path, &content)
+                    .with_context(|| format!("writing {seg_path}"))?;
+                let wc: usize = seg.split_whitespace().count();
+                info!("  {seg_name}: {} paragraphs, {wc} words", seg.lines().count());
+            }
+        }
         Command::Synthesize {
-            name,
+            input,
             pod_id,
             speaker,
             cfg_scale,
@@ -309,6 +356,12 @@ async fn main() -> Result<()> {
             gpu_price,
             port,
         } => {
+            let name = match &input {
+                SynthInput::Segment { name } => name.clone(),
+                SynthInput::Doc { .. } => {
+                    anyhow::bail!("synthesize doc is not yet implemented — run `segment <name>` first, then synthesize each segment");
+                }
+            };
             let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
             let input_path = format!("{data_dir}/{name}.txt");
             let normalized_path = format!("{data_dir}/{name}_normalized.txt");

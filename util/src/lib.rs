@@ -11,6 +11,7 @@
 
 pub mod frontmatter;
 pub mod normalizer;
+pub mod segmenter;
 pub mod voice;
 pub mod documents;
 pub mod index;
