@@ -556,7 +556,8 @@ async fn main() -> Result<()> {
                     Ok(r) => {
                         let j: serde_json::Value = r.json().await.context("reading job status")?;
                         let status = j["status"].as_str().unwrap_or("unknown");
-                        info!("job_id={job_id_remote} name={name} status={status}");
+                        let elapsed = synth_start.elapsed().as_secs_f64();
+                        info!("job_id={job_id_remote} name={name} status={status} elapsed={elapsed:.0}s");
                         match status {
                             "done" => {
                                 let seed_used = j["seed"].as_u64().unwrap_or(seed);
@@ -570,7 +571,10 @@ async fn main() -> Result<()> {
                                 let err = j["error"].as_str().unwrap_or("unknown error");
                                 anyhow::bail!("job failed: {err}");
                             }
-                            _ => continue,
+                            _ => {
+                                warn!("job_id={job_id_remote} name={name} unexpected status={status} body={j}");
+                                continue;
+                            }
                         }
                     }
                 }

@@ -7,19 +7,32 @@
 # Bump the version tag each time — RunPod won't pull an updated image otherwise.
 
 # ── Stage 1: compile vibe-service ──────────────────────────────────────────
-# GNU target (not musl) because forced-alignment links against CUDA dynamically.
-FROM rust:slim-bullseye AS builder
+# Built on the same CUDA devel image as the runtime stage — forced-alignment's
+# cudarc dependency needs nvcc, and tokenizers' esaxx-rs needs a C++ compiler;
+# rust:slim-bullseye has neither and lacks the CUDA toolkit entirely.
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     pkg-config \
     libssl-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /build
 COPY . .
 
+# No GPU is present at `docker build` time, so candle-kernels can't probe
+# nvidia-smi for compute capability. Pods are RTX A4000/A6000/3090/A40 — all
+# Ampere (sm_86).
+ENV CUDA_COMPUTE_CAP=86
+
 RUN cargo build --release \
     --manifest-path vibe/service/Cargo.toml \
+    --features vibe-service/cuda \
     --bin vibe-service
 
 # ── Stage 2: RunPod GPU image ───────────────────────────────────────────────

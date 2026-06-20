@@ -81,7 +81,7 @@ cargo run -- synthesize <segment_name> <pod_id> [--seed N] [--gpu-price P]
 - POSTs to `/synthesize` and blocks until inference completes
 - Saves `vibe/data/<segment_name>_generated.wav`
 - Fetches and saves the inference log to `vibe/data/<segment_name>_<id>.log`
-- Appends a row to `vibe/data/runs.jsonl`
+- Appends a row to `vibe/runs.jsonl`
 
 Pass `--seed <N>` to fix the voice across multiple segments. Preferred seed
 is **71463** — see [voices.md](voices.md) for seed evaluations.

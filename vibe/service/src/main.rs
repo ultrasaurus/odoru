@@ -124,7 +124,8 @@ async fn create_job_handler(
     let job_id = Uuid::new_v4().to_string();
     let name = req.name.clone();
 
-    info!(job_id = %job_id, name = ?name, "job created");
+    let text_words = req.text.split_whitespace().count();
+    info!(job_id = %job_id, name = ?name, words = text_words, "job created");
 
     state.jobs.write().await.insert(job_id.clone(), JobState::Pending { name: name.clone() });
 
@@ -264,6 +265,7 @@ fn strip_speaker_prefixes(text: &str) -> String {
 }
 
 async fn run_alignment(wav_bytes: &[u8], text: &str, name: &str) -> Option<AlignData> {
+    info!(name = %name, "alignment starting");
     // Write wav to a temp file so forced_alignment::audio::load_audio can read it.
     let tmp_path = std::path::PathBuf::from(format!("/tmp/align_{}.wav", Uuid::new_v4()));
     if let Err(e) = tokio::fs::write(&tmp_path, wav_bytes).await {
@@ -327,6 +329,24 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
 
     let start = std::time::Instant::now();
 
+    // Log a heartbeat every 60s while inference is running.
+    let heartbeat_job_id = job_id.clone();
+    let heartbeat_name = name.to_string();
+    let (heartbeat_cancel_tx, mut heartbeat_cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        interval.tick().await; // skip the immediate first tick
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    // elapsed is approximate; this runs until the cancel fires
+                    tracing::info!(job_id = %heartbeat_job_id, name = %heartbeat_name, "job still running");
+                }
+                _ = &mut heartbeat_cancel_rx => break,
+            }
+        }
+    });
+
     let result = async {
         tokio::fs::write(&txt_path, &req.text).await?;
         tokio::fs::create_dir_all(&out_dir).await?;
@@ -334,12 +354,16 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
     }
     .await;
 
+    let _ = heartbeat_cancel_tx.send(());
+
     match result {
         Err(e) => {
             warn!(job_id = %job_id, name = %name, error = %e, "job failed");
             let mut jobs = state.jobs.write().await;
             if let Some(j) = jobs.get_mut(&job_id) {
                 *j = JobState::Error { name: req.name.clone(), error: e.to_string() };
+            } else {
+                warn!(job_id = %job_id, name = %name, "job_id not found in map when storing error");
             }
         }
         Ok((wav_bytes, seed_used)) => {
@@ -368,6 +392,8 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
                     wav_bytes: Arc::new(wav_bytes),
                     align,
                 };
+            } else {
+                warn!(job_id = %job_id, name = %name, "job_id not found in map when storing result");
             }
         }
     }
