@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 use watchdog::ActivityTracker;
 
@@ -23,6 +23,12 @@ struct AppState {
     gpu_info: Arc<String>,
     tracker: ActivityTracker,
     jobs: Arc<RwLock<HashMap<String, JobState>>>,
+}
+
+#[derive(Clone, Serialize)]
+struct AlignData {
+    transcript: forced_alignment::transcript::Transcript,
+    report: forced_alignment::transcript::AlignReport,
 }
 
 #[derive(Clone, Serialize)]
@@ -42,6 +48,8 @@ enum JobState {
         rtf: Option<f64>,
         #[serde(skip)]
         wav_bytes: Arc<Vec<u8>>,
+        #[serde(skip)]
+        align: Option<AlignData>,
     },
     Error {
         name: Option<String>,
@@ -175,10 +183,10 @@ async fn get_job_wav_handler(
         }
     };
 
-    // Drop wav bytes from job store after fetch (fetch-once-then-drop).
+    // Drop wav bytes from job store after fetch; keep align data for subsequent fetches.
     {
         let mut jobs = state.jobs.write().await;
-        if let Some(JobState::Done { name, seed, wall_secs, audio_secs, rtf, .. }) =
+        if let Some(JobState::Done { name, seed, wall_secs, audio_secs, rtf, align, .. }) =
             jobs.remove(&job_id)
         {
             info!(job_id = %job_id, name = ?name, "wav fetched, job removed from memory");
@@ -189,6 +197,7 @@ async fn get_job_wav_handler(
                 audio_secs,
                 rtf,
                 wav_bytes: Arc::new(vec![]),
+                align,
             });
         }
     }
@@ -198,6 +207,96 @@ async fn get_job_wav_handler(
         Body::from(wav_bytes.as_ref().clone()),
     )
         .into_response()
+}
+
+async fn get_job_transcript_handler(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let jobs = state.jobs.read().await;
+    match jobs.get(&job_id) {
+        Some(JobState::Done { align: Some(a), .. }) => Json(&a.transcript).into_response(),
+        Some(JobState::Done { align: None, .. }) => StatusCode::NOT_FOUND.into_response(),
+        Some(_) => StatusCode::CONFLICT.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn get_job_report_handler(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let jobs = state.jobs.read().await;
+    match jobs.get(&job_id) {
+        Some(JobState::Done { align: Some(a), .. }) => Json(&a.report).into_response(),
+        Some(JobState::Done { align: None, .. }) => StatusCode::NOT_FOUND.into_response(),
+        Some(_) => StatusCode::CONFLICT.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Strip "Speaker N: " prefixes from each line, then join into a single string
+/// suitable for the forced aligner (which expects plain spoken text).
+fn strip_speaker_prefixes(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            // Match "Speaker <digits>: " at the start of any line.
+            if let Some(rest) = line.strip_prefix("Speaker ") {
+                if let Some(idx) = rest.find(": ") {
+                    let tag = &rest[..idx];
+                    if tag.chars().all(|c| c.is_ascii_digit()) {
+                        return rest[idx + 2..].to_string();
+                    }
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+async fn run_alignment(wav_bytes: &[u8], text: &str, name: &str) -> Option<AlignData> {
+    // Write wav to a temp file so forced_alignment::audio::load_audio can read it.
+    let tmp_path = std::path::PathBuf::from(format!("/tmp/align_{}.wav", Uuid::new_v4()));
+    if let Err(e) = tokio::fs::write(&tmp_path, wav_bytes).await {
+        error!(name = %name, error = %e, "alignment: failed to write temp wav");
+        return None;
+    }
+
+    let align_text = strip_speaker_prefixes(text);
+    let result = tokio::task::spawn_blocking(move || {
+        let samples = forced_alignment::audio::load_audio(&tmp_path, forced_alignment::SAMPLE_RATE)?;
+        let _ = std::fs::remove_file(&tmp_path);
+        forced_alignment::align(&samples, &align_text)
+    })
+    .await;
+    match result {
+        Ok(Ok((transcript, report))) => {
+            info!(
+                name = %name,
+                suspects = report.suspect.len(),
+                filtered = report.filtered.len(),
+                "alignment done"
+            );
+            Some(AlignData { transcript, report })
+        }
+        Ok(Err(e)) => {
+            error!(name = %name, error = %e, "alignment failed");
+            None
+        }
+        Err(e) => {
+            error!(name = %name, error = %e, "alignment task panicked");
+            None
+        }
+    }
 }
 
 async fn run_job(state: AppState, job_id: String, req: JobRequest) {
@@ -253,6 +352,11 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
                 rtf = rtf.map(|r| format!("{r:.3}")).unwrap_or_default(),
                 "job done"
             );
+
+            // Run forced alignment on GPU. Non-fatal: synthesis result stands even if
+            // alignment fails.
+            let align = run_alignment(&wav_bytes, &req.text, name).await;
+
             let mut jobs = state.jobs.write().await;
             if let Some(j) = jobs.get_mut(&job_id) {
                 *j = JobState::Done {
@@ -262,6 +366,7 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
                     audio_secs,
                     rtf,
                     wav_bytes: Arc::new(wav_bytes),
+                    align,
                 };
             }
         }
@@ -400,6 +505,8 @@ async fn main() -> Result<()> {
         .route("/jobs", post(create_job_handler))
         .route("/jobs/:job_id", get(get_job_handler))
         .route("/jobs/:job_id/wav", get(get_job_wav_handler))
+        .route("/jobs/:job_id/transcript", get(get_job_transcript_handler))
+        .route("/jobs/:job_id/report", get(get_job_report_handler))
         .route("/log/:request_id", get(log_handler))
         .with_state(state);
 

@@ -5,6 +5,8 @@
   without triggering a migraine.  If so, integrate into CLI. Consider how to
   integrate into Odoru.
 
+[*] - means in-progress, implementation done, needs testing
+
 Steps
 1. [x] Section A issues from [dev/normalize-future.md](../dev/normalize-future.md):
    1. [x] Acronym spelling (A1): review existing test coverage for the
@@ -53,20 +55,19 @@ Steps
      fetches wav via `GET /jobs/:id/wav`. seg33 (284 words, RTF 1.04x
      on RTX 3090) completed successfully on 2026-06-19. Docker image
      bumped to v13.
-
-7. Improve tooling to improve workflow
-   - [ ] log GPU type and VRAM of selected pod at run time (currently only
+7. Augment fixes: from full document test, see [artifact-augment.md](artifact-augment.md)
+   - [X] update `tts_overrides.txt`
+   - [X] NAME,number, pattern → normalizer fix
+   - [*] QA pass with forced-alignment AlignReport 
+     (detection of word-skipping/truncations)
+8. Improve tooling to improve workflow
+   - [*] log GPU type and VRAM of selected pod at run time (currently only
      filtered by >=24GB, not recorded); useful for correlating artifact
-     patterns with hardware
+     patterns with hardware 
    - [ ] consider additional synthesize/vibe-service testing needed before
-     removing listen-test-ssh (recently vibe-service failed -- need to
-     investigate)
-   - [ ] QA pass with forced-alignment AlignReport 
-         (detection of word-skipping/truncations)
-8. Augment fixes: from full document test, see [artifact-augment.md](artifact-augment.md)
-   - update `tts_overrides.txt`
-   - NAME,number, pattern → normalizer fix
-   - rerun - test augment, validate skipping
+     removing listen-test-ssh 
+     - [X] recently vibe-service failed -- long segment timout (polling fixes)
+     - [ ] rerun - test augment, validate skipping
 9. Consider additional improvements
    - background noise removal
    - use forced-alignment to find original headers and add silence

@@ -190,6 +190,84 @@ fn append_run_log(entry: serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+async fn fetch_align_results(
+    http: &reqwest::Client,
+    base_url: &str,
+    job_id: &str,
+    name: &str,
+    data_dir: &str,
+    secret: &Option<String>,
+) {
+    for (suffix, file_suffix) in [("transcript", "_transcript.json"), ("report", "_report.json")] {
+        let url = format!("{base_url}/jobs/{job_id}/{suffix}");
+        let mut req = http.get(&url).timeout(std::time::Duration::from_secs(30));
+        if let Some(s) = secret {
+            req = req.bearer_auth(s);
+        }
+        match req.send().await {
+            Err(e) => {
+                warn!("fetch alignment {suffix} for {name}: {e}");
+                continue;
+            }
+            Ok(r) if !r.status().is_success() => {
+                warn!("fetch alignment {suffix} for {name}: HTTP {}", r.status());
+                continue;
+            }
+            Ok(r) => match r.bytes().await {
+                Err(e) => warn!("reading alignment {suffix} for {name}: {e}"),
+                Ok(bytes) => {
+                    let path = format!("{data_dir}/{name}{file_suffix}");
+                    if let Err(e) = std::fs::write(&path, &bytes) {
+                        warn!("writing {path}: {e}");
+                    } else {
+                        // Print QA summary from report.
+                        if suffix == "report" {
+                            print_align_qa(name, &bytes);
+                        }
+                        info!("saved {path}");
+                    }
+                }
+            },
+        }
+    }
+}
+
+fn print_align_qa(name: &str, report_bytes: &[u8]) {
+    #[derive(serde::Deserialize)]
+    struct Report {
+        filtered: Vec<serde_json::Value>,
+        suspect: Vec<Suspect>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Suspect {
+        word: String,
+        score: f64,
+        reason: String,
+    }
+
+    let Ok(report) = serde_json::from_slice::<Report>(report_bytes) else { return };
+
+    let truncated: Vec<_> = report.suspect.iter().filter(|s| s.reason == "Truncated").collect();
+    let low: Vec<_> = report.suspect.iter().filter(|s| s.reason == "LowScore").collect();
+
+    if report.suspect.is_empty() && report.filtered.is_empty() {
+        info!("QA {name}: clean");
+        return;
+    }
+
+    if !truncated.is_empty() {
+        let words: Vec<_> = truncated.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
+        warn!("QA {name}: ⚠ TRUNCATED — {}", words.join(" "));
+    }
+    if !low.is_empty() {
+        let words: Vec<_> = low.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
+        warn!("QA {name}: low-score — {}", words.join(" "));
+    }
+    if !report.filtered.is_empty() {
+        info!("QA {name}: {} filtered word(s)", report.filtered.len());
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -394,13 +472,19 @@ async fn main() -> Result<()> {
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()?;
+            let mut gpu_name = "unknown".to_string();
+            let mut gpu_vram_mb: Option<u64> = None;
             loop {
                 match http.get(format!("{proxy_base_url}/health")).send().await {
                     Ok(r) if r.status().is_success() => {
                         let body: serde_json::Value = r.json().await.unwrap_or_default();
                         if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
-                            let gpu = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
-                            info!("service ready — GPU: {gpu}");
+                            let gpu_info = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
+                            info!("service ready — GPU: {gpu_info}");
+                            let mut parts = gpu_info.splitn(2, ',');
+                            gpu_name = parts.next().unwrap_or("unknown").trim().to_string();
+                            gpu_vram_mb = parts.next()
+                                .and_then(|s| s.trim().trim_end_matches(" MiB").parse::<u64>().ok());
                             break;
                         }
                         if let Some(msg) = body.get("message").and_then(|v| v.as_str()) {
@@ -509,12 +593,20 @@ async fn main() -> Result<()> {
                 info!("audio: {d:.1}s  RTF: {:.2}x", rtf.unwrap_or(wall / d));
             }
 
+            // Fetch alignment results (non-fatal).
+            fetch_align_results(
+                &http, &synth_base_url, &job_id_remote, &name, data_dir, &secret,
+            )
+            .await;
+
             // Append run log.
             let entry = serde_json::json!({
                 "timestamp": chrono::Utc::now().to_rfc3339(),
                 "segment": name,
                 "pod_id": pod_id,
                 "job_id": job_id_remote,
+                "gpu_name": gpu_name,
+                "gpu_vram_mb": gpu_vram_mb,
                 "gpu_price_per_hr": gpu_price,
                 "speaker": speaker,
                 "cfg_scale": cfg_scale,

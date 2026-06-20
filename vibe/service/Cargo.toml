@@ -20,3 +20,4 @@ hound = "3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
+forced-alignment = { git = "https://github.com/ultrasaurus/forced-alignment-rs.git", tag = "v0.2.1", features = ["cuda"] }

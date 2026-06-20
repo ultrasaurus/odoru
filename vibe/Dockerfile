@@ -6,25 +6,21 @@
 #   docker push dockersaura/vibe:<vN>
 # Bump the version tag each time — RunPod won't pull an updated image otherwise.
 
-# ── Stage 1: compile vibe-service as a static musl binary ──────────────────
+# ── Stage 1: compile vibe-service ──────────────────────────────────────────
+# GNU target (not musl) because forced-alignment links against CUDA dynamically.
 FROM rust:slim-bullseye AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    musl-tools \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-
-RUN rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /build
 COPY . .
 
-# Static musl build — no shared library dependencies.
-# reqwest uses rustls (no openssl needed for musl).
-RUN RUSTFLAGS="-C target-feature=+crt-static" \
-    cargo build --release \
+RUN cargo build --release \
     --manifest-path vibe/service/Cargo.toml \
-    --bin vibe-service \
-    --target x86_64-unknown-linux-musl
+    --bin vibe-service
 
 # ── Stage 2: RunPod GPU image ───────────────────────────────────────────────
 # RunPod base image: PyTorch 2.4.0, CUDA 12.4.1, Ubuntu 22.04.
@@ -48,7 +44,7 @@ RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd
 
-COPY --from=builder /build/vibe/target/x86_64-unknown-linux-musl/release/vibe-service /usr/local/bin/vibe-service
+COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-service
 
 COPY vibe/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
