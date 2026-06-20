@@ -8,9 +8,11 @@ for normalizer issues found along the way.
 ## Listen test procedure
 
 See [listen-test.md](listen-test.md) for the current procedure (uses the
-`synthesize` command via `vibe-service`). The old SSH-based workflow is
-preserved in [old-listen-test-ssh.md](old-listen-test-ssh.md) and will
-be deleted once the new path is confirmed reliable.
+`synthesize segment` command via `vibe-service`). The old SSH-based
+`listen-test-ssh` command and its doc (`old-listen-test-ssh.md`) were
+removed 2026-06-20 — the HTTP-service path has been reliable since the
+async job API replaced the blocking `/synthesize` endpoint (see
+`dev/plan.md` step 6).
 
 ## Test inputs (`odoru/data/*.txt`)
 

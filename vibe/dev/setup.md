@@ -97,18 +97,6 @@ for seg in seg01 seg02 seg03; do
 done
 ```
 
-## SSH fallback (listen-test-ssh)
-
-Use when `vibe-service` is not running or for debugging:
-
-```
-cargo run -- listen-test-ssh <segment_name> <pod_id> [--seed N] [--gpu-price P]
-```
-
-Same normalization and output as `synthesize` but connects via SSH/SCP
-instead of the HTTP service. Requires the pod's public IP to be available
-(wait ~60 seconds after `new-pod`).
-
 ## Segment files
 
 Generate segment files with the `util::segmenter` logic, exposed via the

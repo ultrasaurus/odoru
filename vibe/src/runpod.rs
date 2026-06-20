@@ -57,6 +57,7 @@ pub fn scp_download_command(pod_id: &str, pod: &Value, remote_path: &str, local_
 }
 
 /// Build the `scp` command to upload a file to a running pod.
+#[allow(dead_code)] // kept for a future SSH-fallback path; no current caller since listen-test-ssh was removed
 pub fn scp_upload_command(pod_id: &str, pod: &Value, local_path: &str, remote_path: &str) -> Result<Vec<String>> {
     let (ip, port) = ssh_endpoint(pod_id, pod)?;
     Ok(vec![
@@ -74,6 +75,7 @@ pub fn scp_upload_command(pod_id: &str, pod: &Value, local_path: &str, remote_pa
 
 /// Build an `ssh` command that runs `remote_cmd` via `bash -lc` on a
 /// running pod and returns (does not open an interactive shell).
+#[allow(dead_code)] // kept for a future SSH-fallback path; no current caller since listen-test-ssh was removed
 pub fn ssh_exec_command(pod_id: &str, pod: &Value, remote_cmd: &str) -> Result<Vec<String>> {
     let (ip, port) = ssh_endpoint(pod_id, pod)?;
     Ok(vec![
@@ -91,6 +93,7 @@ pub fn ssh_exec_command(pod_id: &str, pod: &Value, remote_cmd: &str) -> Result<V
 }
 
 /// Single-quote a string for a POSIX shell, escaping embedded `'`.
+#[allow(dead_code)] // only used by ssh_exec_command, kept for future SSH-fallback path
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }

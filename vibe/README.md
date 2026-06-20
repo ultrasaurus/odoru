@@ -26,7 +26,7 @@ Fill in:
   (see `runpod.md`). Also set `RUNPOD_USER_API_KEY` in the template env so
   the idle watchdog can auto-stop the pod.
 
-`ssh`/`download`/`listen-test-ssh` use `~/.ssh/runpod` to connect directly to
+`ssh`/`download` use `~/.ssh/runpod` to connect directly to
 `root@<publicIp> -p <port>` (the pod's mapped port 22).
 
 ## Docker image
@@ -49,19 +49,16 @@ cargo run -- new-pod gpu e6qma5uqam
 
 # Synthesize a segment — polls /health, submits async job, polls until done,
 # downloads wav. No proxy timeout risk.
-cargo run -- synthesize authorship_seg01 <pod_id> --seed 71463 --gpu-price <price>
+cargo run -- synthesize segment authorship_seg01 <pod_id> --seed 71463 --gpu-price <price>
 
 # Run multiple segments in sequence
 for seg in seg01 seg02 seg03; do
-  cargo run -- synthesize authorship_$seg <pod_id> --seed 71463 --gpu-price <price>
+  cargo run -- synthesize segment authorship_$seg <pod_id> --seed 71463 --gpu-price <price>
 done
 
 # The idle watchdog auto-stops the pod after 3 min of inactivity.
 # To terminate immediately:
 cargo run -- terminate-pod <pod_id>
-
-# SSH fallback (when vibe-service is not running or for debugging)
-cargo run -- listen-test-ssh authorship_seg01 <pod_id> --seed 71463 --gpu-price <price>
 ```
 
 ### vibe-service endpoints (on the pod)
