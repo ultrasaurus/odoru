@@ -8,6 +8,14 @@
 - Likely need concept of document owner and admin role.
 - shared cache? 
 
+### Per-user annotations
+
+Annotations (see [annotation.md](annotation.md)) currently live in a per-document
+`annotations.json` sidecar, keyed by document UUID — single-user only. Once
+multiple authors share a document store, annotations need to move to
+user-scoped storage so each author's highlights are private. Document UUID
+keying makes this migration straightforward when auth lands.
+
 ## Static export
 - See [export.md](export.md) for current implementation & CLI usage, meets primary use case of demo deployed via github pages
 - Export UI in authoring is expected to be needed when there are multiple users who want to post their projects as static web pages, preconditions:
