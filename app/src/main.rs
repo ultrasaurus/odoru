@@ -319,10 +319,23 @@ async fn get_words(
     };
 
     if voice_id.starts_with("f5:") {
-        warn!("POST /voices/{voice_id}/words: forced alignment for F5 not yet implemented");
-        return (StatusCode::NOT_IMPLEMENTED,
-            Json(serde_json::json!({ "error": "word timestamps not yet implemented for F5" })))
-            .into_response();
+        let sentence = body.sentence.clone();
+        // F5 normalizes before synthesis, so alignment and the audio cache
+        // key must be built from the same normalized text — not the raw
+        // sentence — or this would look up the wrong cache entry.
+        let normalized = tts::f5::normalizer::normalize_with_spans(&sentence);
+        let key = tts::audio_cache::cache_key(&normalized.text, &voice_cache_key);
+
+        return match tokio::task::spawn_blocking(move || tts::alignment::ensure_words(&key)).await {
+            Ok(Ok(words)) => {
+                let mapped = tts::alignment::words_with_original_text(&words, &normalized, &sentence);
+                Json(serde_json::json!({ "words": mapped })).into_response()
+            }
+            Ok(Err(e)) => (StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        };
     }
 
     let sentence = body.sentence.clone();

@@ -84,17 +84,41 @@ function wrapInSegment(seg: HTMLElement, globalStart: number, len: number, ann: 
   return false
 }
 
-function applyAnnotationToDOM(container: HTMLElement, ann: Annotation): boolean {
+// All occurrences of `text` across every `.segment`, in document order.
+function findAllOccurrences(
+  container: HTMLElement,
+  text: string,
+): { seg: HTMLElement; idx: number }[] {
+  const matches: { seg: HTMLElement; idx: number }[] = []
   for (const seg of container.querySelectorAll<HTMLElement>('.segment')) {
     const segText = seg.textContent ?? ''
     let searchFrom = 0
     let idx: number
-    while ((idx = segText.indexOf(ann.text, searchFrom)) !== -1) {
-      const ctx = makeContext(segText, idx, ann.text.length)
-      if (!ann.context || ctx === ann.context) {
-        if (wrapInSegment(seg, idx, ann.text.length, ann)) return true
-      }
+    while ((idx = segText.indexOf(text, searchFrom)) !== -1) {
+      matches.push({ seg, idx })
       searchFrom = idx + 1
+    }
+  }
+  return matches
+}
+
+function applyAnnotationToDOM(container: HTMLElement, ann: Annotation): boolean {
+  const occurrences = findAllOccurrences(container, ann.text)
+
+  // Context only disambiguates when the text isn't already unique — the
+  // 40-chars-after window can cross into a neighboring sentence, so an edit
+  // there can change the recorded context even though the annotated text
+  // itself is untouched. Don't let that break an otherwise-unambiguous match.
+  if (occurrences.length === 1) {
+    const { seg, idx } = occurrences[0]
+    return wrapInSegment(seg, idx, ann.text.length, ann)
+  }
+
+  for (const { seg, idx } of occurrences) {
+    const segText = seg.textContent ?? ''
+    const ctx = makeContext(segText, idx, ann.text.length)
+    if (!ann.context || ctx === ann.context) {
+      if (wrapInSegment(seg, idx, ann.text.length, ann)) return true
     }
   }
   return false
@@ -201,16 +225,32 @@ function findAnnotationWordRange(annText: string, words: WordEntry[]): { end: nu
 
   let charOffset = 0
   let lastEnd: number | undefined
-  for (const w of words) {
+  let lastIndex = -1
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]
     const wordEnd = charOffset + w.word.length
     if (wordEnd > idx && charOffset < idx + needle.length) {
-      if (w.end !== undefined) lastEnd = w.end
+      if (w.end !== undefined) { lastEnd = w.end; lastIndex = i }
     }
     charOffset = wordEnd + 1  // +1 for the space
   }
 
   if (lastEnd === undefined) return null
-  return { end: lastEnd + 0.15 }  // 150ms buffer so the word has time to finish
+
+  // Stop just before the next word's onset (small safety margin) rather
+  // than lastEnd + a flat buffer — forced alignment's *end* boundary for
+  // short words tends to land early, so a flat buffer can either bleed
+  // into the next word's audio (large buffer) or cut the word off (small/
+  // halved buffer) depending on how tight the gap is. The next word's
+  // *start* boundary is more reliable, and stopping just before it lets
+  // the current word finish naturally without spilling into the next one.
+  const SAFETY_MARGIN = 0.03
+  const FLAT_BUFFER = 0.15  // no next word (end of sentence) — just pad.
+  const nextStart = words[lastIndex + 1]?.start
+  const end = nextStart !== undefined
+    ? Math.max(lastEnd, nextStart - SAFETY_MARGIN)
+    : lastEnd + FLAT_BUFFER
+  return { end }
 }
 
 export async function listenAnnotation(

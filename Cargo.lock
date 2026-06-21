@@ -1028,8 +1028,8 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "forced-alignment"
-version = "0.1.0"
-source = "git+https://github.com/ultrasaurus/forced-alignment-rs?tag=v0.1.0#6eefa5d8e0d13e4250f2d4b51f836577c2d767f9"
+version = "0.2.1"
+source = "git+https://github.com/ultrasaurus/forced-alignment-rs?tag=v0.2.1#af5b686f574746b8ccb45fee0a5e30edd7023d9c"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -1042,6 +1042,7 @@ dependencies = [
  "serde_json",
  "symphonia",
  "tokenizers 0.23.1",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -4062,7 +4063,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "num2words",
- "regex",
  "reqwest",
  "roman",
  "serde",
