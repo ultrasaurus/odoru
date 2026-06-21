@@ -27,7 +27,7 @@
 //! ```
 
 // Shared infrastructure
-pub mod splitter;
+pub use util::splitter;
 pub mod chunk;
 pub mod backend;
 pub use forced_alignment::transcript;

@@ -28,9 +28,6 @@ async-stream = "0.3"
 thiserror = "1"
 anyhow = "1"
 
-# Sentence splitting
-unicode-segmentation = "1"
-
 # Shared utilities (frontmatter, voice loading)
 util = { path = "../util" }
 

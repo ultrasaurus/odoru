@@ -3999,6 +3999,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
+ "unicode-segmentation",
  "url",
  "uuid",
 ]

@@ -3887,7 +3887,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "unicode-segmentation",
  "util",
 ]
 
@@ -4072,6 +4071,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "unicode-segmentation",
  "url",
  "uuid",
 ]

@@ -52,16 +52,18 @@ run directories are simply never passed as a basedir to import.
 
 ## What's missing today
 
-1. No mapping from a segment's normalized text back to original-text
-   word positions. The forced-alignment transcript (`_transcript.json`)
-   only has word timestamps for the *normalized* text.
+1. Vibe import doesn't yet *use* the existing normalized↔original word
+   mapping. The forced-alignment transcript (`_transcript.json`) only
+   has word timestamps for the *normalized* text — `util::normalizer`
+   already solves mapping that back to original-text positions (built
+   for F5), it just hasn't been wired into vibe import yet. See
+   "Normalized-to-original word mapping" below — no new design needed,
+   just reuse.
 2. No record of paragraph boundaries within a segment.
 3. No record of which voice/speaker config actually produced a
    segment's audio.
 
-(1) already has a solution to reuse, not design from scratch — see
-"Normalized-to-original word mapping" below. (2) and (3) are what the
-sidecar format in this doc addresses.
+(2) and (3) are what the sidecar format in this doc addresses.
 
 ## Move `splitter::split` into `util`
 
