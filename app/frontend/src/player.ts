@@ -12,6 +12,18 @@ class AudioQueue {
   // AudioContext clock value when the first buffer of the current play/seek
   // was scheduled. Used to compute elapsed time since last seek.
   firstStartTime = 0
+  // All source nodes scheduled since the last reset() — tracked so
+  // scheduleStopAt() can cut them off at a precise AudioContext time.
+  private sources: AudioBufferSourceNode[] = []
+  // Active stop time, if any — applied to every node *already* in
+  // `sources` when scheduleStopAt() is called, and to every node enqueued
+  // *afterwards* too. Segments keep streaming in live via a separate WS
+  // handler while synthesis is in progress (`enqueue()` is called for each
+  // as it arrives), so a node that didn't exist yet at scheduleStopAt()
+  // time still needs the same cutoff applied when it's created — otherwise
+  // it plays through uninterrupted, which only showed up in practice for
+  // annotations listened to while synthesis was still catching up.
+  private scheduledStopAt: number | null = null
 
   constructor() {
     this.ctx = new AudioContext({ sampleRate: 24000 })
@@ -41,7 +53,34 @@ class AudioQueue {
     }
 
     src.start(this.nextStartTime)
+    this.sources.push(src)
+    if (this.scheduledStopAt !== null) {
+      try { src.stop(this.scheduledStopAt) } catch { /* already past */ }
+    }
     this.nextStartTime += buf.duration
+  }
+
+  /**
+   * Schedule every currently-enqueued source node — and any enqueued
+   * later, until cleared — to stop at `ctxTime` (an
+   * `AudioContext.currentTime`-relative time). Sample-accurate, on the
+   * audio hardware clock, not subject to the main thread or
+   * requestAnimationFrame being throttled (e.g. when the tab loses focus).
+   * A node already past its natural end, or already stopped, is a no-op.
+   * A node whose scheduled start is after `ctxTime` simply never plays.
+   */
+  scheduleStopAt(ctxTime: number): void {
+    this.scheduledStopAt = ctxTime
+    for (const src of this.sources) {
+      try { src.stop(ctxTime) } catch { /* already stopped */ }
+    }
+  }
+
+  // Stop applying a previously-scheduled cutoff to newly-enqueued nodes —
+  // call when the stop has been reached, or when starting unrelated
+  // playback that shouldn't inherit a stale listenTo() cutoff.
+  clearScheduledStop(): void {
+    this.scheduledStopAt = null
   }
 
   resume() { return this.ctx.resume() }
@@ -55,6 +94,8 @@ class AudioQueue {
     this.nextStartTime = 0
     this.firstStartTime = 0
     this.started = false
+    this.sources = []
+    this.scheduledStopAt = null
   }
 }
 
@@ -278,13 +319,27 @@ export class Player {
   /**
    * Seek into `segIndex` — at `startOffsetSecs` seconds in (default 0, i.e.
    * the segment's own start) — and play, stopping automatically when
-   * `endOffsetSecs` seconds into that segment have elapsed.
-   * No-op if audio is not loaded or the segment is out of range.
+   * `endOffsetSecs` seconds into `endSegIndex` (default `segIndex`, i.e.
+   * the same segment) have elapsed. `endSegIndex` can be a later segment,
+   * for an annotation that spans multiple sentences.
+   * No-op if audio is not loaded or either segment is out of range.
+   *
+   * The actual audio cutoff is scheduled natively on the Web Audio nodes
+   * (`AudioQueue.scheduleStopAt`) rather than relying solely on the
+   * `tick()` polling loop below — `requestAnimationFrame` can be throttled
+   * by the browser (e.g. when the tab loses focus/visibility), which let
+   * playback audibly run on past `stopAt` by a variable amount. The native
+   * schedule is sample-accurate and unaffected by that. `tick()` still
+   * handles the surrounding state sync (highlighting, calling `pause()` to
+   * update `queue.state`) — if that lags, the audio is already silent by
+   * then regardless.
    */
-  listenTo(segIndex: number, endOffsetSecs: number, startOffsetSecs = 0): void {
-    if (!this.hasAudio || segIndex >= this.segments.length) return
-    this.stopAt = this.segments[segIndex].startTime + endOffsetSecs
+  listenTo(segIndex: number, endOffsetSecs: number, startOffsetSecs = 0, endSegIndex = segIndex): void {
+    if (!this.hasAudio || segIndex >= this.segments.length || endSegIndex >= this.segments.length) return
+    this.stopAt = this.segments[endSegIndex].startTime + endOffsetSecs
     this._doSeek(segIndex, true, startOffsetSecs)
+    const ctxStopTime = this.queue.firstStartTime + (this.stopAt - this.seekOffset)
+    this.queue.scheduleStopAt(ctxStopTime)
   }
 
   get synthesizedWordCount(): number {
@@ -389,6 +444,7 @@ export class Player {
 
       if (this.stopAt !== null && pos >= this.stopAt) {
         this.stopAt = null
+        this.queue.clearScheduledStop()  // don't let later, unrelated segments inherit this cutoff
         this.pause()
         return
       }

@@ -61,64 +61,118 @@ function createMarkEl(ann: Annotation): HTMLElement {
   return mark
 }
 
-function wrapInSegment(seg: HTMLElement, globalStart: number, len: number, ann: Annotation): boolean {
-  const walker = document.createTreeWalker(seg, NodeFilter.SHOW_TEXT)
-  let offset = 0
-  let node: Text | null
-  while ((node = walker.nextNode() as Text | null)) {
-    const nodeLen = node.textContent!.length
-    if (offset + nodeLen > globalStart) {
-      const localStart = globalStart - offset
-      const localEnd   = localStart + len
-      if (localEnd <= nodeLen) {
-        const range = document.createRange()
-        range.setStart(node, localStart)
-        range.setEnd(node, localEnd)
-        try { range.surroundContents(createMarkEl(ann)); return true }
-        catch { return false }
-      }
-      return false  // spans multiple text nodes — skip for MVP
-    }
-    offset += nodeLen
-  }
-  return false
+interface DocPosition {
+  // Full text of `container`, built by walking every text node in document
+  // order — including the literal space text node the renderer inserts
+  // between sentences (`markdown.ts`'s `container.appendChild(createTextNode(' '))`).
+  // Matches exactly what `Range.toString()` would capture for any selection,
+  // including one crossing sentence (or paragraph) boundaries.
+  text: string
+  // Each `.segment`'s [start, end) range within `text`, in document order.
+  segmentRanges: { seg: HTMLElement; start: number; end: number }[]
 }
 
-// All occurrences of `text` across every `.segment`, in document order.
-function findAllOccurrences(
-  container: HTMLElement,
-  text: string,
-): { seg: HTMLElement; idx: number }[] {
-  const matches: { seg: HTMLElement; idx: number }[] = []
-  for (const seg of container.querySelectorAll<HTMLElement>('.segment')) {
-    const segText = seg.textContent ?? ''
-    let searchFrom = 0
-    let idx: number
-    while ((idx = segText.indexOf(text, searchFrom)) !== -1) {
-      matches.push({ seg, idx })
-      searchFrom = idx + 1
+function buildDocPosition(container: HTMLElement): DocPosition {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  let text = ''
+  const segmentRanges: DocPosition['segmentRanges'] = []
+  let node: Text | null
+  while ((node = walker.nextNode() as Text | null)) {
+    const seg = node.parentElement?.closest<HTMLElement>('.segment') ?? null
+    const start = text.length
+    text += node.textContent ?? ''
+    const end = text.length
+    if (seg) {
+      const last = segmentRanges[segmentRanges.length - 1]
+      if (last && last.seg === seg) last.end = end  // extend (segment has multiple text nodes, e.g. inline formatting)
+      else segmentRanges.push({ seg, start, end })
     }
+  }
+  return { text, segmentRanges }
+}
+
+// All occurrences of `needle` in `text`, as match-start offsets.
+function findAllOccurrences(text: string, needle: string): number[] {
+  const matches: number[] = []
+  let searchFrom = 0
+  let idx: number
+  while ((idx = text.indexOf(needle, searchFrom)) !== -1) {
+    matches.push(idx)
+    searchFrom = idx + 1
   }
   return matches
 }
 
+// Wrap a document-wide [start, end) range by splitting at text-node
+// boundaries — the same traversal `buildDocPosition` used to compute
+// offsets, so they stay consistent. This handles segment-internal text,
+// the literal space text node the renderer inserts *between* `.segment`s,
+// and a segment with multiple text nodes (inline formatting) all
+// uniformly: each gets wrapped in its own `<mark>` sharing `ann.id`/color,
+// so CSS renders the whole thing as one continuous highlight regardless of
+// how many text nodes or `.segment` boundaries it crosses. Splitting by
+// `.segment` first (an earlier version of this) left the inter-segment gap
+// text unwrapped, producing a visible gap in a cross-sentence highlight —
+// walking all text nodes directly avoids that by construction.
+function wrapRange(container: HTMLElement, start: number, end: number, ann: Annotation): boolean {
+  // Snapshot every text node + its offset range *before* mutating anything.
+  // surroundContents() on an earlier fragment splits/reparents that text
+  // node, which would leave a live TreeWalker's currentNode pointing into a
+  // now-detached part of the tree — nextNode() then stops early, silently
+  // truncating the wrap to just the first fragment. Collecting the full
+  // list up front and mutating in a separate pass avoids that.
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const nodes: { node: Text; start: number; end: number }[] = []
+  let offset = 0
+  let n: Text | null
+  while ((n = walker.nextNode() as Text | null)) {
+    const nodeStart = offset
+    const nodeEnd = offset + (n.textContent?.length ?? 0)
+    offset = nodeEnd
+    nodes.push({ node: n, start: nodeStart, end: nodeEnd })
+  }
+
+  const marks: HTMLElement[] = []
+  for (const { node, start: nodeStart, end: nodeEnd } of nodes) {
+    const interStart = Math.max(start, nodeStart)
+    const interEnd = Math.min(end, nodeEnd)
+    if (interStart >= interEnd) continue
+    const range = document.createRange()
+    range.setStart(node, interStart - nodeStart)
+    range.setEnd(node, interEnd - nodeStart)
+    const mark = createMarkEl(ann)
+    try { range.surroundContents(mark); marks.push(mark) }
+    catch { /* skip this fragment, keep wrapping the rest */ }
+  }
+
+  // Round only the outer corners of a multi-fragment annotation, so
+  // interior fragments (including a lone-space gap between sentences)
+  // butt flush against their neighbors instead of looking like separate
+  // bubbles. A single-fragment annotation gets both classes — rounded on
+  // all sides, same as before.
+  marks[0]?.classList.add('annotation-frag-start')
+  marks[marks.length - 1]?.classList.add('annotation-frag-end')
+
+  return marks.length > 0
+}
+
 function applyAnnotationToDOM(container: HTMLElement, ann: Annotation): boolean {
-  const occurrences = findAllOccurrences(container, ann.text)
+  const docPos = buildDocPosition(container)
+  const occurrences = findAllOccurrences(docPos.text, ann.text)
 
   // Context only disambiguates when the text isn't already unique — the
   // 40-chars-after window can cross into a neighboring sentence, so an edit
   // there can change the recorded context even though the annotated text
   // itself is untouched. Don't let that break an otherwise-unambiguous match.
   if (occurrences.length === 1) {
-    const { seg, idx } = occurrences[0]
-    return wrapInSegment(seg, idx, ann.text.length, ann)
+    const idx = occurrences[0]
+    return wrapRange(container, idx, idx + ann.text.length, ann)
   }
 
-  for (const { seg, idx } of occurrences) {
-    const segText = seg.textContent ?? ''
-    const ctx = makeContext(segText, idx, ann.text.length)
+  for (const idx of occurrences) {
+    const ctx = makeContext(docPos.text, idx, ann.text.length)
     if (!ann.context || ctx === ann.context) {
-      if (wrapInSegment(seg, idx, ann.text.length, ann)) return true
+      if (wrapRange(container, idx, idx + ann.text.length, ann)) return true
     }
   }
   return false
@@ -144,8 +198,10 @@ export async function applyAnnotations(container: HTMLElement, docId: string): P
   }
 }
 
-// Wrap the current selection, save to server. Returns the new annotation or null.
-export async function wrapSelection(docId: string, color: AnnotationColor, voice?: string): Promise<Annotation | null> {
+// Wrap the current selection, save to server. Returns the new annotation or
+// null. Selections may cross `.segment` boundaries — `wrapRange` (shared
+// with `applyAnnotationToDOM`) handles that uniformly.
+export async function wrapSelection(container: HTMLElement, docId: string, color: AnnotationColor, voice?: string): Promise<Annotation | null> {
   const sel = window.getSelection()
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
   const range = sel.getRangeAt(0)
@@ -153,31 +209,33 @@ export async function wrapSelection(docId: string, color: AnnotationColor, voice
   const anchor = range.startContainer.nodeType === Node.TEXT_NODE
     ? range.startContainer.parentElement
     : range.startContainer as HTMLElement
-  const seg = anchor?.closest<HTMLElement>('.segment')
-  if (!seg) return null
-
-  // Clamp to within the anchor sentence
-  const segRange = document.createRange()
-  segRange.selectNodeContents(seg)
-  if (range.compareBoundaryPoints(Range.END_TO_END, segRange) > 0) {
-    range.setEnd(segRange.endContainer, segRange.endOffset)
-  }
+  const anchorSeg = anchor?.closest<HTMLElement>('.segment')
+  if (!anchorSeg) return null
 
   const rawText = range.toString().trim()
   if (!rawText) return null
 
-  const segText = seg.textContent ?? ''
-  let idx = segText.indexOf(rawText)
+  const docPos = buildDocPosition(container)
+  const anchorRange = docPos.segmentRanges.find(r => r.seg === anchorSeg)
+  if (!anchorRange) return null
+
+  // Search from the anchor segment's own start — the selection can't start
+  // before where the user clicked, so this is a safe floor that also avoids
+  // accidentally matching an earlier coincidental occurrence of the same
+  // text elsewhere in the document. Fall back to a plain search if that
+  // somehow doesn't find it.
+  let idx = docPos.text.indexOf(rawText, anchorRange.start)
+  if (idx === -1) idx = docPos.text.indexOf(rawText)
   if (idx === -1) return null
   let len = rawText.length
 
   // Expand to word boundaries
   const wordChar = /\w/
-  while (idx > 0 && wordChar.test(segText[idx - 1])) idx--
-  while (idx + len < segText.length && wordChar.test(segText[idx + len])) len++
+  while (idx > 0 && wordChar.test(docPos.text[idx - 1])) idx--
+  while (idx + len < docPos.text.length && wordChar.test(docPos.text[idx + len])) len++
 
-  const text = segText.slice(idx, idx + len)
-  const context = makeContext(segText, idx, len)
+  const text = docPos.text.slice(idx, idx + len)
+  const context = makeContext(docPos.text, idx, len)
 
   const ann: Annotation = {
     id: generateId(),
@@ -188,7 +246,7 @@ export async function wrapSelection(docId: string, color: AnnotationColor, voice
   }
 
   sel.removeAllRanges()
-  if (!wrapInSegment(seg, idx, len, ann)) return null
+  if (!wrapRange(container, idx, idx + len, ann)) return null
 
   // Persist: fetch current list, append, PUT (optimistic — DOM already updated)
   const current = await fetchAnnotations(docId)
@@ -202,9 +260,10 @@ export async function deleteAnnotation(
   docId: string,
   annId: string,
 ): Promise<void> {
-  // Remove from DOM immediately
-  const mark = container.querySelector<HTMLElement>(`.annotation[data-id="${annId}"]`)
-  if (mark) unwrapMark(mark)
+  // Remove from DOM immediately — a cross-sentence annotation wraps as
+  // multiple fragments sharing one id (see `wrapRange`), so unwrap all of them.
+  const marks = container.querySelectorAll<HTMLElement>(`.annotation[data-id="${annId}"]`)
+  for (const mark of marks) unwrapMark(mark)
 
   // Remove from server (no alignment needed on delete)
   const current = await fetchAnnotations(docId)
@@ -264,6 +323,19 @@ function findAnnotationWordRange(annText: string, words: WordEntry[]): { start: 
   return { start, end }
 }
 
+async function fetchWords(voice: string, sentence: string): Promise<WordEntry[]> {
+  const res = await fetch(`/voices/${encodeURIComponent(voice)}/words`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sentence }),
+  })
+  if (!res.ok) {
+    throw new Error(`words fetch failed: ${res.status} ${await res.text()}`)
+  }
+  const data = await res.json()
+  return data.words ?? []
+}
+
 export async function listenAnnotation(
   mark: HTMLElement,
   annText: string,
@@ -272,47 +344,88 @@ export async function listenAnnotation(
 ): Promise<void> {
   if (!player.hasAudio) return
 
-  const seg = mark.closest<HTMLElement>('.segment')
-  if (!seg) return
+  // A cross-sentence annotation wraps as multiple <mark> fragments sharing
+  // one id (see `wrapRange`) — gather them all to find the first and last
+  // segment it touches. The common case (single segment) is just a
+  // one-element list, same as before.
+  const annId = mark.dataset.id
+  const marks = annId
+    ? Array.from(document.querySelectorAll<HTMLElement>(`.annotation[data-id="${annId}"]`))
+    : [mark]
+  const firstMark = marks[0] ?? mark
+  const lastMark = marks[marks.length - 1] ?? mark
 
-  const segIndex = player.segmentIndexForEl(seg)
-  if (segIndex === -1) return
+  const firstSeg = firstMark.closest<HTMLElement>('.segment')
+  const lastSeg = lastMark.closest<HTMLElement>('.segment')
+  if (!firstSeg || !lastSeg) return
+
+  const firstSegIndex = player.segmentIndexForEl(firstSeg)
+  const lastSegIndex = player.segmentIndexForEl(lastSeg)
+  if (firstSegIndex === -1 || lastSegIndex === -1) return
 
   const voice = getVoice()
   if (!voice) return
 
   const gen = ++listenGen
-  mark.classList.remove('annotation-error')  // clear any stale error (e.g. from a different voice)
-  mark.classList.add('annotation-loading')
+  for (const m of marks) m.classList.remove('annotation-error')  // clear any stale error (e.g. from a different voice)
+  for (const m of marks) m.classList.add('annotation-loading')
   try {
-    const res = await fetch(`/voices/${encodeURIComponent(voice)}/words`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sentence: seg.textContent ?? '' }),
-    })
-    if (!res.ok) {
-      console.error('listenAnnotation: words fetch failed', res.status, await res.text())
-      mark.classList.add('annotation-error')
-      return
+    let startOffset: number
+    let endOffset: number
+
+    if (firstSeg === lastSeg) {
+      const words = await fetchWords(voice, firstSeg.textContent ?? '')
+      if (gen !== listenGen) return  // superseded by a later click
+      const range = findAnnotationWordRange(annText, words)
+      if (!range) {
+        console.error('listenAnnotation: could not match annotation text in words', { annText, words })
+        for (const m of marks) m.classList.add('annotation-error')
+        return
+      }
+      startOffset = range.start
+      endOffset = range.end
+    } else {
+      // Cross-sentence: need the start offset from the first touched
+      // segment's words and the end offset from the last touched
+      // segment's words. Each mark fragment's own text is exactly the
+      // portion of the annotation within its segment, so search each
+      // segment's words for its own fragment text rather than the full
+      // (multi-sentence) `annText`.
+      const [firstWords, lastWords] = await Promise.all([
+        fetchWords(voice, firstSeg.textContent ?? ''),
+        fetchWords(voice, lastSeg.textContent ?? ''),
+      ])
+      if (gen !== listenGen) return  // superseded by a later click
+
+      const startRange = findAnnotationWordRange(firstMark.textContent ?? '', firstWords)
+      const endRange = findAnnotationWordRange(lastMark.textContent ?? '', lastWords)
+      if (!startRange || !endRange) {
+        console.error('listenAnnotation: could not match cross-sentence annotation text in words', {
+          annText, firstText: firstMark.textContent, lastText: lastMark.textContent, firstWords, lastWords,
+        })
+        for (const m of marks) m.classList.add('annotation-error')
+        return
+      }
+      startOffset = startRange.start
+      endOffset = endRange.end
+
+      console.log('listenAnnotation: cross-sentence', {
+        annText,
+        firstText: firstMark.textContent, lastText: lastMark.textContent,
+        firstSegIndex, lastSegIndex,
+        firstSegStart: player.segmentStartTime(firstSegIndex),
+        lastSegStart: player.segmentStartTime(lastSegIndex),
+        startOffset, endOffset,
+        stopAt: (player.segmentStartTime(lastSegIndex) ?? 0) + endOffset,
+      })
     }
-    const data = await res.json()
-    const words: WordEntry[] = data.words ?? []
 
-    if (gen !== listenGen) return  // superseded by a later click
-
-    const range = findAnnotationWordRange(annText, words)
-    if (!range) {
-      console.error('listenAnnotation: could not match annotation text in words', { annText, words })
-      mark.classList.add('annotation-error')
-      return
-    }
-
-    player.listenTo(segIndex, range.end, range.start)
+    player.listenTo(firstSegIndex, endOffset, startOffset, lastSegIndex)
   } catch (err) {
     console.error('listenAnnotation error:', err)
-    mark.classList.add('annotation-error')
+    for (const m of marks) m.classList.add('annotation-error')
   } finally {
-    mark.classList.remove('annotation-loading')
+    for (const m of marks) m.classList.remove('annotation-loading')
   }
 }
 
@@ -384,7 +497,7 @@ export function initAnnotationPicker(
     const docId = getDocId()
     if (!docId) { hidePicker(); return }
     lastColor = color
-    wrapSelection(docId, color, getVoice() ?? undefined)
+    wrapSelection(articleArea, docId, color, getVoice() ?? undefined)
     hidePicker()
   })
 

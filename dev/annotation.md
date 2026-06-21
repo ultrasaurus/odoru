@@ -119,9 +119,24 @@ which is why it needed the extra mapping step.
 3. User clicks a color → annotation saved → popover closes → highlight applied in-place
 4. Escape or click-away dismisses without saving
 
-**Cross-sentence selections (MVP):** if the selection crosses a `.segment` boundary,
-trim to the sentence containing the drag anchor (start of selection). Avoids the hard
-range-splitting problem for the MVP. Full cross-sentence support is post-MVP.
+**Cross-sentence selections ✓ done:** a selection crossing `.segment` boundaries is
+no longer trimmed to the anchor sentence. `wrapSelection` and `applyAnnotationToDOM`
+both build one document-wide text (`buildDocPosition` walks every text node in the
+container, not just `.segment`s, so it captures the literal space text node the
+renderer inserts between sentences — matching `Range.toString()` exactly) and search
+it as a single string. A match is wrapped by `wrapRange`, which walks the container's
+text nodes directly (the same traversal `buildDocPosition` used to compute offsets)
+and wraps whatever portion of the range falls in each one — segment-internal text,
+the inter-segment gap, and a segment with multiple text nodes (inline formatting) are
+all handled the same way, each fragment getting its own `<mark>` sharing the
+annotation's `id`/color so CSS renders the whole thing as one continuous highlight.
+
+An earlier version split by `.segment` boundaries first (`wrapAcrossSegments`) —
+that left the inter-segment gap's space text node unwrapped, producing a visible gap
+in the middle of a cross-sentence highlight. Walking all text nodes directly instead
+of segment-by-segment avoids that by construction, and also incidentally fixes the
+inline-formatting multi-text-node case that the old per-segment `wrapInSegment` used
+to silently skip.
 
 **Not yet done — last-used color:** remember last picked color and pre-select it;
 Enter confirms without needing to click. (Hook point is in the popover init,
@@ -219,8 +234,46 @@ segments untouched. `findAnnotationWordRange` returns both `start` and
 previous word's audio), so listening starts right at the annotated phrase
 instead of the whole sentence.
 
+**Stop-at enforcement ✓ done (fixed a real bug):** `listenTo`'s stop point
+was originally enforced only by `Player`'s `tick()` loop polling
+`requestAnimationFrame` for `pos >= stopAt` and calling `pause()`.
+`requestAnimationFrame` can be throttled by the browser when the tab loses
+focus/visibility — confirmed via a cross-sentence annotation that logged
+the *identical* computed `stopAt` on two different listens but produced
+very different audible overshoots (once two full sentences plus two more
+words, once just one extra word) — same input, different result, pointing
+at enforcement timing rather than the offset math. Fixed by also
+scheduling the cutoff natively: `AudioQueue` now tracks every
+`AudioBufferSourceNode` it creates and exposes `scheduleStopAt(ctxTime)`,
+which calls `.stop(ctxTime)` on all of them — sample-accurate, enforced by
+the audio hardware clock, not the JS main thread. `listenTo` computes the
+equivalent `AudioContext`-relative time (inverting the `position` getter's
+formula: `ctxStopTime = firstStartTime + (stopAt - seekOffset)`) and calls
+it right after `_doSeek`. `tick()`'s polling loop is kept for the
+surrounding state sync (highlighting, calling `pause()` to update
+`queue.state`) — if *that* lags under throttling, the audio is already
+silent by then regardless, so only the cosmetic UI sync is delayed, not
+the audible bug.
+
+That first attempt still wasn't enough on its own — observed working
+"usually on longer annotations" but not shorter ones. Cause: `_doSeek`
+synchronously enqueues only the segments that already exist in
+`this.segments` *at that moment*; synthesis keeps streaming new segments
+in live via a separate path (the WS segment handler calls
+`queue.enqueue()` directly), so a segment that arrives *after*
+`scheduleStopAt()` was called but *before* the stop point isn't covered by
+it — it just plays through uninterrupted. Longer annotations are more
+often tested once synthesis has caught up (nothing left to stream in
+mid-listen), so the gap rarely showed up there. Fixed by having
+`AudioQueue` remember the active stop time (`scheduledStopAt`) and apply
+it to every node *as it's created* in `enqueue()`, not just the ones that
+existed when `scheduleStopAt()` was called. Cleared on `reset()` (any
+plain seek goes through `_doSeek` → `queue.reset()`, so a stale cutoff
+never leaks into unrelated playback) and when `tick()` actually reaches
+`stopAt` (so segments arriving *after* the listen session ends don't
+inherit it either).
+
 **Known limitations / deferred:**
-- Cross-sentence annotations not yet supported
 - Margin listen button not yet added
 - Annotations still drop if the annotated text *itself* is edited (including
   case-only changes) — by design for now, since text is the anchor; no
@@ -280,7 +333,7 @@ having `expand_year_ranges` spell its own digits — see
 
 # Known limitations (cross-backend)
 
-### Kokoro alignment ground truth doesn't account for spoken-number pronunciation
+### Kokoro doesn't normalize — both an alignment gap and a real pronunciation bug
 
 Kokoro's alignment ground truth (`meta.text`, used by `ensure_words`) is the
 **raw**, unnormalized sentence text — Kokoro's cache key and synthesis input
@@ -298,18 +351,43 @@ alignment (no alignable chars): [FilteredWord { word: "2", original_index: 3 }]
 Practical effect: an annotation spanning a bare number in a Kokoro-voiced
 sentence may fail to find a word match (same symptom as the F5 issue Stage
 3 fixed, but Kokoro was never in scope for that fix since it doesn't
-normalize).
+normalize). Confirmed directly: an annotation ending in `"1973-76"` failed
+to match because that token is completely absent from Kokoro's returned
+words (filtered before alignment, not merely mismatched).
 
-**Possible fix (not yet done):** run the same bare-number normalization
-(`util::normalizer`) on a copy of the text used only as Kokoro's alignment
-ground truth — not the cache key, not the synthesis input, both of which
-must stay raw for Kokoro — then map aligned words back via
-`tts::alignment::words_with_original_text`, the same flow F5 already uses.
-**Risk:** this assumes Kokoro's G2P reads digits the same way
-`util::normalizer`'s rules do. If Kokoro's actual pronunciation convention
-differs (e.g. a different digit-grouping style), the ground truth still
-won't match the audio — just a different mismatch. Needs a listening-test
-pass to confirm before implementing, not just a code change.
+This isn't only an alignment problem — confirmed separately that Kokoro
+also **mispronounces** "Winchester, MA" as literally "Winchester, ma"
+(reading the postal abbreviation as a word) rather than "Winchester,
+Massachusetts". `util::normalizer`'s state-abbreviation/number rules exist
+precisely to fix this kind of thing for F5; Kokoro just never runs them.
+
+Three options, not yet done:
+
+1. **Ground-truth-only fix.** Run the same bare-number normalization on a
+   copy of the text used only as Kokoro's alignment ground truth — not the
+   cache key, not the synthesis input, both of which stay raw — then map
+   aligned words back via `tts::alignment::words_with_original_text`, the
+   same flow F5 already uses. Fixes the alignment gap only; does nothing
+   for the mispronunciation, since Kokoro still synthesizes from raw text.
+   **Risk:** assumes Kokoro's G2P reads digits the same way
+   `util::normalizer`'s rules do — if Kokoro's actual convention differs,
+   ground truth still won't match audio, just a different mismatch.
+2. **Leave as a documented limitation** for now.
+3. **Normalize for Kokoro too, same as F5** (preferred direction, not yet
+   scoped/implemented) — run `util::normalizer::normalize` on Kokoro's
+   synthesis input as well, not just the alignment ground truth. Fixes
+   both problems at once: real pronunciation (the actual motivating case —
+   "Winchester, MA" → "Winchester, Massachusetts" spoken correctly) and
+   alignment (normalized text has no bare digits/abbreviations for forced
+   alignment to drop). Bigger change than option 1: Kokoro's cache key
+   would also need to switch from raw to normalized text (mirroring F5's
+   design exactly), orphaning all existing Kokoro cache entries — expected
+   per the project's existing cache-invalidation-via-key-change convention,
+   not a special migration. `app/src/main.rs`'s `get_words` Kokoro/F5
+   branches would also collapse into one shared code path. Still needs a
+   listening-test pass across a broader sample before committing, since
+   normalizer rules tuned for F5/VibeVoice's hallucination patterns may
+   not all be necessary or even desirable for Kokoro's G2P.
 
 # TODO
 
@@ -320,9 +398,41 @@ Top priority:
 - [x] **Per-word listen start offset** — `listenTo` now takes a start
   offset; `_doSeek` trims it off the front of the seeked-to segment's
   samples. See "Per-word listen start offset" under Stage 2 above.
-- [ ] **Cross-sentence annotations** — selections crossing a `.segment`
-  boundary currently trim to the sentence containing the drag anchor (MVP
-  behavior); full range-splitting support deferred.
+- [x] **Cross-sentence annotations: create + match + render** — see
+  "Cross-sentence selections" under UX — creating an annotation above.
+- [x] **Cross-sentence annotations: click-to-listen** — `listenAnnotation`
+  gathers all `<mark>` fragments sharing the clicked one's `data-id`
+  (`wrapRange` gives each fragment the same id) to find the first/last
+  touched segment. Single-segment annotations (still the common case) take
+  the same one-fetch path as before. For a true cross-sentence annotation,
+  fetches `/words` for the first and last segment in parallel, and matches
+  each fragment's own text (not the full multi-sentence `annText`) against
+  its segment's words — `findAnnotationWordRange`'s start from the first
+  fetch, end from the second. `Player.listenTo` gained an `endSegIndex`
+  param (defaults to `segIndex`) so `stopAt` can land in a later segment
+  than playback started in. Also fixed: `deleteAnnotation` now unwraps
+  *all* fragments sharing an id (`querySelectorAll`, was `querySelector`),
+  and `.annotation`'s CSS rounds only the outer corners of the first/last
+  fragment (`annotation-frag-start`/`-end`) so a multi-fragment highlight —
+  including the lone-space gap between sentences — renders as one
+  continuous bar instead of separate bubbles. The loading/error dotted
+  indicator had the same problem one level deeper: it used `outline`,
+  which can't be styled per-side, so every fragment drew its own full
+  dotted box, doubling up at each seam. Switched to a real `border`
+  (`box-sizing: border-box` so it doesn't shift surrounding text) with
+  top/bottom always shown and left/right only on `annotation-frag-start`/
+  `-end`, so the dotted line traces one open box around the whole
+  annotation instead of one per fragment. Two more real bugs surfaced and
+  fixed while testing this against live audio — see "Stop-at enforcement"
+  under Stage 2 above: (1) the `tick()`/`requestAnimationFrame` polling
+  loop that enforced `stopAt` could be throttled by the browser, letting
+  audio audibly run past the cutoff by a variable amount; fixed by
+  scheduling the stop natively on the Web Audio nodes
+  (`AudioQueue.scheduleStopAt`). (2) that native schedule only covered
+  nodes that existed at the moment it was called — a segment streaming in
+  *after* via the live WS path bypassed it; fixed by having `AudioQueue`
+  remember the active stop time and apply it to every node as it's
+  created, not just the ones enqueued so far.
 - [ ] **Margin listen button** — alongside the existing right-click delete;
   Stage 2 shipped click-to-listen on the annotation mark itself instead.
 
@@ -338,3 +448,15 @@ Not yet prioritized:
 - **`<Ref-N>`-style chunk-granularity alignment gap** — see "Known
   follow-up" above and [normalize-future.md](normalize-future.md). Not yet
   hit in practice; low priority unless it actually breaks an annotation.
+- **Ambiguous cross-sentence fragment match** — `listenAnnotation`'s
+  cross-sentence path matches each fragment's own (possibly short) text
+  against its segment's words via plain `indexOf`, with no context
+  disambiguation. If that fragment's exact words happen to also appear
+  earlier in the same sentence, the wrong (earlier) occurrence could be
+  matched. Not yet hit in practice; the single-segment path already has
+  proper context-based disambiguation (`applyAnnotationToDOM`'s ambiguity
+  check) that this path doesn't reuse.
+- **Diagnostic `console.log` in `listenAnnotation`'s cross-sentence path**
+  — added while chasing the stop-at bugs above; per project convention,
+  leave it until cross-sentence listening is confirmed solid across more
+  varied test content, then remove.

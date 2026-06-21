@@ -1227,26 +1227,48 @@ html, body {
 
 /* Author annotations (word/phrase highlights) */
 .annotation {
-  border-radius: 3px;
   padding: 0.05em 0.1em;
   cursor: text;
 }
-.annotation-yellow   { background: #fde68a; color: #78350f; }
-.annotation-coral    { background: #fca5a5; color: #7f1d1d; }
-.annotation-mint     { background: #6ee7b7; color: #064e3b; }
-.annotation-blue     { background: #93c5fd; color: #1e3a5f; }
-.annotation-lavender { background: #c4b5fd; color: #3b1f6e; }
+/* A cross-sentence annotation wraps as multiple <mark> fragments sharing
+   one id (one per touched segment/gap) so the highlight renders as one
+   continuous bar. Only the first/last fragment get rounded outer corners —
+   rounding every fragment made a lone-space gap fragment look like an
+   isolated bubble. Single-fragment annotations (the common case) get both
+   classes, so they're unaffected (rounded on all sides, same as before). */
+.annotation-frag-start { border-radius: 3px 0 0 3px; }
+.annotation-frag-end   { border-radius: 0 3px 3px 0; }
+.annotation-yellow   { background: #fde68a; color: #78350f; --ann-accent: #b45309; }
+.annotation-coral    { background: #fca5a5; color: #7f1d1d; --ann-accent: #b91c1c; }
+.annotation-mint     { background: #6ee7b7; color: #064e3b; --ann-accent: #047857; }
+.annotation-blue     { background: #93c5fd; color: #1e3a5f; --ann-accent: #1d4ed8; }
+.annotation-lavender { background: #c4b5fd; color: #3b1f6e; --ann-accent: #6d28d9; }
 
-/* Loading state: dotted border drawn inside the highlight */
-.annotation-loading { cursor: wait; }
-.annotation-yellow.annotation-loading   { outline: 2px dotted #b45309; outline-offset: -2px; }
-.annotation-coral.annotation-loading    { outline: 2px dotted #b91c1c; outline-offset: -2px; }
-.annotation-mint.annotation-loading     { outline: 2px dotted #047857; outline-offset: -2px; }
-.annotation-blue.annotation-loading     { outline: 2px dotted #1d4ed8; outline-offset: -2px; }
-.annotation-lavender.annotation-loading { outline: 2px dotted #6d28d9; outline-offset: -2px; }
+/* Loading/error state: a real dotted border, not `outline` — outline can't
+   be styled per-side, so every fragment of a multi-fragment cross-sentence
+   annotation drew its own full outline, doubling up at each fragment seam.
+   Top/bottom always show; left/right only on the true first/last fragment
+   (`annotation-frag-start`/`-end`), so the dotted line traces one
+   continuous open box around the whole annotation instead of a separate
+   box per fragment. The border (even transparent) is scoped to only these
+   two states, not the base `.annotation` rule — for an inline element,
+   `box-sizing: border-box` doesn't stop a border from adding rendered
+   space, so an always-on transparent border left a thin rim where the
+   page background showed through instead of the highlight color, looking
+   like a translucent seam between fragments. */
+.annotation-loading,
+.annotation-error {
+  box-sizing: border-box;
+  border: 2px dotted transparent;
+}
+.annotation-loading { cursor: wait; border-top-color: var(--ann-accent); border-bottom-color: var(--ann-accent); }
+.annotation-loading.annotation-frag-start { border-left-color: var(--ann-accent); }
+.annotation-loading.annotation-frag-end   { border-right-color: var(--ann-accent); }
 
-/* Error state (debugging) */
-.annotation-error { outline: 2px dotted red; outline-offset: -2px; cursor: default; }
+/* Error state (debugging) — always red, regardless of annotation color */
+.annotation-error { cursor: default; border-top-color: red; border-bottom-color: red; }
+.annotation-error.annotation-frag-start { border-left-color: red; }
+.annotation-error.annotation-frag-end   { border-right-color: red; }
 
 /* Annotation color picker popover */
 .annotation-picker {
