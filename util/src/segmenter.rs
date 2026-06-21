@@ -20,6 +20,20 @@ const QUOTE_MIN_WORDS: usize = 8;
 /// Split `text` into TTS segments. Each returned string contains one or more
 /// paragraphs joined with `\n`.
 pub fn segment(text: &str) -> Vec<String> {
+    segment_with_paragraphs(text)
+        .into_iter()
+        .map(|paragraphs| paragraphs.join("\n"))
+        .collect()
+}
+
+/// Same segmentation as `segment`, but keeps each segment's constituent
+/// paragraph-unit strings separate instead of joining them with `\n`.
+///
+/// Useful for callers that need to recover per-paragraph boundaries within a
+/// segment — e.g. running `splitter::split` on each paragraph-unit
+/// individually, since `splitter::split`'s paragraph detection needs a blank
+/// line, which doesn't survive the single-`\n` join `segment()` does.
+pub fn segment_with_paragraphs(text: &str) -> Vec<Vec<String>> {
     let paragraphs = parse_paragraphs(text);
     let merged = merge_fragments(paragraphs);
     let split = split_long_inline(merged);
@@ -169,16 +183,15 @@ fn split_inline_spans(text: &str, out: &mut Vec<String>) {
 // Step 4: greedy accumulation into segments
 // ---------------------------------------------------------------------------
 
-fn accumulate(paragraphs: Vec<String>) -> Vec<String> {
-    let mut segments: Vec<String> = Vec::new();
+fn accumulate(paragraphs: Vec<String>) -> Vec<Vec<String>> {
+    let mut segments: Vec<Vec<String>> = Vec::new();
     let mut current: Vec<String> = Vec::new();
     let mut current_wc: usize = 0;
 
     for p in paragraphs {
         let pw = word_count(&p);
         if current_wc > 0 && current_wc + pw > MAX {
-            segments.push(current.join("\n"));
-            current.clear();
+            segments.push(std::mem::take(&mut current));
             current_wc = 0;
         }
         current.push(p);
@@ -186,13 +199,12 @@ fn accumulate(paragraphs: Vec<String>) -> Vec<String> {
         // Flush if we've hit the minimum — avoids holding a complete segment
         // in memory waiting for a paragraph that might never come.
         if current_wc >= MIN && current_wc >= MAX {
-            segments.push(current.join("\n"));
-            current.clear();
+            segments.push(std::mem::take(&mut current));
             current_wc = 0;
         }
     }
     if !current.is_empty() {
-        segments.push(current.join("\n"));
+        segments.push(current);
     }
     segments
 }
@@ -265,14 +277,18 @@ mod tests {
         assert_eq!(result.len(), 3, "{:?}", result);
     }
 
+    fn segs_wc(segs: &[Vec<String>]) -> Vec<usize> {
+        segs.iter().map(|s| wc(&s.join("\n"))).collect()
+    }
+
     #[test]
     fn accumulate_respects_max() {
         // Each paragraph is 90 words — two fit (180 < 250), three exceed (270 > 250).
         let word90 = "word ".repeat(90).trim().to_string() + ".";
         let paras = vec![word90.clone(), word90.clone(), word90.clone()];
         let segs = accumulate(paras);
-        assert_eq!(segs.len(), 2, "should split at MAX boundary: {:?}", segs.iter().map(|s| wc(s)).collect::<Vec<_>>());
-        assert!(wc(&segs[0]) <= MAX, "first segment {} words", wc(&segs[0]));
+        assert_eq!(segs.len(), 2, "should split at MAX boundary: {:?}", segs_wc(&segs));
+        assert!(segs_wc(&segs)[0] <= MAX, "first segment {} words", segs_wc(&segs)[0]);
     }
 
     #[test]
@@ -293,9 +309,28 @@ mod tests {
         let w137: String = "word ".repeat(137).trim().to_string() + ".";
         let w239: String = "word ".repeat(239).trim().to_string() + ".";
         let segs = accumulate(vec![w137, w239]);
-        for s in &segs {
-            assert!(wc(s) <= MAX, "segment too long: {} words (MAX={})", wc(s), MAX);
+        for wc in segs_wc(&segs) {
+            assert!(wc <= MAX, "segment too long: {wc} words (MAX={MAX})");
         }
+    }
+
+    #[test]
+    fn segment_with_paragraphs_matches_segment_when_joined() {
+        let doc = "Introduction\n\nThis is the first paragraph with enough words to be meaningful content here yes.\n\nThis is the second paragraph with enough words to be meaningful content here yes.";
+        let grouped = segment_with_paragraphs(doc);
+        let joined: Vec<String> = grouped.iter().map(|ps| ps.join("\n")).collect();
+        assert_eq!(joined, segment(doc));
+    }
+
+    #[test]
+    fn segment_with_paragraphs_preserves_multiple_paragraphs_per_segment() {
+        // Two short paragraphs that fit comfortably under MIN, both ending in
+        // sentence punctuation so they don't get fragment-merged — should land
+        // in the same segment, with paragraph structure preserved separately.
+        let doc = "First short paragraph here with words.\n\nSecond short paragraph here with words.";
+        let grouped = segment_with_paragraphs(doc);
+        assert_eq!(grouped.len(), 1, "{:?}", grouped);
+        assert_eq!(grouped[0].len(), 2, "expected two distinct paragraph units: {:?}", grouped[0]);
     }
 
     #[test]

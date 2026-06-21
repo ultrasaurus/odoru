@@ -1,5 +1,6 @@
 mod config;
 mod runpod;
+mod segment;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -391,27 +392,7 @@ async fn main() -> Result<()> {
             println!("{}", util::normalizer::normalize(&text));
         }
         Command::Segment { name, basedir } => {
-            // Source documents live in the workspace data/ dir (odoru/data/).
-            // Segment files are written to --basedir (default: vibe/data).
-            let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
-            let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-            let seg_dir = basedir.as_deref().unwrap_or(default_seg_dir);
-            let input_path = format!("{src_dir}/{name}.txt");
-            let text = std::fs::read_to_string(&input_path)
-                .with_context(|| format!("reading {input_path}"))?;
-            let segments = util::segmenter::segment(&text);
-            info!("{} → {} segments", name, segments.len());
-            for (i, seg) in segments.iter().enumerate() {
-                let seg_name = format!("{name}_seg{:02}", i + 1);
-                let seg_path = format!("{seg_dir}/{seg_name}.txt");
-                let content: String = seg.lines()
-                    .map(|p| format!("Speaker 1: {p}\n"))
-                    .collect();
-                std::fs::write(&seg_path, &content)
-                    .with_context(|| format!("writing {seg_path}"))?;
-                let wc: usize = seg.split_whitespace().count();
-                info!("  {seg_name}: {} paragraphs, {wc} words", seg.lines().count());
-            }
+            segment::run(&name, basedir.as_deref())?;
         }
         Command::Synthesize {
             input,
@@ -590,6 +571,10 @@ async fn main() -> Result<()> {
                 &http, &synth_base_url, &job_id_remote, &name, data_dir, &secret,
             )
             .await;
+
+            // Update the sidecar with this segment's output files and voice
+            // (non-fatal — synthesis output is already saved regardless).
+            segment::record_synthesis(data_dir, &name, &speaker);
 
             // Append run log.
             let entry = serde_json::json!({
