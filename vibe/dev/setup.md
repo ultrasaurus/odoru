@@ -112,9 +112,14 @@ cargo run -- segment authorship
 This reads `odoru/data/<name>.txt` and writes `vibe/data/<name>_seg01.txt`
 … `<name>_segNN.txt` (50–250 words each, `Speaker 1: ` prefix per
 paragraph). Short headings/fragments are merged into the following
-paragraph, and long inline quotes/parentheticals (≥12 words) are split
-into their own speaker turns — see `util/src/segmenter.rs` for the full
-pipeline and `dev/plan.md` for the rationale.
+paragraph — see `util/src/segmenter.rs` for the full pipeline and
+`dev/plan.md` for the rationale.
+
+Long inline quotes/parentheticals were briefly split out into their own
+paragraphs (so the segmenter had finer break points), but that produced
+TTS artifacts when a quote/paren delimiter landed alone at a line edge, so
+it was reverted — quoted/parenthesized text now just stays inline with the
+rest of its paragraph.
 
 The segment count and numbering can shift whenever the segmenter logic
 changes (e.g. authorship.txt currently produces 35 segments, not the

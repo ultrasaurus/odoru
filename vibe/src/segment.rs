@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 const SCHEMA_VERSION: &str = "0.1";
 
-/// `<basedir>/<name>.segments.json` — see `vibe/dev/odoru-import.md` for the
+/// `<basedir>/<name>.segments.json` — see `vibe/dev/odoru-import-prep.md` for the
 /// full design. Vibe writes the `sentences`/`files.original` parts of this at
 /// split time; `synthesize` fills in `files.normalized`/`audio`/`transcript`/
 /// `report` and `voice_id` per segment as each one is rendered.
@@ -38,6 +38,54 @@ pub struct SidecarFiles {
     pub audio: Option<String>,
     pub transcript: Option<String>,
     pub report: Option<String>,
+}
+
+/// `<segment_name>_report.json`, as written by `synthesize` after each
+/// segment's forced-alignment QA pass.
+#[derive(Debug, Deserialize)]
+pub struct AlignReport {
+    pub filtered: Vec<serde_json::Value>,
+    pub suspect: Vec<AlignSuspect>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AlignSuspect {
+    pub word: String,
+    pub score: f64,
+    pub reason: String,
+}
+
+impl AlignReport {
+    pub fn truncated(&self) -> Vec<&AlignSuspect> {
+        self.suspect.iter().filter(|s| s.reason == "Truncated").collect()
+    }
+
+    pub fn low_score(&self) -> Vec<&AlignSuspect> {
+        self.suspect.iter().filter(|s| s.reason == "LowScore").collect()
+    }
+
+    /// Same classification `synthesize` logs as separate lines, collapsed
+    /// into one line for `summary`'s per-segment table.
+    pub fn one_line(&self) -> String {
+        if self.suspect.is_empty() && self.filtered.is_empty() {
+            return "clean".to_string();
+        }
+        let mut parts = Vec::new();
+        let truncated = self.truncated();
+        if !truncated.is_empty() {
+            let words: Vec<_> = truncated.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
+            parts.push(format!("⚠ TRUNCATED — {}", words.join(" ")));
+        }
+        let low = self.low_score();
+        if !low.is_empty() {
+            let words: Vec<_> = low.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
+            parts.push(format!("low-score — {}", words.join(" ")));
+        }
+        if !self.filtered.is_empty() {
+            parts.push(format!("{} filtered word(s)", self.filtered.len()));
+        }
+        parts.join("; ")
+    }
 }
 
 fn sha256_hex(text: &str) -> String {
@@ -196,6 +244,51 @@ pub fn record_synthesis(basedir: &str, name: &str, voice_id: &str) {
         }
         Err(e) => warn!("serializing {sidecar_path}: {e}"),
     }
+}
+
+/// Print a per-segment status table for `<basedir>/<name>.segments.json`:
+/// which segments are missing audio (not yet synthesized, e.g. after a
+/// crashed/interrupted run) and the QA verdict for those that are done.
+/// Lets you resume a run without re-reading every log line.
+pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
+    let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+    let seg_dir = basedir.unwrap_or(default_seg_dir);
+    let sidecar_path = format!("{seg_dir}/{name}.segments.json");
+    let sidecar_json = std::fs::read_to_string(&sidecar_path)
+        .with_context(|| format!("reading {sidecar_path}"))?;
+    let sidecar: Sidecar = serde_json::from_str(&sidecar_json)
+        .with_context(|| format!("parsing {sidecar_path}"))?;
+
+    let mut missing = Vec::new();
+    for seg in &sidecar.segments {
+        let seg_name = format!("{name}_seg{:02}", seg.index);
+        let audio_exists = seg.files.audio.as_deref()
+            .is_some_and(|f| std::path::Path::new(&format!("{seg_dir}/{f}")).exists());
+        if !audio_exists {
+            println!("{seg_name}: MISSING (not yet synthesized)");
+            missing.push(seg_name);
+            continue;
+        }
+        let verdict = seg.files.report.as_deref()
+            .and_then(|f| std::fs::read(format!("{seg_dir}/{f}")).ok())
+            .and_then(|bytes| serde_json::from_slice::<AlignReport>(&bytes).ok())
+            .map(|r| r.one_line())
+            .unwrap_or_else(|| "(no report found)".to_string());
+        println!("{seg_name}: {verdict}");
+    }
+
+    println!();
+    if missing.is_empty() {
+        println!("{} segments total, all synthesized", sidecar.segments.len());
+    } else {
+        println!(
+            "{} segments total, {} missing: {}",
+            sidecar.segments.len(),
+            missing.len(),
+            missing.join(", ")
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

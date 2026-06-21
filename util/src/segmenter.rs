@@ -4,10 +4,7 @@
 ///   1. Parse blank-line-separated paragraphs.
 ///   2. Merge non-sentence-ending paragraphs (headings, fragments) into the
 ///      following paragraph — prevents short orphan lines becoming segments.
-///   3. Split long inline quotes (≥ QUOTE_MIN_WORDS words between `"…"`) and
-///      long parenthetical asides (≥ QUOTE_MIN_WORDS words inside `(…)`) into
-///      their own paragraphs, so the segmenter has finer break points.
-///   4. Greedily accumulate paragraphs into segments, flushing when the next
+///   3. Greedily accumulate paragraphs into segments, flushing when the next
 ///      paragraph would push word count above MAX.
 ///
 /// Output: one `String` per segment, paragraphs joined by `\n`. No
@@ -15,7 +12,6 @@
 
 const MIN: usize = 50;
 const MAX: usize = 250;
-const QUOTE_MIN_WORDS: usize = 8;
 
 /// Split `text` into TTS segments. Each returned string contains one or more
 /// paragraphs joined with `\n`.
@@ -36,8 +32,7 @@ pub fn segment(text: &str) -> Vec<String> {
 pub fn segment_with_paragraphs(text: &str) -> Vec<Vec<String>> {
     let paragraphs = parse_paragraphs(text);
     let merged = merge_fragments(paragraphs);
-    let split = split_long_inline(merged);
-    accumulate(split)
+    accumulate(merged)
 }
 
 // ---------------------------------------------------------------------------
@@ -67,8 +62,22 @@ fn parse_paragraphs(text: &str) -> Vec<String> {
 // Step 2: merge headings/fragments into the following paragraph
 // ---------------------------------------------------------------------------
 
+/// True if `p` reads as a complete sentence/paragraph — i.e. ends with
+/// `.`/`?`/`!`, ignoring any trailing closing-delimiters (`)`, `"`, `'`,
+/// `]`) after it. A paragraph like `"...organization.)"` is a complete
+/// sentence even though its literal last char is `)`; checking only the
+/// last char (as a naive `ends_with` would) misclassifies any
+/// parenthetical-/quote-ending paragraph as an unfinished fragment, which
+/// then gets wrongly force-merged into the next paragraph by
+/// `merge_fragments` — producing a run-on paragraph that splices an aside
+/// directly onto an unrelated following sentence/heading with no
+/// separation. Confirmed as the cause of an observed TTS truncation —
+/// a `(Note: ...)` aside glued directly onto the following heading
+/// sentence with no paragraph break.
 fn ends_sentence(p: &str) -> bool {
-    p.trim_end().ends_with(['.', '?', '!'])
+    p.trim_end()
+        .trim_end_matches([')', '"', '\'', ']'])
+        .ends_with(['.', '?', '!'])
 }
 
 fn merge_fragments(paragraphs: Vec<String>) -> Vec<String> {
@@ -92,95 +101,12 @@ fn merge_fragments(paragraphs: Vec<String>) -> Vec<String> {
     merged
 }
 
-// ---------------------------------------------------------------------------
-// Step 3: split long inline quotes and parentheticals
-// ---------------------------------------------------------------------------
-
 fn word_count(s: &str) -> usize {
     s.split_whitespace().count()
 }
 
-/// Split a paragraph into sub-paragraphs wherever a long quoted or
-/// parenthesized span is found. Spans shorter than QUOTE_MIN_WORDS are
-/// left in place.
-fn split_long_inline(paragraphs: Vec<String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for p in paragraphs {
-        split_inline_spans(&p, &mut out);
-    }
-    out
-}
-
-/// Walk through `text`, extracting `"..."` and `(...)` spans that contain
-/// ≥ QUOTE_MIN_WORDS words as their own paragraph. Everything between spans
-/// becomes its own paragraph too (if non-empty after trimming).
-fn split_inline_spans(text: &str, out: &mut Vec<String>) {
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    let mut segment_start = 0; // byte offset into `text` of current fragment start
-
-    // Convert char index to byte offset
-    let char_to_byte: Vec<usize> = {
-        let mut offsets = Vec::with_capacity(chars.len() + 1);
-        let mut byte = 0;
-        for &c in &chars {
-            offsets.push(byte);
-            byte += c.len_utf8();
-        }
-        offsets.push(byte);
-        offsets
-    };
-
-    while i < chars.len() {
-        let open = chars[i];
-        let close = match open {
-            '"' => '"',
-            '(' => ')',
-            _ => { i += 1; continue; }
-        };
-
-        // Find matching close
-        let content_start = i + 1;
-        let mut j = content_start;
-        while j < chars.len() && chars[j] != close { j += 1; }
-        if j >= chars.len() {
-            // No matching close — skip this opener
-            i += 1;
-            continue;
-        }
-
-        // content is chars[content_start..j]
-        let content: String = chars[content_start..j].iter().collect();
-        if word_count(&content) < QUOTE_MIN_WORDS {
-            i = j + 1;
-            continue;
-        }
-
-        // We have a long span. Emit the text before it as a paragraph.
-        let before = text[char_to_byte[segment_start]..char_to_byte[i]].trim();
-        if !before.is_empty() {
-            out.push(before.to_string());
-        }
-
-        // Emit the span itself (with delimiters) as its own paragraph.
-        let span = text[char_to_byte[i]..=char_to_byte[j]].trim();
-        if !span.is_empty() {
-            out.push(span.to_string());
-        }
-
-        i = j + 1;
-        segment_start = i;
-    }
-
-    // Emit any trailing text
-    let tail = text[char_to_byte[segment_start]..].trim();
-    if !tail.is_empty() {
-        out.push(tail.to_string());
-    }
-}
-
 // ---------------------------------------------------------------------------
-// Step 4: greedy accumulation into segments
+// Step 3: greedy accumulation into segments
 // ---------------------------------------------------------------------------
 
 fn accumulate(paragraphs: Vec<String>) -> Vec<Vec<String>> {
@@ -250,31 +176,27 @@ mod tests {
     }
 
     #[test]
-    fn split_short_quote_not_split() {
-        // Fewer than QUOTE_MIN_WORDS — stays inline.
-        let p = vec![r#"He said "hi there" and left."#.to_string()];
-        let result = split_long_inline(p);
-        assert_eq!(result.len(), 1);
+    fn paren_ending_paragraph_stays_separate_from_next() {
+        // Regression: a paragraph ending in ".)" is a complete sentence —
+        // ends_sentence must look past the trailing ")" to see the "." and
+        // not treat it as an unfinished fragment to merge with the next
+        // paragraph (a heading, in the real-world case this came from).
+        let paras = vec![
+            "(Note: this is an aside.)".to_string(),
+            "Statement Numbers and Names.".to_string(),
+        ];
+        let merged = merge_fragments(paras);
+        assert_eq!(merged.len(), 2, "{:?}", merged);
     }
 
     #[test]
-    fn split_long_quote_becomes_own_paragraph() {
-        // 13-word quote — should be split out.
-        let quote = "one two three four five six seven eight nine ten eleven twelve thirteen";
-        let text = format!(r#"Before. "{quote}" After."#);
-        let result = split_long_inline(vec![text]);
-        assert_eq!(result.len(), 3, "expected before, quote, after: {:?}", result);
-        assert_eq!(result[0].trim(), "Before.");
-        assert!(result[1].contains("one two three"));
-        assert_eq!(result[2].trim(), "After.");
-    }
-
-    #[test]
-    fn split_long_paren_becomes_own_paragraph() {
-        let paren = "one two three four five six seven eight nine ten eleven twelve thirteen";
-        let text = format!("Before. ({paren}) After.");
-        let result = split_long_inline(vec![text]);
-        assert_eq!(result.len(), 3, "{:?}", result);
+    fn quote_ending_paragraph_stays_separate_from_next() {
+        let paras = vec![
+            "She said \"hello.\"".to_string(),
+            "Then she left.".to_string(),
+        ];
+        let merged = merge_fragments(paras);
+        assert_eq!(merged.len(), 2, "{:?}", merged);
     }
 
     fn segs_wc(segs: &[Vec<String>]) -> Vec<usize> {

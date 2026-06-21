@@ -91,15 +91,21 @@ Citation, figure, and table markers are expanded to spoken form.
 
 | Input | Output |
 |-------|--------|
-| `<Ref-3>` | `Ref 3` |
-| `<Fig-1>` | `Figure 1` |
-| `<Table-2>` | `Table 2` |
-| `<Foo-3>` | `Foo 3` *(fallback: any `<CapWord-N>`)* |
+| `<Ref-3>` | `Ref three` |
+| `<Fig-1>` | `Figure one` |
+| `<Table-2>` | `Table two` |
+| `<Foo-3>` | `Foo three` *(fallback: any `<CapWord-N>`)* |
+| `<Ref-1976>` | `Ref nineteen seventy six` |
+| `<Ref-12345>` | `Ref 12345` *(5+ digits — not yet handled, left bare)* |
 
 Tags where the word part is lowercase (e.g. `<em>`, `<b>`) are left
-untouched to avoid mangling HTML. The trailing number is left as a bare
-digit — see the per-chunk-granularity note in Implementation below for why
-Pass 7 doesn't also spell it out.
+untouched to avoid mangling HTML. The trailing number is spelled out via the
+same digit-group convention as Pass 7/Pass 4 (`spell_bare_digit_group`) —
+this pass must do its own spelling, the same reason Pass 4 (year ranges)
+does: once the tag is expanded the chunk is no longer raw, so Pass 7's
+bare-number scan can never reach those digits afterward (chunk-granularity
+design, see Implementation below). Left bare, they'd be invisible to forced
+alignment entirely, not just unspoken awkwardly.
 
 ---
 
@@ -381,13 +387,15 @@ range in the original input (or `None` if out of bounds).
 
 ### Granularity is per-chunk, not per-word
 
-A chunk that gets expanded (e.g. `<Ref-3>` → `Ref 3`, or `Item 71279` →
+A chunk that gets expanded (e.g. `<Ref-3>` → `Ref three`, or `Item 71279` →
 `Item seven one two seven nine`) maps as a **whole** back to its source
 range — there's no attempt to map individual output words within an
-expansion back to individual input characters. This is why Pass 3's
-`<Ref-3>` → `Ref 3` doesn't get its `3` further spelled out by Pass 7 even
-though it's a bare digit at that point: the whole `Ref 3` is one non-raw
-chunk, and Pass 7's bare-number scan correctly skips into it.
+expansion back to individual input characters. This is why Pass 3 has to
+spell its own trailing digits (via `spell_bare_digit_group`, the same helper
+Pass 4 uses for year ranges) rather than leaving them bare for Pass 7 to
+find later: once `<Ref-3>` becomes the non-raw chunk `Ref three`, Pass 7's
+bare-number scan correctly skips over it — there is no later for digits
+inside an already-expanded chunk.
 
 It's also why, when mapping forced-alignment words back to original text
 (`tts::alignment::words_with_original_text`), multiple aligned words that

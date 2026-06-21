@@ -79,6 +79,18 @@ enum Command {
         #[arg(long)]
         basedir: Option<String>,
     },
+    /// Print a per-segment status table for `<basedir>/<name>.segments.json`:
+    /// which segments are missing audio (not yet synthesized) and the QA
+    /// verdict for those that are done. Lets you resume a run without
+    /// re-reading every log line.
+    Summary {
+        /// Stem of <basedir>/<name>.txt (no extension)
+        name: String,
+        /// Directory holding the sidecar and segment output (default:
+        /// vibe/data). Use the same --basedir you used for `segment`.
+        #[arg(long)]
+        basedir: Option<String>,
+    },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
         wav_path: String,
@@ -223,32 +235,19 @@ async fn fetch_align_results(
 }
 
 fn print_align_qa(name: &str, report_bytes: &[u8]) {
-    #[derive(serde::Deserialize)]
-    struct Report {
-        filtered: Vec<serde_json::Value>,
-        suspect: Vec<Suspect>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Suspect {
-        word: String,
-        score: f64,
-        reason: String,
-    }
-
-    let Ok(report) = serde_json::from_slice::<Report>(report_bytes) else { return };
-
-    let truncated: Vec<_> = report.suspect.iter().filter(|s| s.reason == "Truncated").collect();
-    let low: Vec<_> = report.suspect.iter().filter(|s| s.reason == "LowScore").collect();
+    let Ok(report) = serde_json::from_slice::<segment::AlignReport>(report_bytes) else { return };
 
     if report.suspect.is_empty() && report.filtered.is_empty() {
         info!("QA {name}: clean");
         return;
     }
 
+    let truncated = report.truncated();
     if !truncated.is_empty() {
         let words: Vec<_> = truncated.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
         warn!("QA {name}: ⚠ TRUNCATED — {}", words.join(" "));
     }
+    let low = report.low_score();
     if !low.is_empty() {
         let words: Vec<_> = low.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
         warn!("QA {name}: low-score — {}", words.join(" "));
@@ -354,7 +353,10 @@ async fn main() -> Result<()> {
                 warn!("no GPU with >=24GB VRAM found; letting RunPod choose");
             }
 
-            // Try candidates in price order, falling back on "not available" errors.
+            // Try candidates in price order, falling back to the next one on
+            // any creation error — covers both "no instances available" and
+            // GPUs RunPod's GraphQL list exposes but its REST create-pod
+            // endpoint doesn't yet support (e.g. newly added hardware).
             let mut chosen_price: Option<f64> = None;
             let no_candidates = candidates.is_empty();
             let mut iter = candidates.into_iter().peekable();
@@ -367,18 +369,10 @@ async fn main() -> Result<()> {
                 match client.create_pod(&template_id, compute_type, network_volume_id.as_deref(), &name, gpu_id.as_deref()).await {
                     Ok(p) => break p,
                     Err(e) => {
-                        let msg = e.to_string();
-                        let unavailable = msg.contains("could not find any pods")
-                            || msg.contains("no instances currently available");
-                        if unavailable && iter.peek().is_some() {
-                            warn!("not available, trying next GPU...");
-                        } else if no_candidates {
-                            return Err(e);
-                        } else if iter.peek().is_none() {
+                        if no_candidates || iter.peek().is_none() {
                             anyhow::bail!("no available GPU found after trying all candidates: {e}");
-                        } else {
-                            return Err(e);
                         }
+                        warn!("GPU unavailable ({e}), trying next GPU...");
                     }
                 }
             };
@@ -393,6 +387,9 @@ async fn main() -> Result<()> {
         }
         Command::Segment { name, basedir } => {
             segment::run(&name, basedir.as_deref())?;
+        }
+        Command::Summary { name, basedir } => {
+            segment::summary(&name, basedir.as_deref())?;
         }
         Command::Synthesize {
             input,

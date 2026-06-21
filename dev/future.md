@@ -41,7 +41,7 @@ field leaves room for additional invalidation sources (`("manual"`, `"ttl"`).
 
 ## Sentence-level source offsets (`start_offset`/`end_offset` on `Sentence`)
 
-Came up while scoping `vibe/dev/odoru-import.md`'s segment-sidecar design,
+Came up while scoping `vibe/dev/odoru-import-prep.md`'s segment-sidecar design,
 then dropped from that doc — the use case there didn't actually need it
 (derivable from other data if needed later). But the underlying capability
 — knowing each sentence's byte/char offset range in the original source

@@ -84,6 +84,7 @@ delete	deeleet
 "*D"	asterisk dee
 #s	marker S
 printer/graohic	printer or graphic
+RADC    Rad Sea
 
 # Authorship paper artifacts (seg references in artifact-authorship.md)
 (4b.l)	4 b point L

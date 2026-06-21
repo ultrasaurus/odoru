@@ -53,7 +53,7 @@ the repo root)
    find the input.
 
    If a sidecar (`<docname>.segments.json`, see
-   [dev/odoru-import.md](odoru-import.md)) exists in that directory,
+   [dev/odoru-import-prep.md](odoru-import-prep.md)) exists in that directory,
    synthesize also fills in that segment's audio/transcript file
    references and records the voice used. If there's no matching
    sidecar — e.g. testing an ad hoc segment file not produced via
@@ -99,11 +99,9 @@ cargo run -- segment authorship
 Output: `vibe/data/authorship_seg01.txt` … `authorship_segNN.txt`, plus
 `vibe/data/authorship.segments.json` (the sidecar — sentence/paragraph
 structure for each segment, filled in further as each segment is
-synthesized; see [dev/odoru-import.md](odoru-import.md)).
+synthesized; see [dev/odoru-import-prep.md](odoru-import-prep.md)).
 
-Segments are 50–250 words each, split at paragraph boundaries. Long inline
-quotes (≥12 words) and parenthetical asides (≥12 words) are broken out as
-their own speaker turns, giving the model cleaner synthesis units.
+Segments are 50–250 words each, split at paragraph boundaries.
 
 For other documents in `odoru/data/`, pass the stem name:
 ```bash
@@ -132,7 +130,7 @@ Note the pod ID and price. Requires ≥24GB VRAM — enforced automatically.
 
 ```bash
 for seg in seg01 seg02 seg03 ...; do
-  cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> segment authorship_$seg
+  cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> --basedir <path> segment authorship_$seg
 done
 ```
 
@@ -141,7 +139,19 @@ as long as requests arrive within 3 minutes of each other.
 
 If a segment fails with a timeout error (HTTP 524), the inference ran
 longer than the proxy allows. Note which segment failed and retry it on
-a fresh pod later.
+a fresh pod later. A job can also occasionally fail immediately with an
+empty "job submission failed" error (seen on a cold pod's first request)
+— just retry that one segment.
+
+To check progress or resume after a failure, instead of re-reading log
+output:
+```bash
+cargo run -- summary authorship --basedir <path>
+```
+Prints one line per segment — `MISSING (not yet synthesized)`, `clean`,
+or the QA verdict (low-score/filtered/TRUNCATED) for ones already done —
+plus a final count and list of missing segment names you can feed into
+a retry loop.
 
 ### 4. Stitch segments into one file
 

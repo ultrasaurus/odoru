@@ -292,7 +292,15 @@ fn try_expand_tag(inner: &str) -> Option<String> {
             Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         }
     };
-    Some(format!("{} {}", spoken, digits))
+    // Spell the digits out now, the same way Pass 4 (year ranges) does —
+    // once this tag is expanded the chunk is no longer raw, so Pass 7's
+    // bare-number scan can never reach these digits afterward (chunk-
+    // granularity design). Left bare, they'd be invisible to forced
+    // alignment entirely, not just unspoken awkwardly. Falls back to the
+    // bare digits for 5+ digit tags, which `spell_bare_digit_group` doesn't
+    // cover.
+    let spoken_digits = spell_bare_digit_group(digits).unwrap_or_else(|| digits.to_owned());
+    Some(format!("{} {}", spoken, spoken_digits))
 }
 
 /// Span-aware version of `expand_tags`. When a `<...>` doesn't expand (no
@@ -1611,12 +1619,16 @@ mod tests {
 
     #[test]
     fn tag_expansion() {
-        assert_eq!(try_expand_tag("Ref-3"),   Some("Ref 3".into()));
-        assert_eq!(try_expand_tag("Ref-12"),  Some("Ref 12".into()));
-        assert_eq!(try_expand_tag("Fig-1"),   Some("Figure 1".into()));
-        assert_eq!(try_expand_tag("Table-2"), Some("Table 2".into()));
+        assert_eq!(try_expand_tag("Ref-3"),   Some("Ref three".into()));
+        assert_eq!(try_expand_tag("Ref-12"),  Some("Ref twelve".into()));
+        assert_eq!(try_expand_tag("Fig-1"),   Some("Figure one".into()));
+        assert_eq!(try_expand_tag("Table-2"), Some("Table two".into()));
         assert_eq!(try_expand_tag("em"),      None);
-        assert_eq!(try_expand_tag("Foo-3"),   Some("Foo 3".into()));
+        assert_eq!(try_expand_tag("Foo-3"),   Some("Foo three".into()));
+        // 4-digit tag uses the same digit-group convention as Pass 7/4.
+        assert_eq!(try_expand_tag("Ref-1976"), Some("Ref nineteen seventy six".into()));
+        // 5+ digits aren't covered by `spell_bare_digit_group` — left bare.
+        assert_eq!(try_expand_tag("Ref-12345"), Some("Ref 12345".into()));
     }
 
     #[test]
@@ -1646,7 +1658,7 @@ mod tests {
     #[test]
     fn full_citation_sentence() {
         let input = "as reported in <Ref-3> and <Ref-4>";
-        assert_eq!(normalize(input), "as reported in Ref 3 and Ref 4");
+        assert_eq!(normalize(input), "as reported in Ref three and Ref four");
     }
 
     #[test]
@@ -1676,7 +1688,7 @@ mod tests {
 
     #[test]
     fn brackets_stripped() {
-        assert_eq!(normalize("<Ref-8>.) and (EEE,yy,cc)."), "Ref 8. and E E E,yy,cc.");
+        assert_eq!(normalize("<Ref-8>.) and (EEE,yy,cc)."), "Ref eight. and E E E,yy,cc.");
     }
 
     #[test]
@@ -2098,20 +2110,6 @@ mod tests {
             let expected_text: String = expected_text.chars()
                 .filter(|c| !matches!(c, '(' | ')' | '<' | '>' | '[' | ']')).collect();
             let expected_text = replace_ellipsis(&expected_text);
-
-            // The chained unspanned-wrapper computation above re-spans from
-            // scratch at each step, losing the `is_raw` memory the real
-            // chunk-threaded pipeline carries forward. That memory matters
-            // for expand_tags: "<Ref-3>" -> "Ref 3" becomes non-raw, so
-            // production correctly leaves the "3" bare rather than
-            // re-spelling it as "three" — but the chained unspanned
-            // computation sees it as a fresh raw digit run afterward and
-            // spells it out anyway. Patch that one known divergence rather
-            // than asserting a value the real pipeline doesn't produce.
-            // (Year ranges no longer diverge here: `expand_year_ranges`
-            // itself now spells out both halves, so there's no leftover
-            // bare digit run for `expand_comma_numbers` to find either way.)
-            let expected_text = expected_text.replace("Ref three", "Ref 3").replace("Ref four", "Ref 4");
 
             assert_eq!(flatten(&chunks), expected_text, "mismatch for input: {input:?}");
         }
