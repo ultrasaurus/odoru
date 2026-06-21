@@ -13,8 +13,8 @@ segments, normalizes each segment's text, synthesizes audio, and
 produces a forced-alignment transcript per segment.
 
 - Segment files: `authorship_seg01.txt` ... `segNN.txt`.
-- Today there's no manifest tying these back to character offsets in
-  the original document.
+- Today there's no manifest tying these back to the original document
+  or to each other beyond filename order.
 - The only ordering signal is filename order (`_segNN`) and an ffmpeg
   concat list used for playback.
 
@@ -39,24 +39,15 @@ reads the sidecar if present and ignores it otherwise.
 1. No mapping from a segment's normalized text back to original-text
    word positions. The forced-alignment transcript (`_transcript.json`)
    only has word timestamps for the *normalized* text.
-2. No mapping from a segment to its character offsets in the original
-   source document.
-3. No record of paragraph boundaries within a segment.
-4. No record of which voice/speaker config actually produced a
+2. No record of paragraph boundaries within a segment.
+3. No record of which voice/speaker config actually produced a
    segment's audio.
 
 (1) already has a solution to reuse, not design from scratch — see
-"Normalized-to-original word mapping" below. (2), (3), and (4) are
-what the sidecar format in this doc addresses.
+"Normalized-to-original word mapping" below. (2) and (3) are what the
+sidecar format in this doc addresses.
 
-## Design: emit offsets at split time
-
-Rather than reconstructing segment boundaries after the fact (e.g. via
-substring search against the original document), vibe should compute
-and record them when it splits the document, since it already knows
-exactly where each cut falls.
-
-### Move `splitter::split` into `util`
+## Move `splitter::split` into `util`
 
 `Sentence` and `splitter::split` currently live in `tts/src/splitter.rs`.
 Vibe already depends on `util` (not `tts`), so move this module to
@@ -64,37 +55,60 @@ Vibe already depends on `util` (not `tts`), so move this module to
 vibe's segmenter share one paragraph-boundary rule instead of vibe
 re-deriving its own.
 
-`Sentence` needs byte-offset fields added (it currently only carries
-`text` and `paragraph_end`):
+`Sentence` doesn't need any change — it already carries exactly what's
+needed (`text: String`, `paragraph_end: bool`).
 
-```rust
-pub struct Sentence {
-    pub text: String,
-    pub start_offset: usize,   // UTF-8 byte offset into source text
-    pub end_offset: usize,
-    pub paragraph_end: bool,
-}
-```
-
-Note: offsets are only meaningful relative to whichever text was
-passed into the `split()` call that produced them — `Sentence` doesn't
-carry any reference back to *which* source text or document it came
-from. In principle the same `Sentence` value could be (mis)matched
-against a different text than the one it was derived from; in practice
-this basically never happens (each call site immediately consumes its
-own output), so we're not adding a source-text identity field for it.
-
-### Vibe's split step
+## Vibe's split step
 
 At split time, vibe runs `splitter::split` once over the *whole*
 source document, then groups the resulting sentences into its existing
 segment boundaries (today: never mid-sentence, and currently never
-mid-paragraph either — see "Open: paragraph splits within a segment"
-below for why that may change). Each segment retains the
-`start_offset`/`end_offset`/`paragraph_end` of its component
-sentences.
+mid-paragraph either — see "Paragraph/sentence splits within a
+segment" below for why that may change). Vibe writes the resulting
+`Sentence` list (`text` + `paragraph_end`) for each segment straight
+into the sidecar — the importer does not re-run `splitter::split`
+itself.
 
-### Sidecar format: `<docname>.segments.json`
+Re-running the splitter at import time instead of storing its output
+would risk drift: if `splitter::split`'s rules change between when
+vibe rendered the audio and when import runs later, recomputation
+could produce a different sentence/paragraph split than what the
+audio was actually generated against, silently misaligning paragraph
+breaks from what was actually spoken. Storing the actual sentence list
+vibe used avoids that — same category of problem `source_sha256`
+already guards against for the whole document, just at a finer grain.
+
+## No offsets in the sidecar
+
+Earlier drafts of this design added `start_offset`/`end_offset` to
+`Sentence`, to each sidecar sentence entry, and to each segment, for
+mapping playback position back into the full original document.
+Walking through actual use cases shows none of them need it:
+
+- **Building cache entries / slicing audio per sentence** (the
+  importer's main job): needs each sentence's text and its matching
+  word timestamps. Text is already in `Sentence.text` — no offset math
+  needed to get it. Matching words to a sentence is a content-search
+  problem (find which transcript words fall within this sentence's
+  text), the same technique `words_with_original_text` already uses —
+  not an offset-arithmetic problem.
+- **Paragraph break rendering**: `paragraph_end: bool` per sentence is
+  already sufficient — render order + that flag tells the reader to
+  insert a break after this one. No position numbers required.
+- **Re-running a single segment**: the segment's original text is
+  already available verbatim in `_segNN.txt` — no need to re-slice it
+  out of the full document by position.
+- **Highlighting the full document during playback**: this is already
+  solved a different way — by capturing surrounding context, not by
+  storing character positions (positions are expensive to keep valid
+  as the document is edited). Since segment text is an exact,
+  non-normalized substring of the document, a position can always be
+  cheaply re-derived later via substring search if some future feature
+  genuinely needs one — no reason to store and maintain it now.
+
+So the sidecar carries no offsets at all, at any level.
+
+## Sidecar format: `<docname>.segments.json`
 
 One file per document, written alongside the existing `_segNN.*`
 files:
@@ -107,11 +121,9 @@ files:
   "segments": [
     {
       "index": 1,
-      "start_offset": 0,
-      "end_offset": 842,
       "sentences": [
-        { "start_offset": 0,   "end_offset": 118, "paragraph_end": false },
-        { "start_offset": 119, "end_offset": 301, "paragraph_end": true  }
+        { "text": "Augment's mail system allows one to send complete, structured documents as well as small messages.", "paragraph_end": false },
+        { "text": "In an authorship environment, an important role for electronic mail is for the control and distribution of documents, where small, throw away messages are considered to be but a special class of document.", "paragraph_end": true }
       ],
       "files": {
         "original":   "authorship_seg01.txt",
@@ -127,21 +139,13 @@ files:
 
 Notes on the fields:
 
-- `start_offset`/`end_offset` are UTF-8 byte offsets into
-  `source_document`, matching what Rust string slicing and
-  `unicode_segmentation` already use.
 - `source_sha256` is a hash of the original document at split time.
   If the source is edited later, Odoru's importer can detect the
-  mismatch and refuse/warn rather than import against stale offsets.
-- `segments[].start_offset`/`end_offset` are kept even though they're
-  currently derivable from the first/last sentence in `sentences`.
-  This is deliberate redundancy: once segmentation needs to split
-  *within* a paragraph (long monologues — Ulysses' Molly Bloom
-  soliloquy is ~3,687 words in one sentence-ish span — or simply very
-  long single sentences), a segment's edges may no longer coincide
-  with a sentence boundary. Keeping the segment's own span authoritative
-  avoids relying on `sentences` always bracketing it exactly, and gives
-  O(1) "which segment contains offset X" lookups without scanning.
+  mismatch and refuse/warn rather than import against a document that
+  no longer matches what was synthesized.
+- `sentences` are exactly the `Sentence` values vibe's split step
+  produced for this segment — `text` + `paragraph_end`, no offsets
+  (see "No offsets in the sidecar" above).
 - `index` matches the existing `_segNN` filename suffix, so the
   manifest stays correlated with files even if a segment is
   individually re-run/replaced later.
@@ -161,7 +165,7 @@ Notes on the fields:
   ever diverge — but the source of truth for *which voice rendered
   this* is always the sidecar, not an import-time argument.
 
-### Caching assumption that doesn't hold for imported audio
+## Caching assumption that doesn't hold for imported audio
 
 Odoru's audio cache (`tts/src/audio_cache.rs`) is keyed by
 `sha256(normalized_text + voice)` — it assumes identical text from the
@@ -183,26 +187,27 @@ as if it were interchangeable with other audio for the same text.
 Not building yet, but the import command's job, given the sidecar:
 
 1. Verify `source_sha256` matches the document Odoru already has (or
-   is being given) before trusting offsets.
+   is being given) before trusting the rest of the sidecar.
 2. For each segment: transcode `_generated.wav` to mp3 into Odoru's
-   existing audio cache (`tts/src/audio_cache.rs`), keyed the normal
-   way; copy `_transcript.json` words into the cache `Meta.words`
-   field.
-3. Write/attach the sidecar (or a derived form of it) so Odoru's
-   reader can map playback position back to source-document offsets
-   and render paragraph breaks correctly, and so a later "re-run this
-   segment" action knows exactly which span of the original document
-   to re-normalize and re-synthesize.
+   existing audio cache (`tts/src/audio_cache.rs`); copy
+   `_transcript.json` words (mapped back to original text — see
+   "Normalized-to-original word mapping" below) into the cache
+   `Meta.words` field.
+3. Write `voice_id` into `voices.json` (`util/src/documents.rs`).
+4. Use `sentences`' `paragraph_end` flags to render paragraph breaks
+   correctly when displaying the imported document, and to know
+   exactly which span of text to re-normalize and re-synthesize if a
+   segment is later re-run.
 
 ## Open questions / deferred work
 
-### Paragraph splits within a segment
-Vibe's segmenter currently never splits mid-paragraph. If/when long
-single paragraphs (or even single sentences) need splitting for
-synthesis length limits, the segment-level `start_offset`/`end_offset`
-become load-bearing rather than redundant — see note above. No design
-needed yet beyond making sure the sidecar format already supports it,
-which it does.
+### Paragraph/sentence splits within a segment
+Vibe's segmenter currently never splits mid-paragraph or mid-sentence.
+If/when long single paragraphs (or even single sentences — long
+monologues, e.g. Ulysses' Molly Bloom soliloquy at ~3,687 words in one
+sentence-ish span) need splitting for synthesis length limits, this
+will need its own design pass. The sidecar format above doesn't yet
+account for a segment boundary falling inside a sentence.
 
 ### Normalized-to-original word mapping — solved for F5, reusable here
 This was an open problem when this doc was first drafted; it's since
