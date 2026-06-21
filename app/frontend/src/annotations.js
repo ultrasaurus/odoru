@@ -196,12 +196,18 @@ function findAnnotationWordRange(annText, words) {
     if (idx === -1)
         return null;
     let charOffset = 0;
+    let firstStart;
+    let firstIndex = -1;
     let lastEnd;
     let lastIndex = -1;
     for (let i = 0; i < words.length; i++) {
         const w = words[i];
         const wordEnd = charOffset + w.word.length;
         if (wordEnd > idx && charOffset < idx + needle.length) {
+            if (firstStart === undefined && w.start !== undefined) {
+                firstStart = w.start;
+                firstIndex = i;
+            }
             if (w.end !== undefined) {
                 lastEnd = w.end;
                 lastIndex = i;
@@ -209,7 +215,7 @@ function findAnnotationWordRange(annText, words) {
         }
         charOffset = wordEnd + 1; // +1 for the space
     }
-    if (lastEnd === undefined)
+    if (firstStart === undefined || lastEnd === undefined)
         return null;
     // Stop just before the next word's onset (small safety margin) rather
     // than lastEnd + a flat buffer — forced alignment's *end* boundary for
@@ -219,12 +225,18 @@ function findAnnotationWordRange(annText, words) {
     // *start* boundary is more reliable, and stopping just before it lets
     // the current word finish naturally without spilling into the next one.
     const SAFETY_MARGIN = 0.03;
-    const FLAT_BUFFER = 0.15; // no next word (end of sentence) — just pad.
+    const FLAT_BUFFER = 0.15; // no next/previous word (sentence edge) — just pad.
     const nextStart = words[lastIndex + 1]?.start;
     const end = nextStart !== undefined
         ? Math.max(lastEnd, nextStart - SAFETY_MARGIN)
         : lastEnd + FLAT_BUFFER;
-    return { end };
+    // Mirror of the end logic: start a small pre-roll before the first
+    // word's onset, clamped so it never overlaps the previous word's audio.
+    const prevEnd = words[firstIndex - 1]?.end;
+    const start = Math.max(0, prevEnd !== undefined
+        ? Math.min(firstStart, prevEnd + SAFETY_MARGIN)
+        : firstStart - SAFETY_MARGIN);
+    return { start, end };
 }
 export async function listenAnnotation(mark, annText, player, getVoice) {
     if (!player.hasAudio)
@@ -239,6 +251,7 @@ export async function listenAnnotation(mark, annText, player, getVoice) {
     if (!voice)
         return;
     const gen = ++listenGen;
+    mark.classList.remove('annotation-error'); // clear any stale error (e.g. from a different voice)
     mark.classList.add('annotation-loading');
     try {
         const res = await fetch(`/voices/${encodeURIComponent(voice)}/words`, {
@@ -261,7 +274,7 @@ export async function listenAnnotation(mark, annText, player, getVoice) {
             mark.classList.add('annotation-error');
             return;
         }
-        player.listenTo(segIndex, range.end);
+        player.listenTo(segIndex, range.end, range.start);
     }
     catch (err) {
         console.error('listenAnnotation error:', err);

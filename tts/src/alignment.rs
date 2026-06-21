@@ -115,6 +115,18 @@ fn check_cached_words(key: &str) -> Result<Option<Vec<Word>>> {
 /// break a client doing `indexOf` on the joined text, since it would match
 /// the first (too-early) occurrence and report a too-early end time.
 ///
+/// Merging is by range *overlap*, not exact equality — a word can straddle
+/// a chunk boundary (e.g. "Winchester," spans the raw "Winchester" chunk
+/// plus the start of an expanded ", Massachusetts" chunk), and `source_range`
+/// returns the *union* of both chunks' source ranges for that word. That
+/// union is a strict superset of a neighboring word's pure single-chunk
+/// range (e.g. "Massachusetts" alone maps to just the ", MA" chunk), so
+/// exact-equality merging would miss it and emit a stray overlapping
+/// duplicate. Overlap merging also extends the tracked range and re-slices
+/// the merged entry's text on every merge, since each merge can grow the
+/// union further (e.g. a trailing comma in its own raw chunk, as in
+/// "1973-76" + "1973-76,").
+///
 /// Word boundaries within `normalized.text` are found by sequential
 /// forward content search rather than `split_whitespace()` position
 /// arithmetic, since forced alignment may drop words with no alignable
@@ -152,12 +164,19 @@ pub fn words_with_original_text(
         });
 
         if let (Some(s), Some(last)) = (&src, &last_src) {
-            if s == last {
-                // Same source span as the previous output word — merge by
-                // extending its end time rather than appending a duplicate.
+            if s.start < last.end && s.end > last.start {
+                // Overlaps the previous output word's source range — merge
+                // by extending the range (and re-slicing the text, since
+                // the union may have grown) rather than appending a
+                // duplicate/overlapping entry.
+                let union = last.start.min(s.start)..last.end.max(s.end);
                 if let Some(prev) = out.last_mut() {
                     prev.end = w.end.or(prev.end);
+                    if let Some(slice) = char_slice(original, union.clone()) {
+                        prev.word = slice;
+                    }
                 }
+                last_src = Some(union);
                 continue;
             }
         }
@@ -217,6 +236,64 @@ mod tests {
         // Merged entry spans from "Item"'s start to "nine"'s end.
         assert_eq!(mapped[1].start, Some(0.2));
         assert_eq!(mapped[1].end, Some(1.5));
+    }
+
+    #[test]
+    fn merges_words_straddling_a_chunk_boundary() {
+        // Regression: a word can straddle a chunk boundary (e.g. "Winchester,"
+        // spans the raw "Winchester" chunk plus the start of the expanded
+        // ", Massachusetts" chunk), giving it a *union* source range that's a
+        // strict superset of a neighboring word's pure single-chunk range
+        // (e.g. "Massachusetts" alone maps to just the ", MA" chunk). Exact-
+        // equality merging missed this and emitted a stray overlapping
+        // duplicate entry instead of merging.
+        let original = "Later, I lived in Winchester, MA in 1973-76, then we moved to the Philippines.";
+        let normalized = normalize_with_spans(original);
+        assert_eq!(
+            normalized.text,
+            "Later, I lived in Winchester, Massachusetts in nineteen seventy three to seventy six, then we moved to the Philippines."
+        );
+
+        let aligned = vec![
+            word("Later,", 0.36, 0.66),
+            word("I", 0.84, 0.86),
+            word("lived", 0.94, 1.16),
+            word("in", 1.20, 1.24),
+            word("Winchester,", 1.34, 1.90),
+            word("Massachusetts", 2.46, 3.28),
+            word("in", 3.48, 3.52),
+            word("nineteen", 3.62, 3.90),
+            word("seventy", 3.90, 4.20),
+            word("three", 4.20, 4.50),
+            word("to", 4.50, 4.70),
+            word("seventy", 4.70, 5.00),
+            word("six,", 5.00, 5.34),
+            word("then", 6.39, 6.51),
+            word("we", 6.57, 6.65),
+            word("moved", 6.75, 6.99),
+            word("to", 7.05, 7.09),
+            word("the", 7.15, 7.21),
+            word("Philippines.", 7.27, 7.87),
+        ];
+
+        let mapped = words_with_original_text(&aligned, &normalized, original);
+        let words: Vec<&str> = mapped.iter().map(|w| w.word.as_str()).collect();
+        assert_eq!(words, vec![
+            "Later,", "I", "lived", "in", "Winchester, MA", "in", "1973-76,",
+            "then", "we", "moved", "to", "the", "Philippines.",
+        ]);
+
+        // The merged "Winchester, MA" entry spans from "Winchester,"'s start
+        // to "Massachusetts"'s end, not just one of the two.
+        let winchester = &mapped[4];
+        assert_eq!(winchester.start, Some(1.34));
+        assert_eq!(winchester.end, Some(3.28));
+
+        // The merged "1973-76," entry spans from "nineteen"'s start to
+        // "six,"'s end (the comma-extension case).
+        let year = &mapped[6];
+        assert_eq!(year.start, Some(3.62));
+        assert_eq!(year.end, Some(5.34));
     }
 
     #[test]

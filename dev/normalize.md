@@ -20,7 +20,10 @@ first, since they're the source of truth.
   removed)
 - **Pass 2** — Strip short inline quotes (≤5 words)
 - **Pass 3** — Expand `<Tag-N>` markers
-- **Pass 4** — Expand year ranges (e.g. `1976-77`)
+- **Pass 4** — Expand year ranges (e.g. `1976-77` → `nineteen seventy six
+  to seventy seven`) — spells both digit runs itself (shares the Pass 7
+  digit-group helper) rather than leaving them bare, since Pass 7 can't
+  reach digits inside an already-expanded chunk
 - **Pass 5** — Replace em-dashes and double-hyphens (` -- ` → `, `)
 - **Pass 6** — Spell Item/reference numbers digit-by-digit
   (`Item 71279` → `Item seven one two seven nine`) — runs before Pass 7 so
@@ -102,15 +105,23 @@ Pass 7 doesn't also spell it out.
 
 ### Pass 4 — Year ranges
 
-Any hyphen between two runs of digits is expanded to "to".
+Any hyphen between two runs of digits is expanded to "to", and **both**
+digit runs are spelled out (via the same digit-group convention as Pass 7).
 
 | Input | Output |
 |-------|--------|
-| `1976-77` | `1976 to 77` |
-| `pages 10-20` | `pages 10 to 20` |
+| `1976-77` | `nineteen seventy six to seventy seven` |
+| `pages 10-20` | `pages ten to twenty` |
 
-The digit runs themselves are left bare here too, for the same reason as
-Pass 3 — see Implementation.
+Unlike Pass 3's `<Ref-N>` tags, this pass spells its own digits rather than
+leaving them bare for Pass 7 — see Implementation's "Pipeline ordering
+matters" note for why: once this pass expands a range, the chunk is no
+longer raw, so Pass 7 can never reach those digits afterward. Left bare,
+they'd be invisible to forced alignment entirely (no letters in its
+vocabulary), not just unspoken awkwardly — confirmed in practice: an
+annotation spanning a year range like `1973-76` failed to find any word
+match at all, since the unspelled digits were silently dropped before
+alignment even ran, not merely mismatched.
 
 ---
 
@@ -430,3 +441,17 @@ thousand" instead of the intended "Item one zero zero zero") with no
 compiler error — only a behavioral regression, caught by tests. When
 adding a new pass whose pattern overlaps an existing one, place the more
 specific pass first.
+
+A related but distinct trap: a pass that runs *before* Pass 7 and produces
+its own digit content (Pass 4, year ranges) must spell that content out
+itself rather than leaving it bare for Pass 7 to "clean up later" — there
+is no later for digits inside an already-expanded chunk, since Pass 7's
+scan skips non-raw chunks entirely (`is_raw`). This was missed initially
+for Pass 4 (it only replaced the hyphen with "to", leaving both digit runs
+bare) and wasn't just a pronunciation gap: bare digits have no letters, so
+forced alignment dropped them from its output entirely, and an annotation
+spanning a year range (e.g. `1973-76`) found *no* word match at all rather
+than a slightly-off one. Confirmed via `tts::alignment`'s
+`FilteredWord`/`AlignReport` logging, then fixed by extracting
+`spell_bare_digit_group` (shared by Pass 4 and Pass 7) so Pass 4 spells
+both halves itself before marking the chunk non-raw.

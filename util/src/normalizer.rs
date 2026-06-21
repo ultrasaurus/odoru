@@ -470,9 +470,19 @@ fn expand_year_ranges_chunk(chunk: &Spanned) -> Vec<Spanned> {
                     while end < chars.len() && chars[end].is_ascii_digit() { end += 1; }
                     if end >= chars.len() || !chars[end].is_alphabetic() {
                         flush(&mut out, &chars, base, run_start, start);
-                        let expanded: String = chars[start..i].iter().collect::<String>()
-                            + " to "
-                            + &chars[after_hyphen..end].iter().collect::<String>();
+                        // Spell out both halves here, not just insert "to" —
+                        // once this chunk is expanded it's no longer raw, so
+                        // Pass 7's bare-number rule can never reach these
+                        // digits afterward (chunk-granularity design). Left
+                        // bare, they'd be invisible to forced alignment
+                        // entirely, not just unspoken awkwardly.
+                        let first: String = chars[start..i].iter().collect();
+                        let second: String = chars[after_hyphen..end].iter().collect();
+                        let expanded = format!(
+                            "{} to {}",
+                            spell_bare_digit_group(&first).unwrap_or(first),
+                            spell_bare_digit_group(&second).unwrap_or(second),
+                        );
                         out.push(Spanned { text: expanded, src: (base + start)..(base + end) });
                         run_start = end;
                         i = end;
@@ -651,25 +661,20 @@ fn expand_comma_numbers_chunk(chunk: &Spanned) -> Vec<Spanned> {
             // raw digits — which TTS tends to garble, and which forced
             // alignment can't time-align at all (its vocabulary has no
             // digit characters, so bare numbers get silently dropped).
-            // Leading-zero runs of length > 1 ("05", "0609") are excluded —
-            // those are IDs, spelled digit-by-digit elsewhere (process_token).
             // Also excluded: a digit run touching a letter on either side
             // ("4b", "14B", "v2") — that's an alphanumeric ID, not a bare
             // number; split_alphanumeric (in process_token) handles spacing
-            // those out later in the pipeline.
-            let len = j - start;
+            // those out later in the pipeline. (Leading-zero exclusion is
+            // handled inside `spell_bare_digit_group` itself.)
             let touches_letter = (start > 0 && chars[start - 1].is_alphabetic())
                 || (j < chars.len() && chars[j].is_alphabetic());
-            if matches!(len, 1 | 2 | 3 | 4) && (len == 1 || chars[start] != '0') && !touches_letter {
+            if !touches_letter {
                 let digits: String = chars[start..j].iter().collect();
-                let words = match len {
-                    1 | 2 => number_to_words(digits.parse().expect("1-2 ascii digits")),
-                    3 => three_digit_group_words(&digits),
-                    _ => four_digit_group_words(&digits),
-                };
-                flush(&mut out, &chars, base, run_start, start);
-                out.push(Spanned { text: words, src: (base + start)..(base + j) });
-                run_start = j;
+                if let Some(words) = spell_bare_digit_group(&digits) {
+                    flush(&mut out, &chars, base, run_start, start);
+                    out.push(Spanned { text: words, src: (base + start)..(base + j) });
+                    run_start = j;
+                }
             }
             i = j;
         } else {
@@ -731,6 +736,33 @@ fn four_digit_group_words(digits: &str) -> String {
     } else {
         format!("{} {}", group_words(first), group_words(second))
     }
+}
+
+/// Spell out a bare digit-only string using the same convention as the
+/// generic bare-number rule (Pass 7): 1-2 digits via `number_to_words`,
+/// 3 via `three_digit_group_words`, 4 via `four_digit_group_words`.
+/// Returns `None` for forms this convention doesn't cover — 5+ digits, or
+/// a leading-zero run longer than 1 char (those are IDs, spelled
+/// digit-by-digit elsewhere in `process_token`) — so callers can fall back
+/// to leaving the digits bare.
+///
+/// Shared by Pass 7 itself and by `expand_year_ranges_chunk` (Pass 4),
+/// which needs to spell out both halves of a range like "1973-76" itself
+/// rather than leaving bare digits for Pass 7 to find — once Pass 4 expands
+/// "1973-76" into "1973 to 76", that text is no longer raw, so Pass 7's
+/// scan correctly skips it (per the chunk-granularity design), and the
+/// embedded digits would otherwise stay bare forever: not just unspoken
+/// awkwardly, but invisible to forced alignment (whose vocabulary has no
+/// digit characters), entirely dropping that word from alignment results.
+fn spell_bare_digit_group(digits: &str) -> Option<String> {
+    let len = digits.chars().count();
+    if !matches!(len, 1 | 2 | 3 | 4) { return None; }
+    if len > 1 && digits.starts_with('0') { return None; }
+    Some(match len {
+        1 | 2 => number_to_words(digits.parse().expect("1-2 ascii digits")),
+        3 => three_digit_group_words(digits),
+        _ => four_digit_group_words(digits),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1589,10 +1621,20 @@ mod tests {
 
     #[test]
     fn year_range_expansion() {
-        assert_eq!(expand_year_ranges("1976-77"),        "1976 to 77");
-        assert_eq!(expand_year_ranges("1976-1977"),      "1976 to 1977");
-        assert_eq!(expand_year_ranges("in 1976-77 we"),  "in 1976 to 77 we");
-        assert_eq!(expand_year_ranges("pages 10-20"),    "pages 10 to 20");
+        assert_eq!(expand_year_ranges("1976-77"),
+            "nineteen seventy six to seventy seven");
+        assert_eq!(expand_year_ranges("1976-1977"),
+            "nineteen seventy six to nineteen seventy seven");
+        assert_eq!(expand_year_ranges("in 1976-77 we"),
+            "in nineteen seventy six to seventy seven we");
+        assert_eq!(expand_year_ranges("pages 10-20"),
+            "pages ten to twenty");
+        // Regression: both halves must be spelled, not just the hyphen
+        // replaced — bare digits here would be invisible to forced
+        // alignment (no letters), dropping an annotation spanning them
+        // entirely from the aligned word list rather than just mismatching.
+        assert_eq!(expand_year_ranges("in Winchester, MA in 1973-76"),
+            "in Winchester, MA in nineteen seventy three to seventy six");
     }
 
     #[test]
@@ -1777,10 +1819,10 @@ mod tests {
         let input = "in 1976-77 we";
         let chunks = expand_year_ranges_spanned(spanned_from_input(input));
         let normalized = flatten(&chunks);
-        assert_eq!(normalized, "in 1976 to 77 we");
+        assert_eq!(normalized, "in nineteen seventy six to seventy seven we");
 
-        // The expanded "1976 to 77" chunk should map back to "1976-77" in
-        // the original input (chars 3..10).
+        // The expanded chunk should map back to "1976-77" in the original
+        // input (chars 3..10).
         let offset_in_expansion = normalized.find("to").unwrap();
         assert_eq!(source_span_at(&chunks, offset_in_expansion), Some(3..10));
 
@@ -1827,7 +1869,7 @@ mod tests {
         let chunks = hyphens_to_spaces_spanned(chunks);
 
         let normalized = flatten(&chunks);
-        assert_eq!(normalized, "the 1976 to 77 report card");
+        assert_eq!(normalized, "the nineteen seventy six to seventy seven report card");
 
         // "to" still maps back to "1976-77" in the *original* input, even
         // though a later pass (hyphen removal) also ran on this text.
@@ -2060,17 +2102,15 @@ mod tests {
             // The chained unspanned-wrapper computation above re-spans from
             // scratch at each step, losing the `is_raw` memory the real
             // chunk-threaded pipeline carries forward. That memory matters
-            // now: `expand_year_ranges_spanned` turns "1976-77" into
-            // "1976 to 77" and marks it non-raw, so the production
-            // pipeline's bare-4-digit rule (in `expand_comma_numbers_chunk`)
-            // correctly leaves "1976" alone there — but the chained
-            // unspanned computation sees it as a fresh raw digit run and
+            // for expand_tags: "<Ref-3>" -> "Ref 3" becomes non-raw, so
+            // production correctly leaves the "3" bare rather than
+            // re-spelling it as "three" — but the chained unspanned
+            // computation sees it as a fresh raw digit run afterward and
             // spells it out anyway. Patch that one known divergence rather
             // than asserting a value the real pipeline doesn't produce.
-            let expected_text = expected_text.replace("nineteen seventy six to seventy seven", "1976 to 77");
-            // Same divergence via expand_tags: "<Ref-3>" -> "Ref 3" becomes
-            // non-raw, so production correctly leaves the "3" bare rather
-            // than re-spelling it as "three".
+            // (Year ranges no longer diverge here: `expand_year_ranges`
+            // itself now spells out both halves, so there's no leftover
+            // bare digit run for `expand_comma_numbers` to find either way.)
             let expected_text = expected_text.replace("Ref three", "Ref 3").replace("Ref four", "Ref 4");
 
             assert_eq!(flatten(&chunks), expected_text, "mismatch for input: {input:?}");

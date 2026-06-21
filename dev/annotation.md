@@ -209,8 +209,17 @@ without this, editing that neighboring sentence (even unrelated to the
 annotation itself) would change the recorded context and silently drop an
 otherwise-untouched annotation.
 
+**Per-word listen start offset ✓ done:** `listenTo(segIndex, endOffsetSecs,
+startOffsetSecs)` in `player.ts` now accepts a start offset — `_doSeek`
+trims that many seconds (converted to samples at 24000Hz) off the front of
+the seeked-to segment's own audio before enqueuing it, leaving later
+segments untouched. `findAnnotationWordRange` returns both `start` and
+`end`: `start` is a small pre-roll before the first matched word's onset
+(mirroring the end-boundary logic — clamped so it never overlaps the
+previous word's audio), so listening starts right at the annotated phrase
+instead of the whole sentence.
+
 **Known limitations / deferred:**
-- Listen starts from sentence start (no per-word start offset yet)
 - Cross-sentence annotations not yet supported
 - Margin listen button not yet added
 - Annotations still drop if the annotated text *itself* is edited (including
@@ -237,19 +246,95 @@ TTS backend, CLI-only and not yet integrated into Odoru, will need this too).
   search (robust to forced alignment dropping unalignable words — no need
   to track which positions were filtered), maps that range back to the
   original text via `source_range`, and substitutes the original substring
-  for the word's `.word` field. Multiple aligned words landing in the same
-  expanded source span (e.g. all six of "Item seven one two seven nine"
+  for the word's `.word` field. Multiple aligned words landing in *overlapping*
+  expanded source spans (e.g. all six of "Item seven one two seven nine"
   mapping to "Item 71279") are merged into a single output entry rather
-  than returned as repeated duplicates.
+  than returned as repeated duplicates. Merging is by range *overlap*, not
+  exact equality — a word straddling a chunk boundary (e.g. "Winchester,"
+  spanning the raw "Winchester" chunk plus the start of an expanded
+  ", Massachusetts" chunk) computes a union range that's a strict superset
+  of a neighboring word's pure single-chunk range; exact-equality merging
+  missed this and produced a stray duplicate entry (e.g. a spurious ", MA"
+  alongside "Winchester, MA") — caught from a real `/words` response, not
+  just theoretically, fixed, and covered by a regression test using that
+  exact sentence.
 - `app/src/main.rs`'s `get_words` F5 branch: normalizes the client's raw
   sentence (`tts::f5::normalizer::normalize_with_spans`, the same call
   synthesis makes, so the cache key matches), runs `ensure_words`, then
   `words_with_original_text` before returning — the response shape is
   identical to Kokoro's, so `listenAnnotation` needed no client changes
 
-**Known follow-up:** numbers/IDs nested inside a different pass's expansion
-(e.g. the `3` in `<Ref-3>` → `Ref 3`) don't get individually spelled out by
-the bare-number rule, since chunk granularity is per-expansion, not
-per-word — see normalize.md's "Granularity is per-chunk" note. Not yet
-hit in practice for annotations, but worth knowing if a `<Ref-N>`-spanning
-annotation ever fails to align.
+**Known follow-up:** a normalizer chunk-granularity limitation (numbers
+nested inside another pass's expansion, e.g. `<Ref-3>` → `Ref 3`, don't get
+individually spelled out) could in principle cause a `<Ref-N>`-spanning
+annotation to fail to align — see
+[normalize-future.md](normalize-future.md)'s "Chunk-granularity limitation"
+section for the detail. Not yet hit in practice for `<Ref-N>` specifically.
+
+(A closely related instance of this *was* hit in practice for year ranges —
+an annotation spanning `1973-76` found no word match at all, since
+`expand_year_ranges` left both digit runs bare for Pass 7 to spell, but
+Pass 7 can never reach digits inside an already-expanded chunk. Fixed by
+having `expand_year_ranges` spell its own digits — see
+[normalize.md](normalize.md)'s "Pipeline ordering matters" section.)
+
+# Known limitations (cross-backend)
+
+### Kokoro alignment ground truth doesn't account for spoken-number pronunciation
+
+Kokoro's alignment ground truth (`meta.text`, used by `ensure_words`) is the
+**raw**, unnormalized sentence text — Kokoro's cache key and synthesis input
+are both raw too, so there's normally no mismatch. But Kokoro's own G2P
+(misaki) apparently pronounces bare digits as words anyway (e.g. "2" spoken
+as "two"), while the literal ground-truth text still says "2". Forced
+alignment can't align a token with no letters against spoken audio, so it
+gets silently dropped — confirmed via a server log warning:
+
+```
+WARN tts::alignment: alignment for <key>: 1 word(s) dropped before
+alignment (no alignable chars): [FilteredWord { word: "2", original_index: 3 }]
+```
+
+Practical effect: an annotation spanning a bare number in a Kokoro-voiced
+sentence may fail to find a word match (same symptom as the F5 issue Stage
+3 fixed, but Kokoro was never in scope for that fix since it doesn't
+normalize).
+
+**Possible fix (not yet done):** run the same bare-number normalization
+(`util::normalizer`) on a copy of the text used only as Kokoro's alignment
+ground truth — not the cache key, not the synthesis input, both of which
+must stay raw for Kokoro — then map aligned words back via
+`tts::alignment::words_with_original_text`, the same flow F5 already uses.
+**Risk:** this assumes Kokoro's G2P reads digits the same way
+`util::normalizer`'s rules do. If Kokoro's actual pronunciation convention
+differs (e.g. a different digit-grouping style), the ground truth still
+won't match the audio — just a different mismatch. Needs a listening-test
+pass to confirm before implementing, not just a code change.
+
+# TODO
+
+Not yet done — collected from the "Known limitations / deferred" and "Not
+yet done" notes above:
+
+Top priority:
+- [x] **Per-word listen start offset** — `listenTo` now takes a start
+  offset; `_doSeek` trims it off the front of the seeked-to segment's
+  samples. See "Per-word listen start offset" under Stage 2 above.
+- [ ] **Cross-sentence annotations** — selections crossing a `.segment`
+  boundary currently trim to the sentence containing the drag anchor (MVP
+  behavior); full range-splitting support deferred.
+- [ ] **Margin listen button** — alongside the existing right-click delete;
+  Stage 2 shipped click-to-listen on the annotation mark itself instead.
+
+Not yet prioritized:
+
+- **Last-used color** — remember the last picked annotation color and
+  pre-select it in the popover; Enter confirms without clicking. Hook point
+  is `initAnnotationPicker` in `annotations.ts`.
+- **Fuzzy/case-insensitive re-match** — annotations still drop if the
+  annotated text itself is edited, including case-only changes, since text
+  is the literal anchor. Confirmed acceptable for now; revisit if it causes
+  enough accidental annotation loss.
+- **`<Ref-N>`-style chunk-granularity alignment gap** — see "Known
+  follow-up" above and [normalize-future.md](normalize-future.md). Not yet
+  hit in practice; low priority unless it actually breaks an annotation.

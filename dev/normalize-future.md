@@ -4,6 +4,21 @@ Found by diffing `normalize()` output for `data/markers.txt` against
 the source text (see `tts/examples/normalize_dump.rs`) and listening
 to the generated audio.
 
+## Chunk-granularity limitation: numbers nested in another pass's expansion
+
+Numbers/IDs nested inside a different pass's expansion (e.g. the `3` in
+`<Ref-3>` → `Ref 3`) don't get individually spelled out by the bare-number
+rule (Pass 7), since chunk granularity is per-expansion, not per-word — see
+[normalize.md](normalize.md)'s "Granularity is per-chunk" note. A chunk
+that's already been expanded by an earlier pass is treated as opaque by
+later scan-and-subdivide passes, so the `3` in `Ref 3` is invisible to
+Pass 7's bare-number scan.
+
+Not yet hit in practice (surfaced while reviewing `annotation.md`'s F5
+alignment work — see Stage 3 there) — worth knowing if a `<Ref-N>`-spanning
+annotation, or any future case relying on every bare number being spelled
+out for forced-alignment compatibility, ever fails to align because of this.
+
 ## A. Verify with unit tests first
 After units test past, verify by listening with authorship.txt sections
 - ✅ **Limit acronym letter-splitting to 3-letter acronyms.** "SID" ->

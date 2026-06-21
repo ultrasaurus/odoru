@@ -207,16 +207,27 @@ export class Player {
     }
   }
 
-  private _doSeek(index: number, wasPlaying: boolean): void {
+  /**
+   * `trimStartSecs` skips that many seconds off the front of `index`'s own
+   * samples before enqueuing (used by `listenTo` to start mid-segment, e.g.
+   * at the start of an annotated phrase rather than the sentence start).
+   * Later segments are unaffected.
+   */
+  private _doSeek(index: number, wasPlaying: boolean, trimStartSecs = 0): void {
     this.stopTracking()
     if (this.activeIndex >= 0) {
       this.segmentEls[this.activeIndex]?.classList.remove('active')
     }
     this.activeIndex = -1
-    this.seekOffset = this.segments[index].startTime
+    this.seekOffset = this.segments[index].startTime + trimStartSecs
     this.queue.reset()
     for (let i = index; i < this.segments.length; i++) {
-      this.queue.enqueue(this.segments[i].samples)
+      let samples = this.segments[i].samples
+      if (i === index && trimStartSecs > 0) {
+        const skipSamples = Math.round(trimStartSecs * 24000)
+        samples = samples.subarray(Math.min(skipSamples, samples.length))
+      }
+      this.queue.enqueue(samples)
     }
     this.highlightSegment(index)
     if (wasPlaying) {
@@ -265,14 +276,15 @@ export class Player {
   }
 
   /**
-   * Seek to the start of `segIndex` and play, stopping automatically when
+   * Seek into `segIndex` — at `startOffsetSecs` seconds in (default 0, i.e.
+   * the segment's own start) — and play, stopping automatically when
    * `endOffsetSecs` seconds into that segment have elapsed.
    * No-op if audio is not loaded or the segment is out of range.
    */
-  listenTo(segIndex: number, endOffsetSecs: number): void {
+  listenTo(segIndex: number, endOffsetSecs: number, startOffsetSecs = 0): void {
     if (!this.hasAudio || segIndex >= this.segments.length) return
     this.stopAt = this.segments[segIndex].startTime + endOffsetSecs
-    this._doSeek(segIndex, true)
+    this._doSeek(segIndex, true, startOffsetSecs)
   }
 
   get synthesizedWordCount(): number {
