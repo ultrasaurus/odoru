@@ -3991,7 +3991,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "num2words",
- "regex",
  "reqwest",
  "roman",
  "serde",

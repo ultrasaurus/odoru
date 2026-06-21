@@ -43,6 +43,12 @@ the repo root)
    and saves `vibe/data/<segment_name>_generated.wav`. No manual wait
    needed — it polls until the pod is ready.
 
+   Pass `--basedir <path>` to read/write somewhere other than
+   `vibe/data/` — useful if you're keeping more than one run of the
+   same segment around (e.g. comparing before/after a normalizer fix).
+   If you do have more than one, there's no marker for which is
+   "current" — say so explicitly each time.
+
 4. Check the AlignReport verdict before you even listen. Synthesize also
    writes `<segment_name>_transcript.json` and `<segment_name>_report.json`,
    and logs a one-line verdict:
@@ -89,6 +95,12 @@ For other documents in `odoru/data/`, pass the stem name:
 ```bash
 cargo run -- segment augment
 ```
+
+Pass `--basedir <path>` to write segments somewhere other than
+`vibe/data/` — e.g. to keep a previous run's segments/audio/transcripts
+intact while testing a new normalizer change on a fresh copy. If you
+have more than one run, there's no marker for which is "current" —
+always say which one you mean.
 
 ### 2. Start a pod
 

@@ -34,6 +34,22 @@ Decision: segment metadata lives in a **sidecar file** that Odoru's
 importer reads, not in Odoru's core document/voice-state schema. Odoru
 reads the sidecar if present and ignores it otherwise.
 
+### Basedir — which run directory is canonical
+
+Independent of this feature: `vibe/data/` currently mixes loose
+top-level `_segNN.txt` files with per-document directories
+(`authorship/`) that themselves contain multiple run subdirectories
+(`authorship-skips`, `authorship-full-doc-1`, `authorship segment
+tests`), with no marker for which one is the canonical/current output
+for that document.
+
+Resolution: no naming convention or pointer file. Both vibe (when
+writing the sidecar) and Odoru's importer (when reading it) take an
+explicit `--basedir <path>` argument naming the directory to operate
+on. There is no automatic "this is the current one" inference —
+the operator always says which directory they mean. Experimental/test
+run directories are simply never passed as a basedir to import.
+
 ## What's missing today
 
 1. No mapping from a segment's normalized text back to original-text
@@ -115,6 +131,7 @@ files:
 
 ```json
 {
+  "schema_version": "0.1",
   "source_document": "authorship.txt",
   "source_sha256": "3a7f...e91c",
   "voice_id": "vibevoice:default",
@@ -139,6 +156,10 @@ files:
 
 Notes on the fields:
 
+- `schema_version` starts at `"0.1"` — this format isn't proven yet.
+  Bump to `"1.0"` once import has been implemented end-to-end and a
+  document imported through it has actually been listened to in
+  Odoru.
 - `source_sha256` is a hash of the original document at split time.
   If the source is edited later, Odoru's importer can detect the
   mismatch and refuse/warn rather than import against a document that
@@ -164,6 +185,9 @@ Notes on the fields:
   fixed mapping table if vibe's naming and Odoru's catalog naming
   ever diverge — but the source of truth for *which voice rendered
   this* is always the sidecar, not an import-time argument.
+- `files.report` (`_report.json` — filtered/suspect word counts from
+  forced alignment) is intentionally not consumed by import. It's kept
+  for manual QA only; no design need yet to surface it programmatically.
 
 ## Caching assumption that doesn't hold for imported audio
 
@@ -199,6 +223,26 @@ Not building yet, but the import command's job, given the sidecar:
    exactly which span of text to re-normalize and re-synthesize if a
    segment is later re-run.
 
+## Re-running a single segment after import
+
+Not a CLI/API workflow yet — just manual steps for now:
+
+1. Identify the problem segment.
+2. Re-run it manually via vibe, regenerating that segment's
+   `_generated.wav`/`_transcript.json`/`_report.json` in place (the
+   sidecar's `sentences` only need updating if the segment's *text*
+   changed, not just its audio — most re-runs won't touch the sidecar
+   at all).
+3. `odoru import` gets a new option to import a single segment by
+   index — re-transcodes just that segment's audio, re-derives its
+   original-text word mapping from the refreshed transcript, and
+   overwrites only that segment's entries in the audio cache, leaving
+   every other segment untouched.
+4. Restart the Odoru server — its cache/document state is loaded at
+   startup, so a cache file overwritten on disk isn't picked up by a
+   running server. This is a known limitation, not something this
+   design solves.
+
 ## Open questions / deferred work
 
 ### Paragraph/sentence splits within a segment
@@ -208,6 +252,13 @@ monologues, e.g. Ulysses' Molly Bloom soliloquy at ~3,687 words in one
 sentence-ish span) need splitting for synthesis length limits, this
 will need its own design pass. The sidecar format above doesn't yet
 account for a segment boundary falling inside a sentence.
+
+### Multi-speaker text
+Sample segment text has a `Speaker 1: ` prefix per line. Not addressed
+here: whether that prefix is stripped before going into `Sentence.text`
+/normalization, and how a future multi-speaker document with different
+voices per speaker would map onto this design's single document-level
+`voice_id`. Left open.
 
 ### Normalized-to-original word mapping — solved for F5, reusable here
 This was an open problem when this doc was first drafted; it's since

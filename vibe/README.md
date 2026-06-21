@@ -61,6 +61,14 @@ done
 cargo run -- terminate-pod <pod_id>
 ```
 
+For a typical end-to-end workflow (multi-segment documents, listening,
+recording findings) see [dev/listen-test.md](dev/listen-test.md). For any
+command's full options (e.g. `--basedir`), use `--help`:
+
+```
+cargo run -- segment --help
+```
+
 ### vibe-service endpoints (on the pod)
 
 All requests except `/health` require `Authorization: Bearer <VIBE_SERVICE_SECRET>`.

@@ -66,11 +66,17 @@ enum Command {
     /// Normalize text (calls util::normalizer::normalize)
     Normalize { text: String },
     /// Split a document into TTS segments and write them as numbered files.
-    /// Reads vibe/data/<name>.txt, writes vibe/data/<name>_seg01.txt etc.
+    /// Reads <basedir>/<name>.txt, writes <basedir>/<name>_seg01.txt etc.
     /// with Speaker 1: prefix per paragraph.
     Segment {
-        /// Stem of vibe/data/<name>.txt (no extension)
+        /// Stem of <basedir>/<name>.txt (no extension)
         name: String,
+        /// Directory for segment output (default: vibe/data). Use this to
+        /// keep separate synthesis runs for the same document apart — if
+        /// more than one exists there's no marker for which is "current",
+        /// so the caller always names the one they mean.
+        #[arg(long)]
+        basedir: Option<String>,
     },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
@@ -102,19 +108,27 @@ enum Command {
         /// Override the service port (default: 3000)
         #[arg(long, default_value_t = 3000)]
         port: u16,
+        /// Directory holding the segment file and where output (wav,
+        /// normalized text, transcript, report) is written (default:
+        /// vibe/data). Use this to keep separate synthesis runs for the
+        /// same document apart — if more than one exists there's no
+        /// marker for which is "current", so the caller always names
+        /// the one they mean.
+        #[arg(long)]
+        basedir: Option<String>,
     },
 }
 
 /// What to synthesize: a pre-split segment file or a whole document.
 #[derive(Subcommand)]
 enum SynthInput {
-    /// Synthesize a pre-split segment file: reads vibe/data/<name>.txt.
+    /// Synthesize a pre-split segment file: reads <basedir>/<name>.txt.
     Segment {
-        /// Stem of vibe/data/<name>.txt (no extension, e.g. authorship_seg01)
+        /// Stem of <basedir>/<name>.txt (no extension, e.g. authorship_seg01)
         name: String,
     },
     /// Segment a whole document and synthesize each part in sequence.
-    /// Reads vibe/data/<name>.txt, writes vibe/data/<name>_seg*.txt, then
+    /// Reads <basedir>/<name>.txt, writes <basedir>/<name>_seg*.txt, then
     /// synthesizes each segment in order.
     Doc {
         /// Stem of vibe/data/<name>.txt (no extension, e.g. authorship)
@@ -376,11 +390,12 @@ async fn main() -> Result<()> {
         Command::Normalize { text } => {
             println!("{}", util::normalizer::normalize(&text));
         }
-        Command::Segment { name } => {
+        Command::Segment { name, basedir } => {
             // Source documents live in the workspace data/ dir (odoru/data/).
-            // Segment files are written to vibe/data/ for synthesis.
+            // Segment files are written to --basedir (default: vibe/data).
             let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
-            let seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let seg_dir = basedir.as_deref().unwrap_or(default_seg_dir);
             let input_path = format!("{src_dir}/{name}.txt");
             let text = std::fs::read_to_string(&input_path)
                 .with_context(|| format!("reading {input_path}"))?;
@@ -406,6 +421,7 @@ async fn main() -> Result<()> {
             seed,
             gpu_price,
             port,
+            basedir,
         } => {
             let name = match &input {
                 SynthInput::Segment { name } => name.clone(),
@@ -413,7 +429,8 @@ async fn main() -> Result<()> {
                     anyhow::bail!("synthesize doc is not yet implemented — run `segment <name>` first, then synthesize each segment");
                 }
             };
-            let data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let default_data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+            let data_dir = basedir.as_deref().unwrap_or(default_data_dir);
             let input_path = format!("{data_dir}/{name}.txt");
             let normalized_path = format!("{data_dir}/{name}_normalized.txt");
             let wav_path = format!("{data_dir}/{name}_generated.wav");
