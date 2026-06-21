@@ -91,6 +91,20 @@ enum Command {
         #[arg(long)]
         basedir: Option<String>,
     },
+    /// Regenerate `<basedir>/<name>.segments.json` from whatever
+    /// <name>_segNN.txt files currently exist on disk, instead of from
+    /// `segment`'s original split. Use after hand-editing segment files
+    /// (e.g. testing a segmenter fix) to get a sidecar that matches
+    /// reality without re-running `segment` and losing recorded synthesis
+    /// output for untouched segments.
+    SegmentsFromFiles {
+        /// Stem of <basedir>/<name>.txt (no extension)
+        name: String,
+        /// Directory holding the segment files and sidecar (default:
+        /// vibe/data). Use the same --basedir you used for `segment`.
+        #[arg(long)]
+        basedir: Option<String>,
+    },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
         wav_path: String,
@@ -390,6 +404,9 @@ async fn main() -> Result<()> {
         }
         Command::Summary { name, basedir } => {
             segment::summary(&name, basedir.as_deref())?;
+        }
+        Command::SegmentsFromFiles { name, basedir } => {
+            segment::segments_from_files(&name, basedir.as_deref())?;
         }
         Command::Synthesize {
             input,

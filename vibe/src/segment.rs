@@ -31,7 +31,7 @@ pub struct SidecarSentence {
     pub paragraph_end: bool,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SidecarFiles {
     pub original: Option<String>,
     pub normalized: Option<String>,
@@ -288,6 +288,106 @@ pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
             missing.join(", ")
         );
     }
+    Ok(())
+}
+
+/// Regenerate `<basedir>/<name>.segments.json` from whatever
+/// `<name>_segNN.txt` files currently exist on disk, instead of from
+/// `segment`'s original split. Lets you hand-edit segment files (e.g. to
+/// test a segmenter fix by re-splitting paragraphs differently) and get a
+/// sidecar that matches reality, without re-running `segment` — which would
+/// also discard every segment's recorded synthesis output.
+///
+/// Preserves each segment's `files.audio`/`normalized`/`transcript`/
+/// `report` from the existing sidecar by index — only the sentence
+/// structure is recomputed. Segments you didn't touch keep their recorded
+/// output; segments you changed will look "done" with a stale audio/report
+/// pairing until you re-run `synthesize` for them (use `summary` to see
+/// what's missing first, but staleness from edits isn't tracked).
+pub fn segments_from_files(name: &str, basedir: Option<&str>) -> Result<()> {
+    let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+    let seg_dir = basedir.unwrap_or(default_seg_dir);
+
+    let existing: Option<Sidecar> = std::fs::read_to_string(format!("{seg_dir}/{name}.segments.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let existing_files: std::collections::HashMap<u32, SidecarFiles> = existing
+        .as_ref()
+        .map(|s| {
+            s.segments
+                .iter()
+                .map(|seg| {
+                    (
+                        seg.index,
+                        SidecarFiles {
+                            original: seg.files.original.clone(),
+                            normalized: seg.files.normalized.clone(),
+                            audio: seg.files.audio.clone(),
+                            transcript: seg.files.transcript.clone(),
+                            report: seg.files.report.clone(),
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let voice_id = existing.as_ref().and_then(|s| s.voice_id.clone());
+    let source_sha256 = existing.as_ref().map(|s| s.source_sha256.clone()).unwrap_or_default();
+
+    let prefix = format!("{name}_seg");
+    let mut indices: Vec<u32> = std::fs::read_dir(seg_dir)
+        .with_context(|| format!("reading dir {seg_dir}"))?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_str()?;
+            let stem = file_name.strip_suffix(".txt")?;
+            let rest = stem.strip_prefix(&prefix)?;
+            rest.parse::<u32>().ok()
+        })
+        .collect();
+    indices.sort_unstable();
+
+    if indices.is_empty() {
+        anyhow::bail!("no {prefix}NN.txt files found in {seg_dir}");
+    }
+
+    let segments: Vec<SidecarSegment> = indices
+        .into_iter()
+        .map(|index| {
+            let seg_name = format!("{name}_seg{index:02}");
+            let seg_path = format!("{seg_dir}/{seg_name}.txt");
+            let content = std::fs::read_to_string(&seg_path)
+                .with_context(|| format!("reading {seg_path}"))?;
+            let paragraphs: Vec<String> = content
+                .lines()
+                .filter_map(|line| line.strip_prefix("Speaker 1: "))
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty())
+                .collect();
+            let files = existing_files.get(&index).cloned().unwrap_or_else(|| SidecarFiles {
+                original: Some(format!("{seg_name}.txt")),
+                ..Default::default()
+            });
+            Ok(SidecarSegment { index, sentences: sentences_for_segment(&paragraphs), files })
+        })
+        .collect::<Result<_>>()?;
+
+    let sidecar = Sidecar {
+        schema_version: SCHEMA_VERSION.to_string(),
+        source_document: format!("{name}.txt"),
+        source_sha256,
+        voice_id,
+        segments,
+    };
+
+    let sidecar_path = format!("{seg_dir}/{name}.segments.json");
+    let count = sidecar.segments.len();
+    let sidecar_json = serde_json::to_string_pretty(&sidecar).context("serializing sidecar")?;
+    std::fs::write(&sidecar_path, sidecar_json + "\n")
+        .with_context(|| format!("writing {sidecar_path}"))?;
+    info!("wrote {sidecar_path} from {count} segment file(s) found in {seg_dir}");
+
     Ok(())
 }
 
