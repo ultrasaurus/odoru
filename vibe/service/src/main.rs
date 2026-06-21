@@ -3,8 +3,9 @@ mod watchdog;
 use anyhow::Result;
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -497,6 +498,16 @@ fn query_gpu_info() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Resets the idle watchdog's timer on every request — status polls and
+/// result downloads count as activity too, not just the inference job
+/// itself. Without this, the watchdog could stop the pod while a client is
+/// still mid-download right after a job finishes, since only `run_job`
+/// touched the tracker before.
+async fn touch_activity(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    state.tracker.touch();
+    next.run(request).await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -534,6 +545,7 @@ async fn main() -> Result<()> {
         .route("/jobs/:job_id/transcript", get(get_job_transcript_handler))
         .route("/jobs/:job_id/report", get(get_job_report_handler))
         .route("/log/:request_id", get(log_handler))
+        .layer(middleware::from_fn_with_state(state.clone(), touch_activity))
         .with_state(state);
 
     let addr = "0.0.0.0:3000";

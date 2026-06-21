@@ -18,3 +18,4 @@ pub mod documents;
 pub mod index;
 pub mod slug;
 pub mod export;
+pub mod segment_types;

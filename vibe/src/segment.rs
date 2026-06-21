@@ -1,44 +1,10 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
+use util::segment_types::{Sidecar, SidecarFiles, SidecarSegment, SidecarSentence};
 
 const SCHEMA_VERSION: &str = "0.1";
-
-/// `<basedir>/<name>.segments.json` — see `vibe/dev/odoru-import-prep.md` for the
-/// full design. Vibe writes the `sentences`/`files.original` parts of this at
-/// split time; `synthesize` fills in `files.normalized`/`audio`/`transcript`/
-/// `report` and `voice_id` per segment as each one is rendered.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct Sidecar {
-    pub schema_version: String,
-    pub source_document: String,
-    pub source_sha256: String,
-    pub voice_id: Option<String>,
-    pub segments: Vec<SidecarSegment>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SidecarSegment {
-    pub index: u32,
-    pub sentences: Vec<SidecarSentence>,
-    pub files: SidecarFiles,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct SidecarSentence {
-    pub text: String,
-    pub paragraph_end: bool,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SidecarFiles {
-    pub original: Option<String>,
-    pub normalized: Option<String>,
-    pub audio: Option<String>,
-    pub transcript: Option<String>,
-    pub report: Option<String>,
-}
 
 /// `<segment_name>_report.json`, as written by `synthesize` after each
 /// segment's forced-alignment QA pass.
