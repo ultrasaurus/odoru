@@ -1,4 +1,4 @@
-# Design: importing vibe output into Odoru
+# Design: prep for importing vibe output into Odoru
 
 ## Goal
 Preserve vibe's per-segment synthesis output (audio + word timestamps)

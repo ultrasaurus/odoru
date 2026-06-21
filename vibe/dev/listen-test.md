@@ -47,7 +47,18 @@ the repo root)
    `vibe/data/` — useful if you're keeping more than one run of the
    same segment around (e.g. comparing before/after a normalizer fix).
    If you do have more than one, there's no marker for which is
-   "current" — say so explicitly each time.
+   "current" — say so explicitly each time. **Use the same `--basedir`
+   you used for `segment` in step 1** — synthesize reads the segment's
+   `.txt` file from that directory, so a mismatch means it simply won't
+   find the input.
+
+   If a sidecar (`<docname>.segments.json`, see
+   [dev/odoru-import.md](odoru-import.md)) exists in that directory,
+   synthesize also fills in that segment's audio/transcript file
+   references and records the voice used. If there's no matching
+   sidecar — e.g. testing an ad hoc segment file not produced via
+   `segment` — it logs a warning and skips the update; that's expected,
+   not a failure.
 
 4. Check the AlignReport verdict before you even listen. Synthesize also
    writes `<segment_name>_transcript.json` and `<segment_name>_report.json`,
@@ -85,7 +96,10 @@ regenerate segment files. Run from `vibe/`:
 cargo run -- segment authorship
 ```
 
-Output: `vibe/data/authorship_seg01.txt` … `authorship_segNN.txt`
+Output: `vibe/data/authorship_seg01.txt` … `authorship_segNN.txt`, plus
+`vibe/data/authorship.segments.json` (the sidecar — sentence/paragraph
+structure for each segment, filled in further as each segment is
+synthesized; see [dev/odoru-import.md](odoru-import.md)).
 
 Segments are 50–250 words each, split at paragraph boundaries. Long inline
 quotes (≥12 words) and parenthetical asides (≥12 words) are broken out as
@@ -98,9 +112,13 @@ cargo run -- segment augment
 
 Pass `--basedir <path>` to write segments somewhere other than
 `vibe/data/` — e.g. to keep a previous run's segments/audio/transcripts
-intact while testing a new normalizer change on a fresh copy. If you
-have more than one run, there's no marker for which is "current" —
-always say which one you mean.
+intact while testing a new normalizer change on a fresh copy, or to do
+a full re-render of a document after normalizer/segmenting changes
+without disturbing an older run kept around for comparison (e.g.
+`vibe/data/authorship/authorship-2026-06-21`). If you have more than
+one run, there's no marker for which is "current" — always say which
+one you mean, and **use the same `--basedir` for every `synthesize`
+call in step 3** so the sidecar and audio end up in the same place.
 
 ### 2. Start a pod
 
