@@ -23,6 +23,35 @@ enum Command {
     Fetch(FetchArgs),
     /// Export published documents as a standalone static SPA
     Spa(SpaArgs),
+    /// Import content from various sources into Odoru's document/audio store
+    Import(ImportArgs),
+}
+
+#[derive(Parser)]
+struct ImportArgs {
+    #[command(subcommand)]
+    command: ImportCommand,
+}
+
+#[derive(Subcommand)]
+enum ImportCommand {
+    /// Fetch a URL into Odoru's document store, printing the resulting
+    /// document id (see dev/cli-import.md)
+    Fetch(ImportFetchArgs),
+}
+
+#[derive(Parser)]
+struct ImportFetchArgs {
+    /// URL to fetch
+    url: String,
+
+    /// Skip the document cache — always fetch and overwrite
+    #[arg(long)]
+    no_cache: bool,
+
+    /// Print the result as JSON instead of human-readable text
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Parser)]
@@ -182,6 +211,56 @@ fn build_backend(backend: AudioBackend, voice: Option<&str>) -> anyhow::Result<(
     }
 }
 
+/// Fetch a URL into Odoru's document store, cache-aware (scans existing
+/// documents for a matching `source_url` unless `no_cache`), returning the
+/// parsed article and the resulting document id.
+fn fetch_url_to_document(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, String)> {
+    if !no_cache {
+        let docs = documents::list_all()?;
+        if let Some(hit) = docs.into_iter().find(|d| d.source_url.as_deref() == Some(input)) {
+            if hit.status == documents::FetchStatus::Ready {
+                if let Some(full) = documents::lookup_by_id(&hit.id)? {
+                    let article = ParsedArticle {
+                        url: full.source_url.unwrap_or_else(|| input.to_string()),
+                        title: full.title,
+                        authors: full.authors,
+                        date: full.date,
+                        description: full.description,
+                        content: full.content,
+                        plain_text: full.plain_text,
+                    };
+                    return Ok((article, hit.id));
+                }
+            }
+        }
+    }
+
+    // Cache miss or --no-cache: fetch and store.
+    let html = dl::fetch::fetch(input)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let content_hash = html_content_hash(&html);
+    let article = dl::extract(&html, input)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let id = documents::create_fetching(Some(input))?;
+    if let Err(e) = documents::store_ready(
+        &id,
+        Some(input),
+        article.title.as_deref(),
+        &article.authors,
+        article.date.as_deref(),
+        article.description.as_deref(),
+        &article.content,
+        &article.plain_text,
+        &html,
+        &content_hash,
+    ) {
+        eprintln!("Warning: failed to store document: {e}");
+    }
+
+    Ok((article, id))
+}
+
 /// Load article content from a local file or URL.
 ///
 /// Local files: `.txt` (read directly), `.md` (read directly, plain text
@@ -241,51 +320,7 @@ fn load_input(input: &str, no_cache: bool) -> anyhow::Result<(ParsedArticle, Opt
             ),
         }
     } else if input.starts_with("http://") || input.starts_with("https://") {
-        // Check document store first (scan for matching source_url).
-        if !no_cache {
-            let docs = documents::list_all()?;
-            if let Some(hit) = docs.into_iter().find(|d| d.source_url.as_deref() == Some(input)) {
-                if hit.status == documents::FetchStatus::Ready {
-                    // Re-read with content.
-                    if let Some(full) = documents::lookup_by_id(&hit.id)? {
-                        let article = ParsedArticle {
-                            url: full.source_url.unwrap_or_else(|| input.to_string()),
-                            title: full.title,
-                            authors: full.authors,
-                            date: full.date,
-                            description: full.description,
-                            content: full.content,
-                            plain_text: full.plain_text,
-                        };
-                        return Ok((article, None));
-                    }
-                }
-            }
-        }
-
-        // Cache miss or --no-cache: fetch and store.
-        let html = dl::fetch::fetch(input)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        let content_hash = html_content_hash(&html);
-        let article = dl::extract(&html, input)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-        let id = documents::create_fetching(Some(input))?;
-        if let Err(e) = documents::store_ready(
-            &id,
-            Some(input),
-            article.title.as_deref(),
-            &article.authors,
-            article.date.as_deref(),
-            article.description.as_deref(),
-            &article.content,
-            &article.plain_text,
-            &html,
-            &content_hash,
-        ) {
-            eprintln!("Warning: failed to store document: {e}");
-        }
-
+        let (article, _id) = fetch_url_to_document(input, no_cache)?;
         Ok((article, None))
     } else {
         anyhow::bail!("'{}' is not an existing file and does not look like a URL (expected http:// or https://)", input)
@@ -327,7 +362,35 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Fetch(args) => run_fetch(args).await,
         Command::Spa(args) => run_spa(args),
+        Command::Import(args) => run_import(args).await,
     }
+}
+
+async fn run_import(args: ImportArgs) -> anyhow::Result<()> {
+    match args.command {
+        ImportCommand::Fetch(fetch_args) => run_import_fetch(fetch_args).await,
+    }
+}
+
+async fn run_import_fetch(args: ImportFetchArgs) -> anyhow::Result<()> {
+    if !(args.url.starts_with("http://") || args.url.starts_with("https://")) {
+        anyhow::bail!(
+            "'{}' does not look like a URL (expected http:// or https://)",
+            args.url
+        );
+    }
+
+    let url = args.url.clone();
+    let no_cache = args.no_cache;
+    let (_article, id) = tokio::task::spawn_blocking(move || fetch_url_to_document(&url, no_cache))
+        .await??;
+
+    if args.json {
+        println!("{}", serde_json::json!({ "id": id }));
+    } else {
+        println!("doc id: {id}");
+    }
+    Ok(())
 }
 
 async fn run_fetch(args: FetchArgs) -> anyhow::Result<()> {
