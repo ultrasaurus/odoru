@@ -1130,16 +1130,39 @@ mod tests {
         }
     }
 
+    // Writes a minimal fixture voice dir so F5 tests don't depend on the
+    // repo's real voices/ directory (whose contents change over time).
+    fn write_f5_voice_fixture(dir: &std::path::Path, name: &str) {
+        let voice_dir = dir.join(name);
+        std::fs::create_dir(&voice_dir).unwrap();
+        std::fs::write(voice_dir.join("voice.md"), "---\ntranscript: \"Hi.\"\n---\n").unwrap();
+        std::fs::write(voice_dir.join("ref.wav"), b"").unwrap();
+    }
+
     #[test]
-    fn build_backend_f5_loads_sarah_voice() {
-        let (backend, voice_name) = build_backend(AudioBackend::F5, None).unwrap();
-        assert_eq!(voice_name, "f5-am-puck"); // first alphabetically
+    fn build_backend_f5_loads_first_voice_alphabetically() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        write_f5_voice_fixture(dir.path(), "sarah");
+        write_f5_voice_fixture(dir.path(), "alice");
+        std::env::set_var("VOICES_DIR", dir.path());
+        let result = build_backend(AudioBackend::F5, None);
+        std::env::remove_var("VOICES_DIR");
+        let (backend, voice_name) = result.unwrap();
+        assert_eq!(voice_name, "alice"); // first alphabetically
         let _ = backend; // just check it doesn't error
     }
 
     #[test]
     fn build_backend_f5_selects_named_voice() {
-        let (backend, voice_name) = build_backend(AudioBackend::F5, Some("sarah")).unwrap();
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        write_f5_voice_fixture(dir.path(), "sarah");
+        write_f5_voice_fixture(dir.path(), "alice");
+        std::env::set_var("VOICES_DIR", dir.path());
+        let result = build_backend(AudioBackend::F5, Some("sarah"));
+        std::env::remove_var("VOICES_DIR");
+        let (backend, voice_name) = result.unwrap();
         assert_eq!(voice_name, "sarah");
         match backend {
             tts::Backend::F5Tts { voices, .. } => {
@@ -1154,7 +1177,12 @@ mod tests {
 
     #[test]
     fn build_backend_f5_unknown_voice_errors() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        write_f5_voice_fixture(dir.path(), "sarah");
+        std::env::set_var("VOICES_DIR", dir.path());
         let result = build_backend(AudioBackend::F5, Some("nobody"));
+        std::env::remove_var("VOICES_DIR");
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("nobody"));
