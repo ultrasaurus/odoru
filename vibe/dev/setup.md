@@ -179,8 +179,25 @@ full GPU performance data.
 - Repo: https://github.com/vibevoice-community/VibeVoice
 - Commit pinned in Dockerfile: `07cb79feadd2d3fd7f47530d4c964a12857936a0`
 - Reference voice: `voices/sarah/ref.wav` (copied into image as
-  `en-Sarah_woman.wav`)
+  `en-Sarah_woman.wav`). Only do this for voices you're OK shipping in the
+  public `dockersaura/vibe` image — for personal/private reference voices,
+  use `vibe upload-voice` instead (see below).
 - cfg_scale: 1.3 (default in CLI; 2.0 introduced artifacts on longer
   segments)
 - Models pre-baked in image: `vibevoice/VibeVoice-1.5B` and
   `Qwen/Qwen2.5-1.5B` (each in their own Docker layer for cache efficiency)
+
+### Using a personal/private reference voice
+
+Don't bake personal reference audio into the Docker image — it's public on
+Docker Hub. Instead, upload it to a running pod at runtime:
+
+```bash
+cargo run -- upload-voice <pod_id> Andy man voices/andy/ref.wav
+```
+
+This sends the wav straight to vibe-service, which writes it as
+`en-Andy_man.wav` in VibeVoice's voices directory — the same naming
+convention as the baked-in voices, so `--speaker Andy` on `synthesize`
+picks it up immediately. It only persists for the pod's lifetime; re-upload
+after creating a new pod.

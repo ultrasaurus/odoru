@@ -113,6 +113,39 @@ async fn log_handler(
     }
 }
 
+/// Upload a reference voice wav for VibeVoice to use, without baking it
+/// into the (public) Docker image. Persists only for the pod's lifetime —
+/// re-upload after creating a new pod. Written as
+/// `en-<name>_<gender>.wav`, matching VibeVoice's own naming convention
+/// (e.g. `en-Sarah_woman.wav`), so `--speaker_names <name>` resolves it.
+async fn upload_voice_handler(
+    State(state): State<AppState>,
+    Path((name, gender)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let valid_segment = |s: &str| !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric());
+    if !valid_segment(&name) || !valid_segment(&gender) {
+        return (StatusCode::BAD_REQUEST, "name and gender must be non-empty alphanumeric").into_response();
+    }
+
+    let path = format!("/workspace/VibeVoice/demo/voices/en-{name}_{gender}.wav");
+    match tokio::fs::write(&path, &body).await {
+        Ok(()) => {
+            info!(name = %name, gender = %gender, bytes = body.len(), "uploaded voice to {path}");
+            StatusCode::OK.into_response()
+        }
+        Err(e) => {
+            warn!("writing {path}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 async fn create_job_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -545,6 +578,7 @@ async fn main() -> Result<()> {
         .route("/jobs/:job_id/transcript", get(get_job_transcript_handler))
         .route("/jobs/:job_id/report", get(get_job_report_handler))
         .route("/log/:request_id", get(log_handler))
+        .route("/voices/:name/:gender", post(upload_voice_handler))
         .layer(middleware::from_fn_with_state(state.clone(), touch_activity))
         .with_state(state);
 

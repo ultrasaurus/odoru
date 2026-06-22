@@ -105,6 +105,20 @@ enum Command {
         #[arg(long)]
         basedir: Option<String>,
     },
+    /// Upload a reference voice wav to a running pod's vibe-service,
+    /// without baking it into the (public) Docker image. Persists only
+    /// for the pod's lifetime — re-upload after creating a new pod.
+    UploadVoice {
+        pod_id: String,
+        /// Voice name (e.g. "Andy") — pass as --speaker to synthesize afterward.
+        name: String,
+        /// Voice descriptor matching VibeVoice's filename convention, e.g. "man" or "woman".
+        gender: String,
+        /// Local path to the reference wav file.
+        wav_path: String,
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+    },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
         wav_path: String,
@@ -312,6 +326,38 @@ async fn main() -> Result<()> {
         Command::TerminatePod { pod_id } => {
             client.terminate_pod(&pod_id).await?;
             info!("Terminated pod {pod_id}");
+        }
+        Command::UploadVoice { pod_id, name, gender, wav_path, port } => {
+            let bytes = std::fs::read(&wav_path).with_context(|| format!("reading {wav_path}"))?;
+            info!("uploading {wav_path} ({} bytes) as voice {name}/{gender}", bytes.len());
+
+            let proxy_base_url = format!("https://{pod_id}-{port}.proxy.runpod.net");
+            let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
+            let http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()?;
+
+            info!("waiting for vibe-service at {proxy_base_url}/health ...");
+            loop {
+                match http.get(format!("{proxy_base_url}/health")).send().await {
+                    Ok(r) if r.status().is_success() => break,
+                    Ok(r) => info!("health: HTTP {} — retrying", r.status()),
+                    Err(e) => info!("health: {e} — retrying"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+
+            let mut req = http.post(format!("{proxy_base_url}/voices/{name}/{gender}")).body(bytes);
+            if let Some(ref s) = secret {
+                req = req.bearer_auth(s);
+            }
+            let resp = req.send().await.context("POST /voices")?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("upload failed: HTTP {status} {body}");
+            }
+            info!("uploaded voice {name}/{gender} — pass --speaker {name} to synthesize");
         }
         Command::Ssh { pod_id } => {
             let pod = client.get_pod(&pod_id).await?;
