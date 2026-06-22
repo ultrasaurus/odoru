@@ -44,6 +44,14 @@ FROM chef AS builder
 ENV CUDA_COMPUTE_CAP=86
 
 COPY --from=planner /build/vibe/service/recipe.json vibe/service/recipe.json
+# cargo chef cook needs the workspace's manifest tree (not just recipe.json)
+# to resolve the workspace before building stub crates — vibe's workspace has
+# a path dependency on ../util, so that manifest is needed too. Manifests
+# only, no source, so source edits don't bust this cached layer.
+COPY vibe/Cargo.toml vibe/Cargo.toml
+COPY vibe/Cargo.lock vibe/Cargo.lock
+COPY vibe/service/Cargo.toml vibe/service/Cargo.toml
+COPY util/Cargo.toml util/Cargo.toml
 RUN cd vibe/service && cargo chef cook --release \
     --recipe-path recipe.json \
     --features cuda
