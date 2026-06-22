@@ -20,23 +20,40 @@ the repo root)
     source vibe/.env
     ```
 
-2. Check whether a pod is already running:
-   ```
-   cargo run -- list-pods
-   ```
+2. Starting a pod
    
-   Look for vibe pods with `"desiredStatus": "RUNNING"`. If so, check with the
-   team if anyone is running a job, otherwise there may be an error to 
-   investigate. (Idle pods should stop on their own within 3 mins.)
+   * **A.** Check whether a pod is already running   
+      In odoru/vibe directory:
+      ```
+      cargo run -- list-pods
+      ```
+      
+      Look for vibe pods with `"desiredStatus":    "RUNNING"`. If so, check with the
+      team if anyone is running a job, otherwise    there may be an error to 
+      investigate. (Idle pods should stop on their    own within 3 mins.)
    
-   Once RunPod state is confirmed, start a new pod:
-   ```
-   cargo run -- new-pod gpu e6qma5uqam
-   ```
-   Note the pod ID and GPU price printed.
+   * **B.** Once RunPod state is confirmed, start a new pod:
+       ```
+       cargo run -- new-pod gpu e6qma5uqam
+       ```
+       Note the pod ID and GPU price printed.
+
+   * **C.** Check for status of pod
+   
+      ```bash
+      POD=<pod-id>
+      curl -f https://${POD}-3000.proxy.runpod.net/health
+      ```
+      it will return 404, until the proxy is connected, then it should   return
+      JSON with `status: ready` -- any other status means the pod is   running, but
+      there was a failure in the vibe service.
+  
+      ```json
+      { "gpu": "NVIDIA GeForce RTX 3090, 24576 MiB", "status": "ready" }
+      ```
 
 3. Synthesize the segment:
-   ```
+   ```bash
    cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> segment <segment_name>
    ```
    This normalizes `vibe/data/<segment_name>.txt`, sends it to the pod,
@@ -93,22 +110,20 @@ If segment files don't exist yet or the document/segmenting has changed,
 regenerate segment files. Run from `vibe/`:
 
 ```bash
-cargo run -- segment authorship
+cargo run -- segment --basedir <targetdir> <basefilename>
 ```
+basedir: we typically create a folder named <basefilname> with
+subfolder <basefilename-date>
 
-Output: `vibe/data/authorship_seg01.txt` … `authorship_segNN.txt`, plus
-`vibe/data/authorship.segments.json` (the sidecar — sentence/paragraph
-structure for each segment, filled in further as each segment is
-synthesized; see [dev/odoru-import-prep.md](odoru-import-prep.md)).
+Sample Output: `vibe/data/authorship/authorship-2026-06-22/authorship_seg01.txt`
+ … `authorship_segNN.txt`, plus
+`vibe/data/authorship/authorship-2026-06-22/authorship.segments.json` 
+(the sidecar — sentence/paragraph structure for each segment, filled in further
+as each segment is synthesized; see [dev/odoru-import-prep.md](odoru-import-prep.md)).
 
-Segments are 50–250 words each, split at paragraph boundaries.
+Segments are 50–200 words each, split at paragraph boundaries.
 
-For other documents in `odoru/data/`, pass the stem name:
-```bash
-cargo run -- segment augment
-```
-
-Pass `--basedir <path>` to write segments somewhere other than
+Important: Always pass `--basedir <path>` to write segments somewhere other than
 `vibe/data/` — e.g. to keep a previous run's segments/audio/transcripts
 intact while testing a new normalizer change on a fresh copy, or to do
 a full re-render of a document after normalizer/segmenting changes
@@ -116,21 +131,22 @@ without disturbing an older run kept around for comparison (e.g.
 `vibe/data/authorship/authorship-2026-06-21`). If you have more than
 one run, there's no marker for which is "current" — always say which
 one you mean, and **use the same `--basedir` for every `synthesize`
-call in step 3** so the sidecar and audio end up in the same place.
+call the sidecar and audio end up in the same place.
 
 ### 2. Start a pod
 
-```bash
-cargo run -- new-pod gpu e6qma5uqam
-```
-
-Note the pod ID and price. Requires ≥24GB VRAM — enforced automatically.
+   see step 2 "Starting a pod" above -- make sure to check /health before
+   continuing
 
 ### 3. Synthesize all segments
 
 ```bash
+POD=<pod-id>
+GPU_PRICE=<price> 
+BASEDIR=<path>
+BASENAME=<file-basename>
 for seg in seg01 seg02 seg03 ...; do
-  cargo run -- synthesize <pod_id> --seed 71463 --gpu-price <price> --basedir <path> segment authorship_$seg
+  cargo run -- synthesize $POD --seed 71463 --gpu-price $GPU_PRICE --basedir $BASEDIR segment ${BASENAME}_${seg}
 done
 ```
 
@@ -156,16 +172,19 @@ a retry loop.
 ### 4. Stitch segments into one file
 
 ```bash
-cd vibe/data
-printf "file '%s'\n" authorship_seg01_generated.wav authorship_seg02_generated.wav ... > authorship_concat_list.txt
-ffmpeg -y -f concat -safe 0 -i authorship_concat_list.txt -acodec copy authorship_stitched.wav
+cd $BASEDIR
+printf "file '%s'\n" *_generated.wav > ${BASENAME}_concat_list.txt
+ffmpeg -y -f concat -safe 0 -i ${BASENAME}_concat_list.txt -acodec copy ${BASENAME}_stitched.wav
 ```
+
+The `printf` glob (portable bash/zsh) matches only `*_generated.wav`, not
+the `_stitched.wav` output itself if you re-run this.
 
 ### 5. Listen and record findings
 
-Listen to `vibe/data/authorship_stitched.wav` or individual segment wavs.
+Listen to `${BASENAME}_stitched.wav` or individual segment wavs.
 For each problem: note the segment, what the text says, and what was heard.
-Add findings to `dev/normalize-future.md`.
+If artifacts are found create a file `vibe/dev/artifact-${BASENAME}.md`
 
 ### 6. Verify logs and terminate the pod
 

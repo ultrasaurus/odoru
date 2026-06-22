@@ -111,6 +111,11 @@ for now, you need to specify which backend to build
 ODORU_BACKEND=f5 cargo run -p app
 ```
 
+or for both:
+```bash
+ODORU_BACKEND=both cargo run -p app
+```
+
 ## Known Issues
 
 In general, if anything works, consider it a happy surprise.
