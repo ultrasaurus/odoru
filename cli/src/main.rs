@@ -25,6 +25,33 @@ enum Command {
     Spa(SpaArgs),
     /// Import content from various sources into Odoru's document/audio store
     Import(ImportArgs),
+    /// Write a document's current text to a file (see dev/cli-import.md)
+    Export(ExportArgs),
+    /// Read a file back into a document, replacing its content/plain_text
+    /// (see dev/cli-import.md)
+    Edit(EditArgs),
+}
+
+#[derive(Parser)]
+struct ExportArgs {
+    /// Document id to export
+    doc_id: String,
+    /// File path to write
+    path: std::path::PathBuf,
+    /// Which text to export: plain_text (default) or markdown content
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+}
+
+#[derive(Parser)]
+struct EditArgs {
+    /// Document id to update
+    doc_id: String,
+    /// File path to read
+    path: std::path::PathBuf,
+    /// Whether the file is plain text (default) or markdown
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
 }
 
 #[derive(Parser)]
@@ -363,7 +390,45 @@ async fn main() -> anyhow::Result<()> {
         Command::Fetch(args) => run_fetch(args).await,
         Command::Spa(args) => run_spa(args),
         Command::Import(args) => run_import(args).await,
+        Command::Export(args) => run_export(args),
+        Command::Edit(args) => run_edit(args),
     }
+}
+
+fn run_export(args: ExportArgs) -> anyhow::Result<()> {
+    let doc = documents::lookup_by_id(&args.doc_id)
+        .with_context(|| format!("looking up document {}", args.doc_id))?
+        .ok_or_else(|| anyhow::anyhow!("no document found with id {}", args.doc_id))?;
+
+    let text = match args.format {
+        Format::Text => &doc.plain_text,
+        Format::Markdown => &doc.content,
+    };
+
+    std::fs::write(&args.path, text)
+        .with_context(|| format!("writing {}", args.path.display()))?;
+
+    println!("wrote {}", args.path.display());
+    Ok(())
+}
+
+fn run_edit(args: EditArgs) -> anyhow::Result<()> {
+    let file_text = std::fs::read_to_string(&args.path)
+        .with_context(|| format!("reading {}", args.path.display()))?;
+
+    let (content, plain_text) = match args.format {
+        Format::Text => (file_text.clone(), file_text),
+        Format::Markdown => {
+            let plain_text = tts::markdown::to_plain_text(&file_text);
+            (file_text, plain_text)
+        }
+    };
+
+    documents::update_content(&args.doc_id, &content, &plain_text)
+        .with_context(|| format!("updating document {}", args.doc_id))?;
+
+    println!("updated doc id: {}", args.doc_id);
+    Ok(())
 }
 
 async fn run_import(args: ImportArgs) -> anyhow::Result<()> {
