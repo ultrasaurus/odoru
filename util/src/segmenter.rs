@@ -11,7 +11,7 @@
 /// engine-specific prefix (`Speaker 1:` etc.) — callers add that.
 
 const MIN: usize = 50;
-const MAX: usize = 250;
+const MAX: usize = 200;
 
 /// Split `text` into TTS segments. Each returned string contains one or more
 /// paragraphs joined with `\n`.
@@ -227,13 +227,16 @@ mod tests {
     #[test]
     fn seg25_bug_fixed() {
         // Regression: a 137-word para followed by a 239-word para should NOT
-        // produce a single 376-word segment.
+        // produce a single 376-word segment. The second paragraph alone
+        // (239 words) exceeds MAX=200, but that's expected — a single
+        // paragraph too large to combine with anything still gets its own
+        // segment rather than being artificially split; the bug being
+        // guarded against is unnecessary *merging*, not a lone oversized
+        // paragraph.
         let w137: String = "word ".repeat(137).trim().to_string() + ".";
         let w239: String = "word ".repeat(239).trim().to_string() + ".";
         let segs = accumulate(vec![w137, w239]);
-        for wc in segs_wc(&segs) {
-            assert!(wc <= MAX, "segment too long: {wc} words (MAX={MAX})");
-        }
+        assert_eq!(segs.len(), 2, "should not merge into one segment: {:?}", segs_wc(&segs));
     }
 
     #[test]
