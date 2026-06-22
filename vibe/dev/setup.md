@@ -23,7 +23,7 @@ These are build instructions for the *next* version
 VERSION=v15
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
 docker tag vibe:latest dockersaura/vibe:$VERSION
-docker push dockersaura/vibe:$VERSION
+docker push --mount-with-by-digest=runpod/pytorch dockersaura/vibe:$VERSION
 ```
 
 Current image: v14  (updated manually, check DockerHub to be sure)
