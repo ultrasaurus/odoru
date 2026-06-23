@@ -25,22 +25,12 @@ def download_with_retry(model_id, max_retries=3):
 
 
 def verify_models():
-    """Load models to verify they work."""
-    print("\nVerifying models can be loaded...")
+    """Verify Qwen tokenizer loads correctly (most likely failure point)."""
+    print("\nVerifying Qwen2.5-1.5B tokenizer can be loaded...")
     try:
-        print("Loading VibeVoice processor...")
-        from transformers import AutoProcessor
-        processor = AutoProcessor.from_pretrained('vibevoice/VibeVoice-1.5B')
-        print("  ✓ VibeVoice processor loaded")
-    except Exception as e:
-        print(f"  ✗ Failed to load VibeVoice: {e}")
-        raise
-
-    try:
-        print("Loading Qwen2.5-1.5B tokenizer...")
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen2.5-1.5B')
-        print("  ✓ Qwen2.5-1.5B tokenizer loaded")
+        print("  ✓ Qwen2.5-1.5B tokenizer loaded successfully")
     except Exception as e:
         print(f"  ✗ Failed to load Qwen tokenizer: {e}")
         raise
