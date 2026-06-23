@@ -15,6 +15,7 @@ Steps
       that behavior over the default spell-out.
    2. [x] Em dash (A2): `--` → `, ` confirmed working 2026-06-18 after
       segmented listen tests (see normalize-future.md section G).
+      - TODO: verify em-dash fix still working in current test runs
    3. [x] Ref/code patterns (A3): bracket-stripping + punctuated-override
       fixes, confirmed passing in normalize-future.md sections E/F.
 2. [x] Listen test: create audio wav files for sections of
@@ -36,10 +37,8 @@ Steps
    not the content itself).
 5. [x] Create audio file for all of `odoru/data/authorship.txt` by dividing
    into text segments at paragraph division then stitching audio together.
-   - [x] Split into segments via `split_authorship.py` (250–400 words),
-     then resplit from seg12 onward at 150–250 words via
-     `split_authorship_short.py` and `split_authorship_end.py` after
-     seg07 clipping issue
+   - [x] Split into segments via segmenter (50–200 words, split at paragraph
+     boundaries) after resolving seg07 clipping issue
    - [x] Seed discovery: ran seg07–11 with 5 different seeds; seed 71463
      chosen as preferred voice (see `vibe/dev/voices.md`)
    - [x] Full run: seg01–seg26 with seed 71463
@@ -47,7 +46,7 @@ Steps
    - [x] **Resolved**: repeated-phrase hallucination on seg10 was VRAM-related
      (RTX A4000 16GB). Re-run on RTX A6000 48GB — clean. Fixed by enforcing
      >=24GB VRAM minimum in `new-pod`.
-6. Update docs and investigate error from last run
+6. [x] Update docs and investigate error from last run
    - [x] update docs
    - [x] seg33 — root cause was RunPod proxy 524 timeout on long segments
      (blocking `/synthesize` held connection open during inference).
@@ -56,20 +55,27 @@ Steps
      fetches wav via `GET /jobs/:id/wav`. seg33 (284 words, RTF 1.04x
      on RTX 3090) completed successfully on 2026-06-19. Docker image
      bumped to v13.
-7. Augment fixes: from full document test, see [artifact-augment.md](artifact-augment.md)
-   - [X] update `tts_overrides.txt`
-   - [X] NAME,number, pattern → normalizer fix
+7. [x] Augment fixes: from full document test, see [artifact-augment.md](artifact-augment.md)
+   - [x] update `tts_overrides.txt`
+   - [x] NAME,number, pattern → normalizer fix
+   - [x] segmentation: reduced max segment size from 250 → 200 words to
+     prevent truncation and speed degradation
    - [*] QA pass with forced-alignment AlignReport 
      (detection of word-skipping/truncations)
-8. Improve tooling to improve workflow
-   - [X] log GPU type and VRAM of selected pod at run time (currently only
+8. [*] Don't store reference voices in Dockerfile
+   - [x] --voice option
+   - [ ] test with Sarah
+   - [ ] test with Andy
+9. [*] eval Google Cloud Run
+   - [*] Cloud Run project setup, Dockerfile.cloudrun
+10. Improve tooling to improve workflow
+   - [x] log GPU type and VRAM of selected pod at run time (currently only
      filtered by >=24GB, not recorded); useful for correlating artifact
      patterns with hardware 
-   - [*] segmentation (integrated in Rust CLI) - adjust so max is not exceeded
-         by so much
-   - [X] recently vibe-service failed -- long segment timout (polling fixes)
+   - [x] segmentation (integrated in Rust CLI) - max word limit enforced at 200
+   - [x] recently vibe-service failed -- long segment timout (polling fixes)
    - [ ] rerun - test augment, validate skipping
-9. Consider additional improvements
+11. Consider additional improvements
    - background noise removal
    - use forced-alignment to find original headers and add silence
 

@@ -1,0 +1,3071 @@
+[
+  {
+    "insertId": "6a3ab8f9000cea4b8e877e0b",
+    "labels": {
+      "instanceId": "002f8ffd478195ddd2a4e77babf9e6d36a80315dba07698cfe1a150e0b6cea5f8e5a78e680ea479ab2529b12d64a9685e916ea44dcba3be44b2639dd142541329d36b7ffa71f1c16fc70b5a0dca31dd4c1f0a28480a25973d2ba"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:48:58.010310522Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"vibe-cloudrun-1\" on port 8080.",
+    "timestamp": "2026-06-23T16:48:57.846411Z"
+  },
+  {
+    "insertId": "6a3ab8f9000ce4131da9168e",
+    "labels": {
+      "instanceId": "002f8ffd478195ddd2a4e77babf9e6d36a80315dba07698cfe1a150e0b6cea5f8e5a78e680ea479ab2529b12d64a9685e916ea44dcba3be44b2639dd142541329d36b7ffa71f1c16fc70b5a0dca31dd4c1f0a28480a25973d2ba"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:48:58.163790495Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:48:57.843819Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m vibe-service listening on 0.0.0.0:8080",
+    "timestamp": "2026-06-23T16:48:57.844819Z"
+  },
+  {
+    "insertId": "6a3ab8f9000c9079e4868e9b",
+    "labels": {
+      "instanceId": "002f8ffd478195ddd2a4e77babf9e6d36a80315dba07698cfe1a150e0b6cea5f8e5a78e680ea479ab2529b12d64a9685e916ea44dcba3be44b2639dd142541329d36b7ffa71f1c16fc70b5a0dca31dd4c1f0a28480a25973d2ba"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:48:57.831774775Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:48:57.821568Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mvibe_service::watchdog\u001b[0m\u001b[2m:\u001b[0m watchdog: RUNPOD_POD_ID or RUNPOD_USER_API_KEY not set — idle auto-stop disabled",
+    "timestamp": "2026-06-23T16:48:57.823417Z"
+  },
+  {
+    "insertId": "6a3ab8f9000c905d586127e7",
+    "labels": {
+      "instanceId": "002f8ffd478195ddd2a4e77babf9e6d36a80315dba07698cfe1a150e0b6cea5f8e5a78e680ea479ab2529b12d64a9685e916ea44dcba3be44b2639dd142541329d36b7ffa71f1c16fc70b5a0dca31dd4c1f0a28480a25973d2ba"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:48:57.831774775Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:48:57.821464Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m GPU: NVIDIA L4, 23034 MiB",
+    "timestamp": "2026-06-23T16:48:57.823389Z"
+  },
+  {
+    "insertId": "6a3ab8f2000a4fd3133b6d28",
+    "labels": {
+      "instanceId": "002f8ffd478195ddd2a4e77babf9e6d36a80315dba07698cfe1a150e0b6cea5f8e5a78e680ea479ab2529b12d64a9685e916ea44dcba3be44b2639dd142541329d36b7ffa71f1c16fc70b5a0dca31dd4c1f0a28480a25973d2ba",
+      "scaling_reason": "AUTOSCALING"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:48:50.685330812Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.",
+    "timestamp": "2026-06-23T16:48:50.675795Z"
+  },
+  {
+    "insertId": "6a3ab8c9000c86b8ba2cc4f4",
+    "labels": {
+      "instanceId": "002f8ffd4783433885d6eb71ab20d802c79b40c701fd619361465a0153ec108c155a90168ad08ffc5973c13c244a6aa4bf67a7830109aea257a1ae39241c18bcebff9bf93a6d5b7997b25cf600f606afe5b04b2b71ee24282e"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:48:10.082915354Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"vibe-cloudrun-1\" on port 8080.",
+    "timestamp": "2026-06-23T16:48:09.820920Z"
+  },
+  {
+    "insertId": "6a3ab8c9000c8484e24f2564",
+    "labels": {
+      "instanceId": "002f8ffd4783433885d6eb71ab20d802c79b40c701fd619361465a0153ec108c155a90168ad08ffc5973c13c244a6aa4bf67a7830109aea257a1ae39241c18bcebff9bf93a6d5b7997b25cf600f606afe5b04b2b71ee24282e"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:48:10.138756047Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:48:09.818495Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m vibe-service listening on 0.0.0.0:8080",
+    "timestamp": "2026-06-23T16:48:09.820356Z"
+  },
+  {
+    "insertId": "6a3ab8c9000c21f657f27fc8",
+    "labels": {
+      "instanceId": "002f8ffd4783433885d6eb71ab20d802c79b40c701fd619361465a0153ec108c155a90168ad08ffc5973c13c244a6aa4bf67a7830109aea257a1ae39241c18bcebff9bf93a6d5b7997b25cf600f606afe5b04b2b71ee24282e"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:48:09.806073077Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:48:09.792799Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mvibe_service::watchdog\u001b[0m\u001b[2m:\u001b[0m watchdog: RUNPOD_POD_ID or RUNPOD_USER_API_KEY not set — idle auto-stop disabled",
+    "timestamp": "2026-06-23T16:48:09.795126Z"
+  },
+  {
+    "insertId": "6a3ab8c9000c21dea2b77509",
+    "labels": {
+      "instanceId": "002f8ffd4783433885d6eb71ab20d802c79b40c701fd619361465a0153ec108c155a90168ad08ffc5973c13c244a6aa4bf67a7830109aea257a1ae39241c18bcebff9bf93a6d5b7997b25cf600f606afe5b04b2b71ee24282e"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:48:09.806073077Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:48:09.792766Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m GPU: NVIDIA L4, 23034 MiB",
+    "timestamp": "2026-06-23T16:48:09.795102Z"
+  },
+  {
+    "insertId": "6a3ab8c5000b64bdb9fae35e",
+    "labels": {
+      "instanceId": "002f8ffd4783433885d6eb71ab20d802c79b40c701fd619361465a0153ec108c155a90168ad08ffc5973c13c244a6aa4bf67a7830109aea257a1ae39241c18bcebff9bf93a6d5b7997b25cf600f606afe5b04b2b71ee24282e",
+      "scaling_reason": "AUTOSCALING"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:48:05.757885776Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.",
+    "timestamp": "2026-06-23T16:48:05.746685Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "2.707126976s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "369",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/3202a1e5-6dc4-44a5-846b-faef9c0317ec",
+      "responseSize": "58",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 404
+    },
+    "insertId": "6a3ab8c9000dc3302e1a6180",
+    "labels": {
+      "instanceId": "002f8ffd4783433885d6eb71ab20d802c79b40c701fd619361465a0153ec108c155a90168ad08ffc5973c13c244a6aa4bf67a7830109aea257a1ae39241c18bcebff9bf93a6d5b7997b25cf600f606afe5b04b2b71ee24282e"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:48:09.908259613Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "c77024c74a8e1ca5",
+    "timestamp": "2026-06-23T16:48:05.710593Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/750486cdef7d41934e51aa1df444826b",
+    "traceSampled": true
+  },
+  {
+    "insertId": "6a3ab8b700054b6344d923b8",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:47:51.353248469Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "terminated: Application failed to start: The container may have exited abnormally.",
+    "timestamp": "2026-06-23T16:47:51.346944716Z"
+  },
+  {
+    "insertId": "6a3ab8b700054b7add2ee614",
+    "labels": {
+      "container_name": "vibe-cloudrun-1",
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:47:51.353248469Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "textPayload": "Application exec likely failed",
+    "timestamp": "2026-06-23T16:47:51.346943499Z"
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CKqF4cGSuODxngE"
+      }
+    ],
+    "httpRequest": {
+      "latency": "0s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "369",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/3202a1e5-6dc4-44a5-846b-faef9c0317ec",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 500
+    },
+    "insertId": "6a3ab8c6000aae067095ecba",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:48:06.711381553Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "spanId": "a464c11a0130ae77",
+    "textPayload": "The request was aborted because there was no available instance. Additional troubleshooting documentation can be found at: https://cloud.google.com/run/docs/troubleshooting#abort-request",
+    "timestamp": "2026-06-23T16:47:40.681592Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/d4702446627c9b1a4e4ff56aa7ff6f5a"
+  },
+  {
+    "insertId": "6a3ab8a20007d979aa854d9a",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:47:30.576668984Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:47:30.513697Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m job running \u001b[3mjob_id\u001b[0m\u001b[2m=\u001b[0m3202a1e5-6dc4-44a5-846b-faef9c0317ec \u001b[3mname\u001b[0m\u001b[2m=\u001b[0maugment/augment-2026-06-22/augment_seg13 \u001b[3mseed\u001b[0m\u001b[2m=\u001b[0m71463 \u001b[3mcfg\u001b[0m\u001b[2m=\u001b[0m1.3",
+    "timestamp": "2026-06-23T16:47:30.514425Z"
+  },
+  {
+    "insertId": "6a3ab8a20007d96869497bb6",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:47:30.576668984Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:47:30.513578Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m job created \u001b[3mjob_id\u001b[0m\u001b[2m=\u001b[0m3202a1e5-6dc4-44a5-846b-faef9c0317ec \u001b[3mname\u001b[0m\u001b[2m=\u001b[0mSome(\"augment/augment-2026-06-22/augment_seg13\") \u001b[3mwords\u001b[0m\u001b[2m=\u001b[0m180",
+    "timestamp": "2026-06-23T16:47:30.514408Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000947576s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "POST",
+      "requestSize": "1642",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs",
+      "responseSize": "186",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 200
+    },
+    "insertId": "6a3ab8a20007d959a55740e7",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:47:30.677504159Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "0666275c3e9038c9",
+    "timestamp": "2026-06-23T16:47:30.512314Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/d5abb5314d6509b475162573d7695eb9"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000932285s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "267",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/health",
+      "responseSize": "134",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 200
+    },
+    "insertId": "6a3ab8a20006ca70714f995b",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:47:30.677504159Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "3f4404a93d1b4258",
+    "timestamp": "2026-06-23T16:47:30.442669Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/3a4fd199b647567775162573d7695f03"
+  },
+  {
+    "insertId": "6a3ab8a1000a93fbb68e9178",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:47:29.913991085Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:47:29.692487Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m uploaded voice to /workspace/VibeVoice/demo/voices/en-Sarah_woman.wav \u001b[3mname\u001b[0m\u001b[2m=\u001b[0mSarah \u001b[3mgender\u001b[0m\u001b[2m=\u001b[0mwoman \u001b[3mbytes\u001b[0m\u001b[2m=\u001b[0m398992",
+    "timestamp": "2026-06-23T16:47:29.693243Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.004712937s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "POST",
+      "requestSize": "399388",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/voices/Sarah/woman",
+      "responseSize": "58",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 200
+    },
+    "insertId": "6a3ab8a1000a9477d55931a5",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:47:30.013894691Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "f53e754f91766517",
+    "timestamp": "2026-06-23T16:47:29.686603Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/321b7b873ff3e81cb3dc2b03ef83a3de",
+    "traceSampled": true
+  },
+  {
+    "insertId": "6a3ab8a0000dd0d84ef390f7",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:47:28.913787696Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"vibe-cloudrun-1\" on port 8080.",
+    "timestamp": "2026-06-23T16:47:28.905432Z"
+  },
+  {
+    "insertId": "6a3ab8a0000dcf249adc8248",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:47:28.914711920Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:47:28.904424Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m vibe-service listening on 0.0.0.0:8080",
+    "timestamp": "2026-06-23T16:47:28.904996Z"
+  },
+  {
+    "insertId": "6a3ab8a0000dcf1f4bfe976e",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:47:28.914711920Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:47:28.903793Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mvibe_service::watchdog\u001b[0m\u001b[2m:\u001b[0m watchdog: RUNPOD_POD_ID or RUNPOD_USER_API_KEY not set — idle auto-stop disabled",
+    "timestamp": "2026-06-23T16:47:28.904991Z"
+  },
+  {
+    "insertId": "6a3ab8a0000dcf007c2b6981",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:47:28.914711920Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:47:28.903760Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m GPU: NVIDIA L4, 23034 MiB",
+    "timestamp": "2026-06-23T16:47:28.904960Z"
+  },
+  {
+    "insertId": "6a3ab8940008321e2a059d99",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af",
+      "scaling_reason": "AUTOSCALING"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:47:16.547010877Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.",
+    "timestamp": "2026-06-23T16:47:16.537118Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "12.436515504s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "291",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/health",
+      "responseSize": "134",
+      "serverIp": "2600:1900:4242:200::",
+      "status": 200
+    },
+    "insertId": "6a3ab8a1000010bc68c0b620",
+    "labels": {
+      "instanceId": "002f8ffd47531ea10d90c83ca36638f0268dabd38108e27b82809f9a43bf89f51f51e52b5b2d8fe7d609cb3e68ae40b209c35c8968afe842a4535301a483d8b0a854791ca4828e0e6a5ad3b8fca2c006d2ec117776bfc4af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:47:29.014558062Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "40ad99bdc8aa50bf",
+    "timestamp": "2026-06-23T16:47:16.526049Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/673035258fd433728ceda340736b311e",
+    "traceSampled": true
+  },
+  {
+    "insertId": "lyhoqvdo352",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Service",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Service",
+        "metadata": {
+          "annotations": {
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "573.0.0",
+            "run.googleapis.com/ingress": "all",
+            "run.googleapis.com/ingress-status": "all",
+            "run.googleapis.com/maxScale": "1",
+            "run.googleapis.com/operation-id": "db7e1a87-d00c-4f29-8d48-fabcf0dbad6d",
+            "run.googleapis.com/urls": "[\"https://vibe-cloudrun-369234196163.us-central1.run.app\",\"https://vibe-cloudrun-jqrfafe24q-uc.a.run.app\"]",
+            "serving.knative.dev/creator": "ultrasaurus1@gmail.com",
+            "serving.knative.dev/lastModifier": "ultrasaurus1@gmail.com"
+          },
+          "creationTimestamp": "2026-06-23T14:05:32.857171Z",
+          "generation": 3,
+          "labels": {
+            "cloud.googleapis.com/location": "us-central1"
+          },
+          "name": "vibe-cloudrun",
+          "namespace": "369234196163",
+          "resourceVersion": "AAZU7m0NvHA",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/369234196163/services/vibe-cloudrun",
+          "uid": "7ad9518a-94c8-4899-a184-24eee14a96fe"
+        },
+        "spec": {
+          "template": {
+            "metadata": {
+              "annotations": {
+                "autoscaling.knative.dev/maxScale": "1",
+                "run.googleapis.com/client-name": "gcloud",
+                "run.googleapis.com/client-version": "573.0.0",
+                "run.googleapis.com/cpu-throttling": "false",
+                "run.googleapis.com/gpu-zonal-redundancy-disabled": "true",
+                "run.googleapis.com/startup-cpu-boost": "true"
+              },
+              "labels": {
+                "client.knative.dev/nonce": "ggrzfbgsbh",
+                "run.googleapis.com/startupProbeType": "Default"
+              }
+            },
+            "spec": {
+              "containerConcurrency": 1,
+              "containers": [
+                {
+                  "env": [
+                    {
+                      "name": "VIBE_SERVICE_SECRET",
+                      "value": "bgsYT1nndShqrWBUPFh9+zEmoguyszFjjMxjW2+bEDY="
+                    }
+                  ],
+                  "image": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun:v2",
+                  "ports": [
+                    {
+                      "containerPort": 8080,
+                      "name": "http1"
+                    }
+                  ],
+                  "resources": {
+                    "limits": {
+                      "cpu": "4",
+                      "memory": "16Gi",
+                      "nvidia.com/gpu": "1"
+                    }
+                  },
+                  "startupProbe": {
+                    "failureThreshold": 1,
+                    "periodSeconds": 240,
+                    "tcpSocket": {
+                      "port": 8080
+                    },
+                    "timeoutSeconds": 240
+                  }
+                }
+              ],
+              "nodeSelector": {
+                "run.googleapis.com/accelerator": "nvidia-l4"
+              },
+              "serviceAccountName": "369234196163-compute@developer.gserviceaccount.com",
+              "timeoutSeconds": 300
+            }
+          },
+          "traffic": [
+            {
+              "latestRevision": true,
+              "percent": 100
+            }
+          ]
+        },
+        "status": {
+          "address": {
+            "url": "https://vibe-cloudrun-jqrfafe24q-uc.a.run.app"
+          },
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-06-23T16:41:08.830320Z",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:40:53.849788Z",
+              "status": "True",
+              "type": "ConfigurationsReady"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:41:08.778205Z",
+              "status": "True",
+              "type": "RoutesReady"
+            }
+          ],
+          "latestCreatedRevisionName": "vibe-cloudrun-00003-2wf",
+          "latestReadyRevisionName": "vibe-cloudrun-00003-2wf",
+          "observedGeneration": 3,
+          "traffic": [
+            {
+              "latestRevision": true,
+              "percent": 100,
+              "revisionName": "vibe-cloudrun-00003-2wf"
+            }
+          ],
+          "url": "https://vibe-cloudrun-jqrfafe24q-uc.a.run.app"
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Service vibe-cloudrun."
+      }
+    },
+    "receiveTimestamp": "2026-06-23T16:41:09.542223063Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2026-06-23T16:41:08.851411Z"
+  },
+  {
+    "insertId": "dbl22rdleq4",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/project-a4127f08-9359-4200-985/revisions/vibe-cloudrun-00003-2wf",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Revision",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Revision",
+        "metadata": {
+          "annotations": {
+            "autoscaling.knative.dev/maxScale": "1",
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "573.0.0",
+            "run.googleapis.com/cpu-throttling": "false",
+            "run.googleapis.com/execution-environment": "gen2",
+            "run.googleapis.com/gpu-zonal-redundancy-disabled": "true",
+            "run.googleapis.com/operation-id": "db7e1a87-d00c-4f29-8d48-fabcf0dbad6d",
+            "run.googleapis.com/startup-cpu-boost": "true",
+            "serving.knative.dev/creator": "ultrasaurus1@gmail.com"
+          },
+          "creationTimestamp": "2026-06-23T16:40:52.579803Z",
+          "generation": 1,
+          "labels": {
+            "client.knative.dev/nonce": "ggrzfbgsbh",
+            "cloud.googleapis.com/location": "us-central1",
+            "run.googleapis.com/startupProbeType": "Default",
+            "serving.knative.dev/configuration": "vibe-cloudrun",
+            "serving.knative.dev/configurationGeneration": "3",
+            "serving.knative.dev/route": "vibe-cloudrun",
+            "serving.knative.dev/service": "vibe-cloudrun",
+            "serving.knative.dev/serviceUid": "7ad9518a-94c8-4899-a184-24eee14a96fe"
+          },
+          "name": "vibe-cloudrun-00003-2wf",
+          "namespace": "369234196163",
+          "ownerReferences": [
+            {
+              "apiVersion": "serving.knative.dev/v1",
+              "blockOwnerDeletion": true,
+              "controller": true,
+              "kind": "Configuration",
+              "name": "vibe-cloudrun",
+              "uid": "9744ed2a-f11e-4d06-8564-9378666c3a9a"
+            }
+          ],
+          "resourceVersion": "AAZU7mz4/H0",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/369234196163/revisions/vibe-cloudrun-00003-2wf",
+          "uid": "7140d047-2ca8-487d-bd8f-651970a998dd"
+        },
+        "spec": {
+          "containerConcurrency": 1,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "VIBE_SERVICE_SECRET",
+                  "value": "bgsYT1nndShqrWBUPFh9+zEmoguyszFjjMxjW2+bEDY="
+                }
+              ],
+              "image": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun@sha256:259bb418b4e26467b2b5881e1c164f83f9b0e6dcc54e07367d7f5ce98409837f",
+              "name": "vibe-cloudrun-1",
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "name": "http1"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": "4",
+                  "memory": "16Gi",
+                  "nvidia.com/gpu": "1"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 1,
+                "periodSeconds": 240,
+                "tcpSocket": {
+                  "port": 8080
+                },
+                "timeoutSeconds": 240
+              }
+            }
+          ],
+          "nodeSelector": {
+            "run.googleapis.com/accelerator": "nvidia-l4"
+          },
+          "serviceAccountName": "369234196163-compute@developer.gserviceaccount.com",
+          "timeoutSeconds": 300
+        },
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-06-23T16:41:07.470461Z",
+              "message": "Deploying revision succeeded in 14.89s.",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:41:07.414391Z",
+              "message": "Containers became healthy in 12.02s.",
+              "status": "True",
+              "type": "ContainerHealthy"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:40:53.715697Z",
+              "message": "Container image import completed.",
+              "status": "True",
+              "type": "ContainerReady"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:40:55.263871Z",
+              "message": "Provisioning imported containers completed in 1.55s. Checking container health. This will wait for up to 4m for the configured startup probe, including an initial delay of 0s.",
+              "status": "True",
+              "type": "ResourcesAvailable"
+            }
+          ],
+          "containerStatuses": [
+            {
+              "imageDigest": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun@sha256:259bb418b4e26467b2b5881e1c164f83f9b0e6dcc54e07367d7f5ce98409837f",
+              "name": "vibe-cloudrun-1"
+            }
+          ],
+          "imageDigest": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun@sha256:259bb418b4e26467b2b5881e1c164f83f9b0e6dcc54e07367d7f5ce98409837f",
+          "logUrl": "https://console.cloud.google.com/logs/viewer?project=project-a4127f08-9359-4200-985&resource=cloud_run_revision/service_name/vibe-cloudrun/revision_name/vibe-cloudrun-00003-2wf&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22vibe-cloudrun%22%0Aresource.labels.revision_name%3D%22vibe-cloudrun-00003-2wf%22",
+          "observedGeneration": 1
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Revision vibe-cloudrun-00003-2wf with message: Deploying revision succeeded in 14.89s."
+      }
+    },
+    "receiveTimestamp": "2026-06-23T16:41:07.616881684Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2026-06-23T16:41:07.483097Z"
+  },
+  {
+    "insertId": "6a3ab72300064185e393dea8",
+    "labels": {
+      "instanceId": "002f8ffd478591bbd16885fa0912d8cafde01c293d86f5392a6708aa7118e5b7361c33f3e779b260d265651e8c8ec8117a155065fb8d6e740f1b79e329e840e2c0efb21e995bfc281bef01dba94d7dcb9e681e97995422af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:41:07.417076413Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"vibe-cloudrun-1\" on port 8080.",
+    "timestamp": "2026-06-23T16:41:07.409989Z"
+  },
+  {
+    "insertId": "6a3ab723000640136bc38c6c",
+    "labels": {
+      "instanceId": "002f8ffd478591bbd16885fa0912d8cafde01c293d86f5392a6708aa7118e5b7361c33f3e779b260d265651e8c8ec8117a155065fb8d6e740f1b79e329e840e2c0efb21e995bfc281bef01dba94d7dcb9e681e97995422af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:41:07.734011901Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:41:07.409097Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m vibe-service listening on 0.0.0.0:8080",
+    "timestamp": "2026-06-23T16:41:07.409619Z"
+  },
+  {
+    "insertId": "6a3ab72300060366f83d9ed6",
+    "labels": {
+      "instanceId": "002f8ffd478591bbd16885fa0912d8cafde01c293d86f5392a6708aa7118e5b7361c33f3e779b260d265651e8c8ec8117a155065fb8d6e740f1b79e329e840e2c0efb21e995bfc281bef01dba94d7dcb9e681e97995422af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:41:07.400519446Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:41:07.389709Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mvibe_service::watchdog\u001b[0m\u001b[2m:\u001b[0m watchdog: RUNPOD_POD_ID or RUNPOD_USER_API_KEY not set — idle auto-stop disabled",
+    "timestamp": "2026-06-23T16:41:07.394086Z"
+  },
+  {
+    "insertId": "6a3ab7230006034b9317ad4a",
+    "labels": {
+      "instanceId": "002f8ffd478591bbd16885fa0912d8cafde01c293d86f5392a6708aa7118e5b7361c33f3e779b260d265651e8c8ec8117a155065fb8d6e740f1b79e329e840e2c0efb21e995bfc281bef01dba94d7dcb9e681e97995422af"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:41:07.400519446Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:41:07.389675Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m GPU: NVIDIA L4, 23034 MiB",
+    "timestamp": "2026-06-23T16:41:07.394059Z"
+  },
+  {
+    "insertId": "6a3ab71700057a5a978ba531",
+    "labels": {
+      "instanceId": "002f8ffd478591bbd16885fa0912d8cafde01c293d86f5392a6708aa7118e5b7361c33f3e779b260d265651e8c8ec8117a155065fb8d6e740f1b79e329e840e2c0efb21e995bfc281bef01dba94d7dcb9e681e97995422af",
+      "scaling_reason": "DEPLOYMENT_ROLLOUT"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:40:55.365089680Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00003-2wf",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.",
+    "timestamp": "2026-06-23T16:40:55.359002Z"
+  },
+  {
+    "insertId": "l3k07ge1266x",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/cloudaudit.googleapis.com%2Factivity",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "authenticationInfo": {
+        "oauthInfo": {
+          "oauthClientId": "32555940559.apps.googleusercontent.com"
+        },
+        "principalEmail": "ultrasaurus1@gmail.com",
+        "principalSubject": "user:ultrasaurus1@gmail.com"
+      },
+      "authorizationInfo": [
+        {
+          "granted": true,
+          "permission": "run.services.update",
+          "permissionType": "ADMIN_WRITE",
+          "resource": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+          "resourceAttributes": {}
+        },
+        {
+          "granted": true,
+          "permission": "run.services.update",
+          "permissionType": "ADMIN_WRITE",
+          "resource": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+          "resourceAttributes": {
+            "name": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+            "service": "run.googleapis.com/",
+            "type": "run.googleapis.com/Service"
+          }
+        }
+      ],
+      "methodName": "google.cloud.run.v1.Services.ReplaceService",
+      "request": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.ReplaceServiceRequest",
+        "name": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+        "service": {
+          "apiVersion": "serving.knative.dev/v1",
+          "kind": "Service",
+          "metadata": {
+            "annotations": {
+              "run.googleapis.com/client-name": "gcloud",
+              "run.googleapis.com/client-version": "573.0.0",
+              "run.googleapis.com/ingress": "all",
+              "run.googleapis.com/ingress-status": "all",
+              "run.googleapis.com/maxScale": "1",
+              "run.googleapis.com/operation-id": "72f966af-871f-4047-a5a2-084a837605b4",
+              "run.googleapis.com/urls": "[\"https://vibe-cloudrun-369234196163.us-central1.run.app\",\"https://vibe-cloudrun-jqrfafe24q-uc.a.run.app\"]",
+              "serving.knative.dev/creator": "ultrasaurus1@gmail.com",
+              "serving.knative.dev/lastModifier": "ultrasaurus1@gmail.com"
+            },
+            "creationTimestamp": "2026-06-23T14:05:32.857171Z",
+            "generation": 2,
+            "labels": {
+              "cloud.googleapis.com/location": "us-central1"
+            },
+            "name": "vibe-cloudrun",
+            "namespace": "369234196163",
+            "resourceVersion": "AAZU7fi/Syw",
+            "selfLink": "/apis/serving.knative.dev/v1/namespaces/369234196163/services/vibe-cloudrun",
+            "uid": "7ad9518a-94c8-4899-a184-24eee14a96fe"
+          },
+          "spec": {
+            "template": {
+              "metadata": {
+                "annotations": {
+                  "autoscaling.knative.dev/maxScale": "1",
+                  "run.googleapis.com/client-name": "gcloud",
+                  "run.googleapis.com/client-version": "573.0.0",
+                  "run.googleapis.com/cpu-throttling": "False",
+                  "run.googleapis.com/gpu-zonal-redundancy-disabled": "True",
+                  "run.googleapis.com/startup-cpu-boost": "true"
+                },
+                "labels": {
+                  "client.knative.dev/nonce": "ggrzfbgsbh",
+                  "run.googleapis.com/startupProbeType": "Default"
+                }
+              },
+              "spec": {
+                "containerConcurrency": 1,
+                "containers": [
+                  {
+                    "image": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun:v2",
+                    "resources": {
+                      "limits": {
+                        "cpu": "4",
+                        "memory": "16Gi",
+                        "nvidia.com/gpu": "1"
+                      }
+                    }
+                  }
+                ],
+                "nodeSelector": {
+                  "run.googleapis.com/accelerator": "nvidia-l4"
+                },
+                "serviceAccountName": "369234196163-compute@developer.gserviceaccount.com",
+                "timeoutSeconds": 300
+              }
+            },
+            "traffic": [
+              {
+                "latestRevision": true,
+                "percent": 100
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-06-23T16:08:37.532460Z",
+                "status": "True",
+                "type": "Ready"
+              },
+              {
+                "lastTransitionTime": "2026-06-23T16:08:27.822430Z",
+                "status": "True",
+                "type": "ConfigurationsReady"
+              },
+              {
+                "lastTransitionTime": "2026-06-23T16:08:37.478370Z",
+                "status": "True",
+                "type": "RoutesReady"
+              }
+            ],
+            "latestCreatedRevisionName": "vibe-cloudrun-00002-fdg",
+            "latestReadyRevisionName": "vibe-cloudrun-00002-fdg",
+            "observedGeneration": 2,
+            "traffic": [
+              {
+                "latestRevision": true,
+                "percent": 100,
+                "revisionName": "vibe-cloudrun-00002-fdg"
+              }
+            ],
+            "url": "https://vibe-cloudrun-jqrfafe24q-uc.a.run.app"
+          }
+        }
+      },
+      "requestMetadata": {
+        "callerIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+        "callerSuppliedUserAgent": "google-cloud-sdk gcloud/573.0.0 command/gcloud.run.deploy invocation-id/2f13529f36a3420d8760ca27672cc64d environment/None environment-version/None client-os/MACOSX client-os-ver/24.6.0 client-pltf-arch/arm interactive/True from-script/False python/3.14.5 term/xterm-256color  (Macintosh; Intel Mac OS X 24.6.0),gzip(gfe)",
+        "destinationAttributes": {},
+        "requestAttributes": {
+          "auth": {},
+          "time": "2026-06-23T16:40:52.481957Z"
+        }
+      },
+      "resourceLocation": {
+        "currentLocations": [
+          "us-central1"
+        ]
+      },
+      "resourceName": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+      "serviceName": "run.googleapis.com",
+      "status": {}
+    },
+    "receiveTimestamp": "2026-06-23T16:40:53.042084486Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "NOTICE",
+    "timestamp": "2026-06-23T16:40:52.257509Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.001868469s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "369",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/fe8f8336-1cf0-4d21-bf9a-8c688a3cde4f",
+      "responseSize": "2377",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafea000e317ae263b76c",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:10:18.997027423Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "69d7d7dfe50dbed2",
+    "timestamp": "2026-06-23T16:10:18.926784Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/de965a30bfae295debb849acd35e2cdd",
+    "traceSampled": true
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CJ7riaD9mey2jgE"
+      }
+    ],
+    "insertId": "6a3aafe700050a95c9002ea4",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.672037514Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/workspace/VibeVoice/demo/inference_from_file.py\", line 455, in <module>\n    main()\n  File \"/workspace/VibeVoice/demo/inference_from_file.py\", line 280, in main\n    processor = VibeVoiceProcessor.from_pretrained(args.model_path)\n  File \"/workspace/VibeVoice/vibevoice/processor/vibevoice_processor.py\", line 100, in from_pretrained\n    tokenizer = VibeVoiceTextTokenizerFast.from_pretrained(\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/tokenization_utils_base.py\", line 2062, in from_pretrained\n    return cls._from_pretrained(\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/tokenization_utils_base.py\", line 2100, in _from_pretrained\n    slow_tokenizer = (cls.slow_tokenizer_class)._from_pretrained(\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/tokenization_utils_base.py\", line 2302, in _from_pretrained\n    tokenizer = cls(*init_inputs, **init_kwargs)\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/models/qwen2/tokenization_qwen2.py\", line 172, in __init__\n    with open(vocab_file, encoding=\"utf-8\") as vocab_handle:\nTypeError: expected str, bytes or os.PathLike object, not NoneType",
+    "timestamp": "2026-06-23T16:10:15.330389Z"
+  },
+  {
+    "insertId": "6a3aafe700050a64d62ad2fe",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Loading processor & model from vibevoice/VibeVoice-1.5B",
+    "timestamp": "2026-06-23T16:10:15.330340Z"
+  },
+  {
+    "insertId": "6a3aafe700050a6024d102ac",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Speaker 1 ('Sarah') -> Voice: en-Sarah_woman.wav",
+    "timestamp": "2026-06-23T16:10:15.330336Z"
+  },
+  {
+    "insertId": "6a3aafe700050a5d982a07ad",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  Speaker 1 -> Sarah",
+    "timestamp": "2026-06-23T16:10:15.330333Z"
+  },
+  {
+    "insertId": "6a3aafe700050a5b8f389862",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Speaker mapping:",
+    "timestamp": "2026-06-23T16:10:15.330331Z"
+  },
+  {
+    "insertId": "6a3aafe700050a571b3c69d4",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "     Text preview: Speaker 1: B. Objective O F T H E Study The objective of this study is to develop a conceptual frame...",
+    "timestamp": "2026-06-23T16:10:15.330327Z"
+  },
+  {
+    "insertId": "6a3aafe700050a54283d4beb",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  1. Speaker 1",
+    "timestamp": "2026-06-23T16:10:15.330324Z"
+  },
+  {
+    "insertId": "6a3aafe700050a512a80b312",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Found 1 speaker segments:",
+    "timestamp": "2026-06-23T16:10:15.330321Z"
+  },
+  {
+    "insertId": "6a3aafe700050a4fa2a46ebf",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Reading script from: /tmp/832afe60-2488-46b5-a127-bae7cdadd57c.txt",
+    "timestamp": "2026-06-23T16:10:15.330319Z"
+  },
+  {
+    "insertId": "6a3aafe700050a4bd33599fe",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Available voices: en-Alice_woman, en-Carter_man, en-Frank_man, en-Mary_woman_bgm, en-Maya_woman, en-Sarah_woman, in-Samuel_man, zh-Anchen_man_bgm, zh-Bowen_man, zh-Xinran_woman",
+    "timestamp": "2026-06-23T16:10:15.330315Z"
+  },
+  {
+    "insertId": "6a3aafe700050a48144bfe66",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Found 10 voice files in /workspace/VibeVoice/demo/voices",
+    "timestamp": "2026-06-23T16:10:15.330312Z"
+  },
+  {
+    "insertId": "6a3aafe700050a44e0ebc4c8",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Setting seed: 71463",
+    "timestamp": "2026-06-23T16:10:15.330308Z"
+  },
+  {
+    "insertId": "6a3aafe700050a423f11bca1",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Using device: cuda",
+    "timestamp": "2026-06-23T16:10:15.330306Z"
+  },
+  {
+    "insertId": "6a3aafe700050a3c329b3b7e",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "}",
+    "timestamp": "2026-06-23T16:10:15.330300Z"
+  },
+  {
+    "insertId": "6a3aafe700050a3a228ee3e1",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"vocab_size\": 151936",
+    "timestamp": "2026-06-23T16:10:15.330298Z"
+  },
+  {
+    "insertId": "6a3aafe700050a37df50e5da",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"use_sliding_window\": false,",
+    "timestamp": "2026-06-23T16:10:15.330295Z"
+  },
+  {
+    "insertId": "6a3aafe700050a359470762d",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"use_mrope\": false,",
+    "timestamp": "2026-06-23T16:10:15.330293Z"
+  },
+  {
+    "insertId": "6a3aafe700050a32f0e42452",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"use_cache\": true,",
+    "timestamp": "2026-06-23T16:10:15.330290Z"
+  },
+  {
+    "insertId": "6a3aafe700050a2fb91bbb1f",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"transformers_version\": \"4.51.3\",",
+    "timestamp": "2026-06-23T16:10:15.330287Z"
+  },
+  {
+    "insertId": "6a3aafe700050a2ce327acb1",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"torch_dtype\": \"bfloat16\",",
+    "timestamp": "2026-06-23T16:10:15.330284Z"
+  },
+  {
+    "insertId": "6a3aafe700050a290f5f0ba5",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"tie_word_embeddings\": true,",
+    "timestamp": "2026-06-23T16:10:15.330281Z"
+  },
+  {
+    "insertId": "6a3aafe700050a25452834a5",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"sliding_window\": 131072,",
+    "timestamp": "2026-06-23T16:10:15.330277Z"
+  },
+  {
+    "insertId": "6a3aafe700050a227b30965c",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"rope_theta\": 1000000.0,",
+    "timestamp": "2026-06-23T16:10:15.330274Z"
+  },
+  {
+    "insertId": "6a3aafe700050a0b64873798",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:10:15.337897918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:10:15.327944Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m job failed \u001b[3mjob_id\u001b[0m\u001b[2m=\u001b[0mfe8f8336-1cf0-4d21-bf9a-8c688a3cde4f \u001b[3mname\u001b[0m\u001b[2m=\u001b[0maugment/augment-2026-06-22/augment_seg13 \u001b[3merror\u001b[0m\u001b[2m=\u001b[0minference process exited exit status: 1",
+    "timestamp": "2026-06-23T16:10:15.330251Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.001438794s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "370",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/fe8f8336-1cf0-4d21-bf9a-8c688a3cde4f",
+      "responseSize": "157",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafe0000d055236dd5ffe",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:10:09.010428413Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "8c8b82f8ba5c3498",
+    "timestamp": "2026-06-23T16:10:08.845608Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/02564b8c0bf24def26b8c942bd6ec3c2",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000884890s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "370",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/fe8f8336-1cf0-4d21-bf9a-8c688a3cde4f",
+      "responseSize": "157",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafd6000bdc0a3040a9e4",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:59.017707161Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "8358ae9396441234",
+    "timestamp": "2026-06-23T16:09:58.774765Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/b59db92b66caa64d9aa14bc3b00b4b32",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000895489s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "369",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/fe8f8336-1cf0-4d21-bf9a-8c688a3cde4f",
+      "responseSize": "157",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafcc000a900fa1f52940",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:49.027434198Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "00063ddbe7344b08",
+    "timestamp": "2026-06-23T16:09:48.689715Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/35892d6eff9777ea9d101feb1e3b33c2",
+    "traceSampled": true
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000910346s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "369",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/fe8f8336-1cf0-4d21-bf9a-8c688a3cde4f",
+      "responseSize": "157",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafc200098e31ce7f86c4",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:38.702921899Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "553308d084793004",
+    "timestamp": "2026-06-23T16:09:38.623777Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/a3732eacebcfb6969cabbcdf5fa440db",
+    "traceSampled": true
+  },
+  {
+    "insertId": "6a3aafb80006f719945aeda5",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:09:28.697211967Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:09:28.454845Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m job running \u001b[3mjob_id\u001b[0m\u001b[2m=\u001b[0mfe8f8336-1cf0-4d21-bf9a-8c688a3cde4f \u001b[3mname\u001b[0m\u001b[2m=\u001b[0maugment/augment-2026-06-22/augment_seg13 \u001b[3mseed\u001b[0m\u001b[2m=\u001b[0m71463 \u001b[3mcfg\u001b[0m\u001b[2m=\u001b[0m1.3",
+    "timestamp": "2026-06-23T16:09:28.456473Z"
+  },
+  {
+    "insertId": "6a3aafb80006f707713f9499",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:09:28.697211967Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:09:28.454728Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m job created \u001b[3mjob_id\u001b[0m\u001b[2m=\u001b[0mfe8f8336-1cf0-4d21-bf9a-8c688a3cde4f \u001b[3mname\u001b[0m\u001b[2m=\u001b[0mSome(\"augment/augment-2026-06-22/augment_seg13\") \u001b[3mwords\u001b[0m\u001b[2m=\u001b[0m180",
+    "timestamp": "2026-06-23T16:09:28.456455Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000929386s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "POST",
+      "requestSize": "1643",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs",
+      "responseSize": "186",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafb80006f7851532dc5f",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:28.711654609Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "4e38be006ef6e606",
+    "timestamp": "2026-06-23T16:09:28.453892Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/1e8e81749361822148a2f0d87962c18c"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.001060173s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "266",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/health",
+      "responseSize": "134",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafb80005d6bb1b063b59",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:28.711654609Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "76757001c8e87aaf",
+    "timestamp": "2026-06-23T16:09:28.379801Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/623c7d2c5a84ad0248a2f0d87962cdfc"
+  },
+  {
+    "insertId": "6a3aafb7000a86805e3e7355",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:09:27.698879765Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:09:27.688086Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m uploaded voice to /workspace/VibeVoice/demo/voices/en-Sarah_woman.wav \u001b[3mname\u001b[0m\u001b[2m=\u001b[0mSarah \u001b[3mgender\u001b[0m\u001b[2m=\u001b[0mwoman \u001b[3mbytes\u001b[0m\u001b[2m=\u001b[0m398992",
+    "timestamp": "2026-06-23T16:09:27.689792Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.005180495s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "POST",
+      "requestSize": "399361",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/voices/Sarah/woman",
+      "responseSize": "58",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafb7000a876ea833746b",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:27.714243086Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "3a9bdf5c5b342793",
+    "timestamp": "2026-06-23T16:09:27.682475Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/fe49158e9a244b5a2ff52ca541ce0a8f"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.050861376s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "267",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/health",
+      "responseSize": "134",
+      "serverIp": "2600:1901:81d4:200::",
+      "status": 200
+    },
+    "insertId": "6a3aafb70005b0e0f0889ed2",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:09:27.384440703Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "e07863afce7416d6",
+    "timestamp": "2026-06-23T16:09:27.181145Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/c37de0e13ea6c9b92ff52ca541ce0829",
+    "traceSampled": true
+  },
+  {
+    "insertId": "u0atmddhm92",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Service",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Service",
+        "metadata": {
+          "annotations": {
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "573.0.0",
+            "run.googleapis.com/ingress": "all",
+            "run.googleapis.com/ingress-status": "all",
+            "run.googleapis.com/maxScale": "1",
+            "run.googleapis.com/operation-id": "72f966af-871f-4047-a5a2-084a837605b4",
+            "run.googleapis.com/urls": "[\"https://vibe-cloudrun-369234196163.us-central1.run.app\",\"https://vibe-cloudrun-jqrfafe24q-uc.a.run.app\"]",
+            "serving.knative.dev/creator": "ultrasaurus1@gmail.com",
+            "serving.knative.dev/lastModifier": "ultrasaurus1@gmail.com"
+          },
+          "creationTimestamp": "2026-06-23T14:05:32.857171Z",
+          "generation": 2,
+          "labels": {
+            "cloud.googleapis.com/location": "us-central1"
+          },
+          "name": "vibe-cloudrun",
+          "namespace": "369234196163",
+          "resourceVersion": "AAZU7fi/Syw",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/369234196163/services/vibe-cloudrun",
+          "uid": "7ad9518a-94c8-4899-a184-24eee14a96fe"
+        },
+        "spec": {
+          "template": {
+            "metadata": {
+              "annotations": {
+                "autoscaling.knative.dev/maxScale": "1",
+                "run.googleapis.com/client-name": "gcloud",
+                "run.googleapis.com/client-version": "573.0.0",
+                "run.googleapis.com/cpu-throttling": "false",
+                "run.googleapis.com/gpu-zonal-redundancy-disabled": "true",
+                "run.googleapis.com/startup-cpu-boost": "true"
+              },
+              "labels": {
+                "client.knative.dev/nonce": "odwrhtjeco",
+                "run.googleapis.com/startupProbeType": "Default"
+              }
+            },
+            "spec": {
+              "containerConcurrency": 1,
+              "containers": [
+                {
+                  "env": [
+                    {
+                      "name": "VIBE_SERVICE_SECRET",
+                      "value": "bgsYT1nndShqrWBUPFh9+zEmoguyszFjjMxjW2+bEDY="
+                    }
+                  ],
+                  "image": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun:v1",
+                  "ports": [
+                    {
+                      "containerPort": 8080,
+                      "name": "http1"
+                    }
+                  ],
+                  "resources": {
+                    "limits": {
+                      "cpu": "4",
+                      "memory": "16Gi",
+                      "nvidia.com/gpu": "1"
+                    }
+                  },
+                  "startupProbe": {
+                    "failureThreshold": 1,
+                    "periodSeconds": 240,
+                    "tcpSocket": {
+                      "port": 8080
+                    },
+                    "timeoutSeconds": 240
+                  }
+                }
+              ],
+              "nodeSelector": {
+                "run.googleapis.com/accelerator": "nvidia-l4"
+              },
+              "serviceAccountName": "369234196163-compute@developer.gserviceaccount.com",
+              "timeoutSeconds": 300
+            }
+          },
+          "traffic": [
+            {
+              "latestRevision": true,
+              "percent": 100
+            }
+          ]
+        },
+        "status": {
+          "address": {
+            "url": "https://vibe-cloudrun-jqrfafe24q-uc.a.run.app"
+          },
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-06-23T16:08:37.532460Z",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:08:27.822430Z",
+              "status": "True",
+              "type": "ConfigurationsReady"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:08:37.478370Z",
+              "status": "True",
+              "type": "RoutesReady"
+            }
+          ],
+          "latestCreatedRevisionName": "vibe-cloudrun-00002-fdg",
+          "latestReadyRevisionName": "vibe-cloudrun-00002-fdg",
+          "observedGeneration": 2,
+          "traffic": [
+            {
+              "latestRevision": true,
+              "percent": 100,
+              "revisionName": "vibe-cloudrun-00002-fdg"
+            }
+          ],
+          "url": "https://vibe-cloudrun-jqrfafe24q-uc.a.run.app"
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Service vibe-cloudrun."
+      }
+    },
+    "receiveTimestamp": "2026-06-23T16:08:38.252250494Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2026-06-23T16:08:37.549290Z"
+  },
+  {
+    "insertId": "axalae14w7k",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/project-a4127f08-9359-4200-985/revisions/vibe-cloudrun-00002-fdg",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Revision",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Revision",
+        "metadata": {
+          "annotations": {
+            "autoscaling.knative.dev/maxScale": "1",
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "573.0.0",
+            "run.googleapis.com/cpu-throttling": "false",
+            "run.googleapis.com/execution-environment": "gen2",
+            "run.googleapis.com/gpu-zonal-redundancy-disabled": "true",
+            "run.googleapis.com/operation-id": "72f966af-871f-4047-a5a2-084a837605b4",
+            "run.googleapis.com/startup-cpu-boost": "true",
+            "serving.knative.dev/creator": "ultrasaurus1@gmail.com"
+          },
+          "creationTimestamp": "2026-06-23T16:08:25.439324Z",
+          "generation": 1,
+          "labels": {
+            "client.knative.dev/nonce": "odwrhtjeco",
+            "cloud.googleapis.com/location": "us-central1",
+            "run.googleapis.com/startupProbeType": "Default",
+            "serving.knative.dev/configuration": "vibe-cloudrun",
+            "serving.knative.dev/configurationGeneration": "2",
+            "serving.knative.dev/route": "vibe-cloudrun",
+            "serving.knative.dev/service": "vibe-cloudrun",
+            "serving.knative.dev/serviceUid": "7ad9518a-94c8-4899-a184-24eee14a96fe"
+          },
+          "name": "vibe-cloudrun-00002-fdg",
+          "namespace": "369234196163",
+          "ownerReferences": [
+            {
+              "apiVersion": "serving.knative.dev/v1",
+              "blockOwnerDeletion": true,
+              "controller": true,
+              "kind": "Configuration",
+              "name": "vibe-cloudrun",
+              "uid": "9744ed2a-f11e-4d06-8564-9378666c3a9a"
+            }
+          ],
+          "resourceVersion": "AAZU7firEE4",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/369234196163/revisions/vibe-cloudrun-00002-fdg",
+          "uid": "3d0c2139-04cf-4501-acba-80fa23c106ca"
+        },
+        "spec": {
+          "containerConcurrency": 1,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "VIBE_SERVICE_SECRET",
+                  "value": "bgsYT1nndShqrWBUPFh9+zEmoguyszFjjMxjW2+bEDY="
+                }
+              ],
+              "image": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun@sha256:259bb418b4e26467b2b5881e1c164f83f9b0e6dcc54e07367d7f5ce98409837f",
+              "name": "vibe-cloudrun-1",
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "name": "http1"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": "4",
+                  "memory": "16Gi",
+                  "nvidia.com/gpu": "1"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 1,
+                "periodSeconds": 240,
+                "tcpSocket": {
+                  "port": 8080
+                },
+                "timeoutSeconds": 240
+              }
+            }
+          ],
+          "nodeSelector": {
+            "run.googleapis.com/accelerator": "nvidia-l4"
+          },
+          "serviceAccountName": "369234196163-compute@developer.gserviceaccount.com",
+          "timeoutSeconds": 300
+        },
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-06-23T16:08:36.206670Z",
+              "message": "Deploying revision succeeded in 10.77s.",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:08:36.162904Z",
+              "message": "Containers became healthy in 6.78s.",
+              "status": "True",
+              "type": "ContainerHealthy"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:08:27.723372Z",
+              "message": "Container image import completed in 1.39s.",
+              "status": "True",
+              "type": "ContainerReady"
+            },
+            {
+              "lastTransitionTime": "2026-06-23T16:08:29.231376Z",
+              "message": "Provisioning imported containers completed in 1.51s. Checking container health. This will wait for up to 4m for the configured startup probe, including an initial delay of 0s.",
+              "status": "True",
+              "type": "ResourcesAvailable"
+            }
+          ],
+          "containerStatuses": [
+            {
+              "imageDigest": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun@sha256:259bb418b4e26467b2b5881e1c164f83f9b0e6dcc54e07367d7f5ce98409837f",
+              "name": "vibe-cloudrun-1"
+            }
+          ],
+          "imageDigest": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun@sha256:259bb418b4e26467b2b5881e1c164f83f9b0e6dcc54e07367d7f5ce98409837f",
+          "logUrl": "https://console.cloud.google.com/logs/viewer?project=project-a4127f08-9359-4200-985&resource=cloud_run_revision/service_name/vibe-cloudrun/revision_name/vibe-cloudrun-00002-fdg&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22vibe-cloudrun%22%0Aresource.labels.revision_name%3D%22vibe-cloudrun-00002-fdg%22",
+          "observedGeneration": 1
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Revision vibe-cloudrun-00002-fdg with message: Deploying revision succeeded in 10.77s."
+      }
+    },
+    "receiveTimestamp": "2026-06-23T16:08:37.138617597Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2026-06-23T16:08:36.222926Z"
+  },
+  {
+    "insertId": "6a3aaf840002618d5122f648",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:08:36.347765561Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"vibe-cloudrun-1\" on port 8080.",
+    "timestamp": "2026-06-23T16:08:36.156045Z"
+  },
+  {
+    "insertId": "6a3aaf8400025ee1780c5503",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:08:36.479449019Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:08:36.154779Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m vibe-service listening on 0.0.0.0:8080",
+    "timestamp": "2026-06-23T16:08:36.155361Z"
+  },
+  {
+    "insertId": "6a3aaf8400020c066317f96b",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:08:36.139962344Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:08:36.133164Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mvibe_service::watchdog\u001b[0m\u001b[2m:\u001b[0m watchdog: RUNPOD_POD_ID or RUNPOD_USER_API_KEY not set — idle auto-stop disabled",
+    "timestamp": "2026-06-23T16:08:36.134150Z"
+  },
+  {
+    "insertId": "6a3aaf8400020be802f78e2c",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:08:36.139962344Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "\u001b[2m2026-06-23T16:08:36.133122Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mvibe_service\u001b[0m\u001b[2m:\u001b[0m GPU: NVIDIA L4, 23034 MiB",
+    "timestamp": "2026-06-23T16:08:36.134120Z"
+  },
+  {
+    "insertId": "6a3aaf7d00055050fae8f58f",
+    "labels": {
+      "instanceId": "002f8ffd47f53820a79a343d709933e4f48f9626c91f5e602147e989bf8ac992cd64e9ba7aabe0addcb7521a4db0e13d88f1e4bee6d4bbf16d94c3f7fab734df26768a01d78c5b0568771b2e3619b324a8c168375cf027933f",
+      "scaling_reason": "DEPLOYMENT_ROLLOUT"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2026-06-23T16:08:29.354135539Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00002-fdg",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.",
+    "timestamp": "2026-06-23T16:08:29.348240Z"
+  },
+  {
+    "insertId": "1lfvznjddp8e",
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/cloudaudit.googleapis.com%2Factivity",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "authenticationInfo": {
+        "oauthInfo": {
+          "oauthClientId": "32555940559.apps.googleusercontent.com"
+        },
+        "principalEmail": "ultrasaurus1@gmail.com",
+        "principalSubject": "user:ultrasaurus1@gmail.com"
+      },
+      "authorizationInfo": [
+        {
+          "granted": true,
+          "permission": "run.services.update",
+          "permissionType": "ADMIN_WRITE",
+          "resource": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+          "resourceAttributes": {}
+        },
+        {
+          "granted": true,
+          "permission": "run.services.update",
+          "permissionType": "ADMIN_WRITE",
+          "resource": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+          "resourceAttributes": {
+            "name": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+            "service": "run.googleapis.com/",
+            "type": "run.googleapis.com/Service"
+          }
+        }
+      ],
+      "methodName": "google.cloud.run.v1.Services.ReplaceService",
+      "request": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.ReplaceServiceRequest",
+        "name": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+        "service": {
+          "apiVersion": "serving.knative.dev/v1",
+          "kind": "Service",
+          "metadata": {
+            "annotations": {
+              "run.googleapis.com/client-name": "gcloud",
+              "run.googleapis.com/client-version": "573.0.0",
+              "run.googleapis.com/ingress": "all",
+              "run.googleapis.com/ingress-status": "all",
+              "run.googleapis.com/maxScale": "1",
+              "run.googleapis.com/operation-id": "7bd0b66d-0360-47f3-9c40-3b5eb0288fb5",
+              "run.googleapis.com/urls": "[\"https://vibe-cloudrun-369234196163.us-central1.run.app\",\"https://vibe-cloudrun-jqrfafe24q-uc.a.run.app\"]",
+              "serving.knative.dev/creator": "ultrasaurus1@gmail.com",
+              "serving.knative.dev/lastModifier": "ultrasaurus1@gmail.com"
+            },
+            "creationTimestamp": "2026-06-23T14:05:32.857171Z",
+            "generation": 1,
+            "labels": {
+              "cloud.googleapis.com/location": "us-central1"
+            },
+            "name": "vibe-cloudrun",
+            "namespace": "369234196163",
+            "resourceVersion": "AAZU7EpEDm4",
+            "selfLink": "/apis/serving.knative.dev/v1/namespaces/369234196163/services/vibe-cloudrun",
+            "uid": "7ad9518a-94c8-4899-a184-24eee14a96fe"
+          },
+          "spec": {
+            "template": {
+              "metadata": {
+                "annotations": {
+                  "run.googleapis.com/client-name": "gcloud",
+                  "run.googleapis.com/client-version": "573.0.0",
+                  "run.googleapis.com/cpu-throttling": "False",
+                  "run.googleapis.com/gpu-zonal-redundancy-disabled": "True",
+                  "run.googleapis.com/startup-cpu-boost": "true"
+                },
+                "labels": {
+                  "client.knative.dev/nonce": "odwrhtjeco",
+                  "run.googleapis.com/startupProbeType": "Default"
+                }
+              },
+              "spec": {
+                "containerConcurrency": 1,
+                "containers": [
+                  {
+                    "image": "us-central1-docker.pkg.dev/project-a4127f08-9359-4200-985/vibe/vibe-cloudrun:v1",
+                    "resources": {
+                      "limits": {
+                        "cpu": "4",
+                        "memory": "16Gi",
+                        "nvidia.com/gpu": "1"
+                      }
+                    }
+                  }
+                ],
+                "nodeSelector": {
+                  "run.googleapis.com/accelerator": "nvidia-l4"
+                },
+                "serviceAccountName": "369234196163-compute@developer.gserviceaccount.com",
+                "timeoutSeconds": 300
+              }
+            },
+            "traffic": [
+              {
+                "latestRevision": true,
+                "percent": 100
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-06-23T14:08:15.253102Z",
+                "status": "True",
+                "type": "Ready"
+              },
+              {
+                "lastTransitionTime": "2026-06-23T14:08:05.050702Z",
+                "status": "True",
+                "type": "ConfigurationsReady"
+              },
+              {
+                "lastTransitionTime": "2026-06-23T14:08:15.192043Z",
+                "status": "True",
+                "type": "RoutesReady"
+              }
+            ],
+            "latestCreatedRevisionName": "vibe-cloudrun-00001-l9n",
+            "latestReadyRevisionName": "vibe-cloudrun-00001-l9n",
+            "observedGeneration": 1,
+            "traffic": [
+              {
+                "latestRevision": true,
+                "percent": 100,
+                "revisionName": "vibe-cloudrun-00001-l9n"
+              }
+            ],
+            "url": "https://vibe-cloudrun-jqrfafe24q-uc.a.run.app"
+          }
+        }
+      },
+      "requestMetadata": {
+        "callerIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+        "callerSuppliedUserAgent": "google-cloud-sdk gcloud/573.0.0 command/gcloud.run.deploy invocation-id/591bce659bc14fde9f522385af7ba9e0 environment/None environment-version/None client-os/MACOSX client-os-ver/24.6.0 client-pltf-arch/arm interactive/True from-script/False python/3.14.5 term/xterm-256color  (Macintosh; Intel Mac OS X 24.6.0),gzip(gfe)",
+        "destinationAttributes": {},
+        "requestAttributes": {
+          "auth": {},
+          "time": "2026-06-23T16:08:25.370504Z"
+        }
+      },
+      "resourceLocation": {
+        "currentLocations": [
+          "us-central1"
+        ]
+      },
+      "resourceName": "namespaces/project-a4127f08-9359-4200-985/services/vibe-cloudrun",
+      "serviceName": "run.googleapis.com",
+      "status": {}
+    },
+    "receiveTimestamp": "2026-06-23T16:08:25.790910420Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "NOTICE",
+    "timestamp": "2026-06-23T16:08:25.151683Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.000929802s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "2601:645:4300:b4b0:28b2:2c2b:3e39:26b8",
+      "requestMethod": "GET",
+      "requestSize": "369",
+      "requestUrl": "https://vibe-cloudrun-369234196163.us-central1.run.app/jobs/b535c511-dbc6-4e03-8336-18417ccb25d5",
+      "responseSize": "2377",
+      "serverIp": "2600:1900:4244:200::",
+      "status": 200
+    },
+    "insertId": "6a3aadff0004d624bdce7065",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2026-06-23T16:02:07.336296918Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "spanId": "ab2a31314931fe96",
+    "timestamp": "2026-06-23T16:02:07.314546Z",
+    "trace": "projects/project-a4127f08-9359-4200-985/traces/5e27a0ce2040d787a1df0a5e42b2a95a",
+    "traceSampled": true
+  },
+  {
+    "errorGroups": [
+      {
+        "id": "CJ7riaD9mey2jgE"
+      }
+    ],
+    "insertId": "6a3aadf50006c948f7780b79",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "ERROR",
+    "textPayload": "Traceback (most recent call last):\n  File \"/workspace/VibeVoice/demo/inference_from_file.py\", line 455, in <module>\n    main()\n  File \"/workspace/VibeVoice/demo/inference_from_file.py\", line 280, in main\n    processor = VibeVoiceProcessor.from_pretrained(args.model_path)\n  File \"/workspace/VibeVoice/vibevoice/processor/vibevoice_processor.py\", line 100, in from_pretrained\n    tokenizer = VibeVoiceTextTokenizerFast.from_pretrained(\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/tokenization_utils_base.py\", line 2062, in from_pretrained\n    return cls._from_pretrained(\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/tokenization_utils_base.py\", line 2100, in _from_pretrained\n    slow_tokenizer = (cls.slow_tokenizer_class)._from_pretrained(\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/tokenization_utils_base.py\", line 2302, in _from_pretrained\n    tokenizer = cls(*init_inputs, **init_kwargs)\n  File \"/usr/local/lib/python3.10/dist-packages/transformers/models/qwen2/tokenization_qwen2.py\", line 172, in __init__\n    with open(vocab_file, encoding=\"utf-8\") as vocab_handle:\nTypeError: expected str, bytes or os.PathLike object, not NoneType",
+    "timestamp": "2026-06-23T16:01:57.444744Z"
+  },
+  {
+    "insertId": "6a3aadf50006c92aa23b9022",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Loading processor & model from vibevoice/VibeVoice-1.5B",
+    "timestamp": "2026-06-23T16:01:57.444714Z"
+  },
+  {
+    "insertId": "6a3aadf50006c927beb6de5a",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Speaker 1 ('Sarah') -> Voice: en-Sarah_woman.wav",
+    "timestamp": "2026-06-23T16:01:57.444711Z"
+  },
+  {
+    "insertId": "6a3aadf50006c925c4738770",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  Speaker 1 -> Sarah",
+    "timestamp": "2026-06-23T16:01:57.444709Z"
+  },
+  {
+    "insertId": "6a3aadf50006c922d72fdb6d",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Speaker mapping:",
+    "timestamp": "2026-06-23T16:01:57.444706Z"
+  },
+  {
+    "insertId": "6a3aadf50006c91fa7334c82",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "     Text preview: Speaker 1: B. Objective O F T H E Study The objective of this study is to develop a conceptual frame...",
+    "timestamp": "2026-06-23T16:01:57.444703Z"
+  },
+  {
+    "insertId": "6a3aadf50006c91c2759cd67",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  1. Speaker 1",
+    "timestamp": "2026-06-23T16:01:57.444700Z"
+  },
+  {
+    "insertId": "6a3aadf50006c919b0880d58",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Found 1 speaker segments:",
+    "timestamp": "2026-06-23T16:01:57.444697Z"
+  },
+  {
+    "insertId": "6a3aadf50006c9168611f6eb",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Reading script from: /tmp/5619eed1-0c52-4834-b41d-20440fe840e5.txt",
+    "timestamp": "2026-06-23T16:01:57.444694Z"
+  },
+  {
+    "insertId": "6a3aadf50006c91394cf4239",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Available voices: en-Alice_woman, en-Carter_man, en-Frank_man, en-Mary_woman_bgm, en-Maya_woman, en-Sarah_woman, in-Samuel_man, zh-Anchen_man_bgm, zh-Bowen_man, zh-Xinran_woman",
+    "timestamp": "2026-06-23T16:01:57.444691Z"
+  },
+  {
+    "insertId": "6a3aadf50006c9106fd95fa3",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Found 10 voice files in /workspace/VibeVoice/demo/voices",
+    "timestamp": "2026-06-23T16:01:57.444688Z"
+  },
+  {
+    "insertId": "6a3aadf50006c90d0392cc4b",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Setting seed: 71463",
+    "timestamp": "2026-06-23T16:01:57.444685Z"
+  },
+  {
+    "insertId": "6a3aadf50006c90b857adbc7",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "Using device: cuda",
+    "timestamp": "2026-06-23T16:01:57.444683Z"
+  },
+  {
+    "insertId": "6a3aadf50006c90786036f3c",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "}",
+    "timestamp": "2026-06-23T16:01:57.444679Z"
+  },
+  {
+    "insertId": "6a3aadf50006c904504ea496",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"vocab_size\": 151936",
+    "timestamp": "2026-06-23T16:01:57.444676Z"
+  },
+  {
+    "insertId": "6a3aadf50006c9023c93cf2e",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"use_sliding_window\": false,",
+    "timestamp": "2026-06-23T16:01:57.444674Z"
+  },
+  {
+    "insertId": "6a3aadf50006c8ffb0d177df",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"use_mrope\": false,",
+    "timestamp": "2026-06-23T16:01:57.444671Z"
+  },
+  {
+    "insertId": "6a3aadf50006c8fc52b6875f",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"use_cache\": true,",
+    "timestamp": "2026-06-23T16:01:57.444668Z"
+  },
+  {
+    "insertId": "6a3aadf50006c8f9c556f56c",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"transformers_version\": \"4.51.3\",",
+    "timestamp": "2026-06-23T16:01:57.444665Z"
+  },
+  {
+    "insertId": "6a3aadf50006c8f6decf7bba",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"torch_dtype\": \"bfloat16\",",
+    "timestamp": "2026-06-23T16:01:57.444662Z"
+  },
+  {
+    "insertId": "6a3aadf50006c8f375babf01",
+    "labels": {
+      "instanceId": "002f8ffd470e4aec2555c53c249289d64986395d01a4c93ce53a2aa475d08a6b7cdc1e7cabda7a18bc44e8417da561914021c44e137c71474458c55138a89fe1c766cda7f99fe6e52dbf21f37b4af521793ec2b0a87de05602"
+    },
+    "logName": "projects/project-a4127f08-9359-4200-985/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-06-23T16:01:57.669257259Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "vibe-cloudrun",
+        "location": "us-central1",
+        "project_id": "project-a4127f08-9359-4200-985",
+        "revision_name": "vibe-cloudrun-00001-l9n",
+        "service_name": "vibe-cloudrun"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "  \"tie_word_embeddings\": true,",
+    "timestamp": "2026-06-23T16:01:57.444659Z"
+  }
+]

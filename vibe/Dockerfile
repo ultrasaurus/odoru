@@ -76,14 +76,13 @@ RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
 RUN pip install --no-cache-dir -e /workspace/VibeVoice
 RUN pip install --no-cache-dir hf_transfer
 
+ENV HF_HOME=/workspace/.cache/huggingface
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV HF_HUB_DISABLE_XET=1
-RUN for i in 1 2 3; do \
-      python3 -c "from huggingface_hub import snapshot_download; snapshot_download('vibevoice/VibeVoice-1.5B')" && break || sleep 5; \
-    done
-RUN for i in 1 2 3; do \
-      python3 -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-1.5B')" && break || sleep 5; \
-    done
+RUN mkdir -p $HF_HOME
+
+COPY vibe/download-models.py /tmp/download-models.py
+RUN python3 /tmp/download-models.py
 
 # sshd, so RunPod can expose a direct ssh/scp port into the container
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* \

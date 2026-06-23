@@ -110,12 +110,16 @@ enum Command {
     /// for the pod's lifetime — re-upload after creating a new pod.
     UploadVoice {
         /// RunPod pod id (omit if --url is given)
+        #[arg(long)]
         pod_id: Option<String>,
         /// Voice name (e.g. "Andy") — pass as --speaker to synthesize afterward.
+        #[arg(long)]
         name: String,
         /// Voice descriptor matching VibeVoice's filename convention, e.g. "man" or "woman".
+        #[arg(long)]
         gender: String,
         /// Local path to the reference wav file.
+        #[arg(long)]
         wav_path: String,
         #[arg(long, default_value_t = 3000)]
         port: u16,

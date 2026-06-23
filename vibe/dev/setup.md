@@ -17,13 +17,36 @@ CUDA 12.4 works on a much wider range of machines.
 ### Docker image build -- Cloud Run
 
 ```
-VERSION=v0
+VERSION=v2
 source vibe/.env
 docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
 docker tag vibe-cloudrun:latest  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
 docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
 ```
 
+```
+gcloud run deploy vibe-cloudrun \
+  --image us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION \
+  --region us-central1 \
+  --gpu 1 --gpu-type nvidia-l4 \
+  --no-gpu-zonal-redundancy \
+  --cpu 4 --memory 16Gi \
+  --no-cpu-throttling \
+  --concurrency 1 \
+  --min-instances 0
+  --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET
+```
+
+```bash
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL
+cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_URL segment augment_seg01
+```
+
+current test:
+```bash
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL
+cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_URL segment augment/augment-2026-06-22/augment_seg13
+```
 
 ### Docker image build -- Runpod
 Build and push from the **repo root** (bump version tag each time — RunPod
@@ -121,7 +144,7 @@ cargo run -- segment authorship
 ```
 
 This reads `odoru/data/<name>.txt` and writes `vibe/data/<name>_seg01.txt`
-… `<name>_segNN.txt` (50–250 words each, `Speaker 1: ` prefix per
+… `<name>_segNN.txt` (50–200 words each, `Speaker 1: ` prefix per
 paragraph). Short headings/fragments are merged into the following
 paragraph — see `util/src/segmenter.rs` for the full pipeline and
 `dev/plan.md` for the rationale.
@@ -204,7 +227,11 @@ Don't bake personal reference audio into the Docker image — it's public on
 Docker Hub. Instead, upload it to a running pod at runtime:
 
 ```bash
-cargo run -- upload-voice <pod_id> Andy man voices/andy/ref.wav
+# For RunPod pod:
+cargo run -- upload-voice --pod-id <pod_id> --name Andy --gender man --wav-path voices/andy/ref.wav
+
+# For Cloud Run:
+cargo run -- upload-voice --name Andy --gender man --wav-path voices/andy/ref.wav --url $VIBE_URL
 ```
 
 This sends the wav straight to vibe-service, which writes it as
@@ -212,3 +239,15 @@ This sends the wav straight to vibe-service, which writes it as
 convention as the baked-in voices, so `--speaker Andy` on `synthesize`
 picks it up immediately. It only persists for the pod's lifetime; re-upload
 after creating a new pod.
+
+### Selecting a speaker/voice
+
+Use `--speaker` to specify which voice to use during synthesis:
+
+```bash
+cargo run -- synthesize <pod_id> --speaker Sarah segment authorship_seg01
+cargo run -- synthesize <pod_id> --speaker Andy segment authorship_seg01
+```
+
+Default: `Sarah`. Available speakers are baked into the Docker image
+(e.g., `Sarah`) or uploaded at runtime via `upload-voice` (e.g., `Andy`).
