@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1
+#
+# Build from the odoru repo root:
+#   docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
+#   docker tag vibe-cloudrun:latest gcr.io/<project>/vibe-cloudrun:<vN>
+#   docker push gcr.io/<project>/vibe-cloudrun:<vN>
+#
+# Targets Cloud Run GPU (NVIDIA L4). Mirrors vibe/Dockerfile's structure but
+# on NVIDIA's NGC PyTorch base (Google's recommended image for Cloud Run GPU)
+# instead of RunPod's, and without RunPod-specific sshd/entrypoint plumbing.
+
+# ── Stage 1: cargo-chef base ─────────────────────────────────────────────
+FROM nvcr.io/nvidia/pytorch:24.05-py3 AS chef
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install cargo-chef --locked
+
+WORKDIR /build
+
+# ── Stage 2: dependency recipe ──────────────────────────────────────────
+# Computes a recipe.json from Cargo.toml/Cargo.lock only, so the cook step
+# below can cache dependency builds without being invalidated by source edits.
+FROM chef AS planner
+COPY . .
+# vibe/service isn't a member of the root workspace — vibe/Cargo.toml is its
+# own workspace (members = [".", "service"]) — so cargo chef must run from
+# inside it rather than being pointed at it via --manifest-path (unsupported).
+RUN cd vibe/service && cargo chef prepare --recipe-path recipe.json
+
+# ── Stage 3: compile vibe-service ───────────────────────────────────────
+FROM chef AS builder
+
+# No GPU is present at `docker build` time, so candle-kernels can't probe
+# nvidia-smi for compute capability. L4 is Ada Lovelace, sm_89 — NOT the same
+# as RunPod's Ampere fleet (sm_86) in vibe/Dockerfile. Don't copy that value.
+ENV CUDA_COMPUTE_CAP=89
+
+COPY --from=planner /build/vibe/service/recipe.json vibe/service/recipe.json
+# cargo chef cook needs the workspace's manifest tree (not just recipe.json)
+# to resolve the workspace before building stub crates — vibe's workspace has
+# a path dependency on ../util, so that manifest is needed too. Manifests
+# only, no source, so source edits don't bust this cached layer.
+COPY vibe/Cargo.toml vibe/Cargo.toml
+COPY vibe/Cargo.lock vibe/Cargo.lock
+COPY vibe/service/Cargo.toml vibe/service/Cargo.toml
+COPY util/Cargo.toml util/Cargo.toml
+RUN cd vibe/service && cargo chef cook --release \
+    --recipe-path recipe.json \
+    --features cuda
+
+COPY . .
+RUN cargo build --release \
+    --manifest-path vibe/service/Cargo.toml \
+    --features vibe-service/cuda \
+    --bin vibe-service
+
+# ── Stage 4: Cloud Run GPU image ────────────────────────────────────────────
+# NVIDIA NGC PyTorch base, as recommended by Google for Cloud Run GPU (L4):
+# CUDA 12.4, driver requirement well above the 525+ minimum for L4.
+FROM nvcr.io/nvidia/pytorch:24.05-py3
+
+WORKDIR /workspace
+RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
+    && cd VibeVoice \
+    && git checkout 07cb79feadd2d3fd7f47530d4c964a12857936a0
+
+RUN pip install --no-cache-dir -e /workspace/VibeVoice
+RUN pip install --no-cache-dir hf_transfer
+
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV HF_HUB_DISABLE_XET=1
+RUN for i in 1 2 3; do \
+      python3 -c "from huggingface_hub import snapshot_download; snapshot_download('vibevoice/VibeVoice-1.5B')" && break || sleep 5; \
+    done
+RUN for i in 1 2 3; do \
+      python3 -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-1.5B')" && break || sleep 5; \
+    done
+
+COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-service
+
+# Cloud Run injects $PORT and routes HTTP/WebSocket directly to it — no sshd,
+# no fixed EXPOSE port needed (unlike RunPod's vibe/Dockerfile).
+ENTRYPOINT ["/usr/local/bin/vibe-service"]

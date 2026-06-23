@@ -14,19 +14,30 @@ have drivers too old for CUDA 12.8 and the container fails to start:
 `nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.8`.
 CUDA 12.4 works on a much wider range of machines.
 
-### Docker image build
+### Docker image build -- Cloud Run
+
+```
+VERSION=v0
+source vibe/.env
+docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
+docker tag vibe-cloudrun:latest  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
+docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
+```
+
+
+### Docker image build -- Runpod
 Build and push from the **repo root** (bump version tag each time — RunPod
 won't re-pull if the tag is unchanged):
 
 These are build instructions for the *next* version
 ```
-VERSION=v15
+VERSION=v16
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
 docker tag vibe:latest dockersaura/vibe:$VERSION
-docker push --mount-with-by-digest=runpod/pytorch dockersaura/vibe:$VERSION
+docker push dockersaura/vibe:$VERSION
 ```
 
-Current image: v14  (updated manually, check DockerHub to be sure)
+Current image: v15  (updated manually, check DockerHub to be sure)
 
 After pushing, update the RunPod template via the PATCH curl in
 `runpod.md`. We keep current template in: `$TEMPLATE`
