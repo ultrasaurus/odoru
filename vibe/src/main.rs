@@ -109,7 +109,8 @@ enum Command {
     /// without baking it into the (public) Docker image. Persists only
     /// for the pod's lifetime — re-upload after creating a new pod.
     UploadVoice {
-        pod_id: String,
+        /// RunPod pod id (omit if --url is given)
+        pod_id: Option<String>,
         /// Voice name (e.g. "Andy") — pass as --speaker to synthesize afterward.
         name: String,
         /// Voice descriptor matching VibeVoice's filename convention, e.g. "man" or "woman".
@@ -118,6 +119,10 @@ enum Command {
         wav_path: String,
         #[arg(long, default_value_t = 3000)]
         port: u16,
+        /// Base URL of a vibe-service instance (e.g. a Cloud Run service
+        /// URL), used instead of deriving a RunPod proxy URL from pod_id.
+        #[arg(long)]
+        url: Option<String>,
     },
     /// Run ffmpeg silencedetect on a local wav file
     Silencedetect {
@@ -135,7 +140,13 @@ enum Command {
         /// What to synthesize: a pre-split segment file or a whole document.
         #[command(subcommand)]
         input: SynthInput,
-        pod_id: String,
+        /// RunPod pod id (omit if --url is given)
+        pod_id: Option<String>,
+        /// Base URL of a vibe-service instance (e.g. a Cloud Run service
+        /// URL), used instead of deriving a RunPod proxy URL from pod_id.
+        /// Skips RunPod-specific direct-IP lookup when set.
+        #[arg(long)]
+        url: Option<String>,
         #[arg(long, default_value = "Sarah")]
         speaker: String,
         #[arg(long, default_value_t = 1.3)]
@@ -327,11 +338,17 @@ async fn main() -> Result<()> {
             client.terminate_pod(&pod_id).await?;
             info!("Terminated pod {pod_id}");
         }
-        Command::UploadVoice { pod_id, name, gender, wav_path, port } => {
+        Command::UploadVoice { pod_id, name, gender, wav_path, port, url } => {
             let bytes = std::fs::read(&wav_path).with_context(|| format!("reading {wav_path}"))?;
             info!("uploading {wav_path} ({} bytes) as voice {name}/{gender}", bytes.len());
 
-            let proxy_base_url = format!("https://{pod_id}-{port}.proxy.runpod.net");
+            let proxy_base_url = match url {
+                Some(url) => url,
+                None => {
+                    let pod_id = pod_id.context("pod_id or --url is required")?;
+                    format!("https://{pod_id}-{port}.proxy.runpod.net")
+                }
+            };
             let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
@@ -457,6 +474,7 @@ async fn main() -> Result<()> {
         Command::Synthesize {
             input,
             pod_id,
+            url,
             speaker,
             cfg_scale,
             seed,
@@ -494,17 +512,23 @@ async fn main() -> Result<()> {
             std::fs::write(&normalized_path, normalized.clone() + "\n")
                 .with_context(|| format!("writing {normalized_path}"))?;
 
-            let proxy_base_url = format!("https://{pod_id}-{port}.proxy.runpod.net");
+            let base_url = match &url {
+                Some(u) => u.clone(),
+                None => {
+                    let pod_id = pod_id.as_deref().context("pod_id or --url is required")?;
+                    format!("https://{pod_id}-{port}.proxy.runpod.net")
+                }
+            };
             let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
 
             // Poll /health via proxy until ready (proxy URL works before the pod
             // IP/portMappings are populated, so we use it here).
-            info!("waiting for vibe-service at {proxy_base_url}/health ...");
+            info!("waiting for vibe-service at {base_url}/health ...");
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()?;
             let (gpu_name, gpu_vram_mb) = loop {
-                match http.get(format!("{proxy_base_url}/health")).send().await {
+                match http.get(format!("{base_url}/health")).send().await {
                     Ok(r) if r.status().is_success() => {
                         let body: serde_json::Value = r.json().await.unwrap_or_default();
                         if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
@@ -526,16 +550,22 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             };
 
-            // After health is confirmed, fetch pod details for direct IP.
-            let pod = client.get_pod(&pod_id).await?;
-            let (synth_base_url, via) = match runpod::http_direct_url(&pod, port) {
-                Some(direct) => {
-                    info!("using direct IP: {direct}");
-                    (direct, "http-direct")
-                }
-                None => {
-                    warn!("no portMappings[{port}] found — falling back to proxy (may timeout on long segments)");
-                    (proxy_base_url, "http-proxy")
+            // After health is confirmed, fetch pod details for direct IP —
+            // only applies to RunPod; a --url target has no such concept.
+            let (synth_base_url, via) = if url.is_some() {
+                (base_url, "url")
+            } else {
+                let pod_id = pod_id.as_deref().context("pod_id or --url is required")?;
+                let pod = client.get_pod(pod_id).await?;
+                match runpod::http_direct_url(&pod, port) {
+                    Some(direct) => {
+                        info!("using direct IP: {direct}");
+                        (direct, "http-direct")
+                    }
+                    None => {
+                        warn!("no portMappings[{port}] found — falling back to proxy (may timeout on long segments)");
+                        (base_url, "http-proxy")
+                    }
                 }
             };
 
