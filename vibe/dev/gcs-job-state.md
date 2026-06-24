@@ -223,47 +223,61 @@ matters:
   `get_job_wav_handler` — GCS storage cost is trivial, no memory pressure
   to manage. Use a GCS lifecycle rule (e.g. delete after 7 days) instead
   of app-level cleanup.
-- Crate: `google-cloud-storage` (implements the standard Application
-  Default Credentials chain — metadata server *or*
-  `GOOGLE_APPLICATION_CREDENTIALS` file — so the same code works on both
-  backends without branching).
+- Crate: `object_store` 0.14 (`gcp` feature). Ambient credentials on Cloud
+  Run (metadata server); explicit key via `with_service_account_path()` on
+  RunPod. One generic `StoreImpl<S>` covers both `GoogleCloudStorage` and
+  the `InMemory` test/local backend. (Implemented in
+  `vibe/service/src/jobstore.rs`.)
 
 ### Auth — differs per platform
 
 | Platform  | Credential path                                              |
 |-----------|---------------------------------------------------------------|
-| Cloud Run | Ambient — default service account via the metadata server. Just needs IAM: `roles/storage.objectAdmin` on the bucket. No code/config beyond that. |
-| RunPod    | Not on GCP, no metadata server. Needs an explicit service-account key. Plan: base64 the JSON key into a RunPod template env var (same pattern as `VIBE_SERVICE_SECRET`), decode to a temp file in `entrypoint.sh`, set `GOOGLE_APPLICATION_CREDENTIALS` to that path. |
+| Cloud Run | Ambient — default service account (`369234196163-compute@…`) via the metadata server, which has `roles/storage.objectAdmin` on the bucket. Only `GCS_BUCKET` is set; no key. |
+| RunPod    | Not on GCP, no metadata server. Uses an explicit service-account key (SA `vibe-jobs-runpod`): base64'd into the `GCS_SA_KEY_B64` RunPod template env var (same pattern as `VIBE_SERVICE_SECRET`); `entrypoint.sh` decodes it to `/root/gcs-sa-key.json` and exports `GCS_SA_KEY_PATH`, which `main()` feeds to `object_store`'s `with_service_account_path()`. |
 
 ### Infra setup (one-time)
 
-- [ ] Create the GCS bucket.
-- [ ] Grant Cloud Run's default service account `storage.objectAdmin` on
-      it.
-- [ ] Generate a service-account key for RunPod; add it to `vibe/.env`
-      (not baked into the public `dockersaura/vibe` image).
-- [ ] Wire the key through `vibe/entrypoint.sh` (decode + set
-      `GOOGLE_APPLICATION_CREDENTIALS`).
-- [ ] Add a bucket lifecycle rule (delete objects after N days).
-- [ ] Add `GCS_BUCKET` env var to both the Cloud Run deploy command and
-      the RunPod template.
+- [x] Create the GCS bucket — `gs://vibe-jobs-a4127f08` (us-central1).
+- [x] Grant Cloud Run's default service account `storage.objectAdmin` on
+      it (also granted to SA `vibe-jobs-runpod`).
+- [x] Generate a service-account key for RunPod; base64'd into `vibe/.env`
+      as `GCS_SA_KEY_B64` (not baked into the public `dockersaura/vibe`
+      image). Required lifting the org policy
+      `iam.disableServiceAccountKeyCreation` for the project.
+- [x] Wire the key through `vibe/entrypoint.sh` (decode + set
+      `GCS_SA_KEY_PATH`).
+- [x] Add a bucket lifecycle rule — delete objects after 7 days.
+- [x] Add `GCS_BUCKET` to the Cloud Run deploy command (`dev/setup.md`)
+      and the RunPod template (`runpod.md`).
 
-### Do this first: de-risk the crate on RunPod
+Deploy/build not yet done — both images need a rebuild+push carrying the
+JobStore code before durable state is live.
 
-Before wiring anything into `vibe-service`, write a small standalone
-binary and run it on a RunPod host to confirm:
+### Crate de-risk — done
 
-- `google-cloud-storage` crate version/API surface is compatible with the
-  current `vibe/service/Cargo.toml` dependency versions.
-- Its ADC chain actually picks up `GOOGLE_APPLICATION_CREDENTIALS` on a
-  non-GCP host (RunPod has no metadata server). This is the riskiest
-  assumption — verify it before building on it.
+Both credential paths were proven with the standalone `vibe/gcs-eval/`
+binary against `object_store` 0.14 (not `google-cloud-storage` — see the
+De-risk results section at the top for the rationale and the API
+corrections). Cloud Run ambient auth ran as a Cloud Run Job; the non-GCP
+key path ran locally with `SA_KEY_PATH` set and ADC out of scope (faithful
+RunPod proxy).
 
 ### Open items for whoever picks this up
 
-- Bucket name/project not yet decided.
 - **Cloud Run churn frequency is uncharacterized** — hit once in a few
   tests, could be rare bad luck. Not worth measuring before doing this
   work: write-on-transition is cheap and also buys crash-resilience on
   every backend, so the work pays off regardless of how often Cloud Run
   specifically churns.
+
+## TODO (follow-ups)
+
+- **Split `vibe/service/src/main.rs` into modules.** It's ~900 lines now
+  and mixes HTTP handlers, the job lifecycle (`run_job`/`run_inference`),
+  resurrection, and `main()` wiring. Candidate split: a `handlers` module
+  (the axum route handlers) and a `jobs` module (`run_job`, `resurrect`,
+  `persist_status`/`persist_align`), leaving `main.rs` as wiring +
+  `AppState`. The resurrection logic and store contract are now covered by
+  tests in `main.rs` (`mod tests`) and `jobstore.rs`, so the move has a
+  safety net — do the split without changing behaviour, keep tests green.

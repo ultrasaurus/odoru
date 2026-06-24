@@ -18,7 +18,7 @@ CUDA 12.4 works on a much wider range of machines.
 
 ```
 source vibe/.env
-VERSION=v4
+VERSION=v5
 docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
 docker tag vibe-cloudrun:latest  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
 docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION

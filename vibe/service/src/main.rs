@@ -773,3 +773,144 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// AppState backed by an in-memory store — no GCS, no HTTP.
+    fn test_state() -> AppState {
+        AppState {
+            secret: None,
+            gpu_info: Arc::new("test-gpu".into()),
+            tracker: ActivityTracker::default(),
+            jobs: Arc::new(RwLock::new(HashMap::new())),
+            store: jobstore::mem_store(),
+        }
+    }
+
+    fn done_status() -> StoredStatus {
+        StoredStatus {
+            status: "done".into(),
+            name: Some("seg01".into()),
+            seed: Some(71463),
+            wall_secs: Some(12.5),
+            audio_secs: Some(40.0),
+            rtf: Some(0.31),
+            error: None,
+        }
+    }
+
+    // ---- resurrection ----
+
+    #[tokio::test]
+    async fn resurrect_unknown_job_leaves_cache_empty() {
+        let state = test_state();
+        resurrect(&state, "nope").await;
+        assert!(state.jobs.read().await.get("nope").is_none());
+    }
+
+    #[tokio::test]
+    async fn resurrect_done_rebuilds_done_marker() {
+        let state = test_state();
+        state.store.put_status("j1", &done_status()).await.unwrap();
+
+        resurrect(&state, "j1").await;
+
+        let jobs = state.jobs.read().await;
+        match jobs.get("j1") {
+            Some(JobState::Done { name, seed, wall_secs, audio_secs, rtf, wav_bytes, align }) => {
+                assert_eq!(name.as_deref(), Some("seg01"));
+                assert_eq!(*seed, 71463);
+                assert_eq!(*wall_secs, 12.5);
+                assert_eq!(*audio_secs, Some(40.0));
+                assert_eq!(*rtf, Some(0.31));
+                // payloads are fetched lazily by their handlers, not in the marker
+                assert!(wav_bytes.is_empty());
+                assert!(align.is_none());
+            }
+            _ => panic!("expected Done marker"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resurrect_error_rebuilds_error() {
+        let state = test_state();
+        let mut s = done_status();
+        s.status = "error".into();
+        s.error = Some("boom".into());
+        state.store.put_status("j1", &s).await.unwrap();
+
+        resurrect(&state, "j1").await;
+
+        let jobs = state.jobs.read().await;
+        match jobs.get("j1") {
+            Some(JobState::Error { error, .. }) => assert_eq!(error, "boom"),
+            _ => panic!("expected Error"),
+        }
+    }
+
+    /// Stuck-running rule: a job still at `running` in the store (instance
+    /// died before committing a result) resurrects as a terminal Error, never
+    /// an indefinite Running.
+    #[tokio::test]
+    async fn resurrect_running_is_marked_dead() {
+        let state = test_state();
+        let mut s = done_status();
+        s.status = "running".into();
+        state.store.put_status("j1", &s).await.unwrap();
+
+        resurrect(&state, "j1").await;
+
+        let jobs = state.jobs.read().await;
+        match jobs.get("j1") {
+            Some(JobState::Error { error, .. }) => assert!(error.contains("interrupted")),
+            _ => panic!("expected terminal Error for stuck running"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resurrect_does_not_clobber_live_cache() {
+        let state = test_state();
+        // A locally-run job is Running in cache; the store has nothing.
+        state.jobs.write().await.insert(
+            "j1".into(),
+            JobState::Running { name: Some("seg01".into()) },
+        );
+
+        resurrect(&state, "j1").await;
+
+        // Must stay Running — resurrection only fills a *miss*.
+        let jobs = state.jobs.read().await;
+        match jobs.get("j1") {
+            Some(JobState::Running { .. }) => {}
+            _ => panic!("resurrect clobbered live cache"),
+        }
+    }
+
+    // ---- normal-path persistence contract ----
+
+    /// Mirrors what run_job's Done branch persists, then asserts a fresh
+    /// instance (empty cache) can both resurrect the marker and fetch the wav
+    /// payload from the store — the contract the wav handler relies on.
+    #[tokio::test]
+    async fn done_payload_and_marker_survive_to_fresh_instance() {
+        let writer = test_state();
+        let wav = b"RIFF....fake-wav".to_vec();
+        // payload first, status marker last (commit ordering)
+        writer.store.put_object("j1", "audio.wav", Bytes::from(wav.clone())).await.unwrap();
+        writer.store.put_status("j1", &done_status()).await.unwrap();
+
+        // Fresh instance shares only the durable store, not the cache.
+        let reader = AppState { jobs: Arc::new(RwLock::new(HashMap::new())), ..writer.clone() };
+        assert!(reader.jobs.read().await.is_empty());
+
+        resurrect(&reader, "j1").await;
+        assert!(matches!(reader.jobs.read().await.get("j1"), Some(JobState::Done { .. })));
+
+        let fetched = reader.store.get_object("j1", "audio.wav").await.unwrap();
+        assert_eq!(fetched.as_deref(), Some(&wav[..]));
+        // no alignment was persisted → transcript object is absent
+        assert!(reader.store.get_object("j1", "transcript.json").await.unwrap().is_none());
+    }
+}

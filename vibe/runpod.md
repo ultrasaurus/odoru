@@ -19,7 +19,9 @@ curl --request POST \
   \"dockerStartCmd\": [],
   \"env\": {
     \"RUNPOD_USER_API_KEY\": \"$RUNPOD_API_KEY\",
-    \"VIBE_SERVICE_SECRET\": \"$VIBE_SERVICE_SECRET\"
+    \"VIBE_SERVICE_SECRET\": \"$VIBE_SERVICE_SECRET\",
+    \"GCS_BUCKET\": \"$GCS_BUCKET\",
+    \"GCS_SA_KEY_B64\": \"$GCS_SA_KEY_B64\"
   },
   \"imageName\": \"dockersaura/vibe:$VERSION\",
   \"isPublic\": false,
@@ -48,13 +50,18 @@ curl --request PATCH \
   \"name\": \"vibe $VERSION\",
   \"env\": {
     \"RUNPOD_USER_API_KEY\": \"$RUNPOD_API_KEY\",
-    \"VIBE_SERVICE_SECRET\": \"$VIBE_SERVICE_SECRET\"
+    \"VIBE_SERVICE_SECRET\": \"$VIBE_SERVICE_SECRET\",
+    \"GCS_BUCKET\": \"$GCS_BUCKET\",
+    \"GCS_SA_KEY_B64\": \"$GCS_SA_KEY_B64\"
   }
 }"
 ```
 
-Note: `source vibe/.env` first so `$RUNPOD_API_KEY`, `$TEMPLATE`, and
-`$VIBE_SERVICE_SECRET` are all in scope.
+Note: `source vibe/.env` first so `$RUNPOD_API_KEY`, `$TEMPLATE`,
+`$VIBE_SERVICE_SECRET`, `$GCS_BUCKET`, and `$GCS_SA_KEY_B64` are all in
+scope. `GCS_BUCKET` + `GCS_SA_KEY_B64` enable durable job state on RunPod —
+`entrypoint.sh` decodes the key and sets `GCS_SA_KEY_PATH`; see
+`dev/gcs-job-state.md`.
 
 
 ## delete template
