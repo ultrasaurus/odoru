@@ -17,8 +17,8 @@ CUDA 12.4 works on a much wider range of machines.
 ### Docker image build -- Cloud Run
 
 ```
-VERSION=v2
 source vibe/.env
+VERSION=v4
 docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
 docker tag vibe-cloudrun:latest  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
 docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
@@ -33,7 +33,7 @@ gcloud run deploy vibe-cloudrun \
   --cpu 4 --memory 16Gi \
   --no-cpu-throttling \
   --concurrency 1 \
-  --min-instances 0
+  --min-instances 0 \
   --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET
 ```
 
@@ -46,6 +46,11 @@ current test:
 ```bash
 cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL
 cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_URL segment augment/augment-2026-06-22/augment_seg13
+```
+
+leave it running in one terminal while you run the test in another
+```bash
+gcloud beta logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=vibe-cloudrun"
 ```
 
 ### Docker image build -- Runpod

@@ -492,8 +492,7 @@ async fn main() -> Result<()> {
                     anyhow::bail!("synthesize doc is not yet implemented — run `segment <name>` first, then synthesize each segment");
                 }
             };
-            let default_data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-            let data_dir = basedir.as_deref().unwrap_or(default_data_dir);
+            let data_dir = segment::resolve_basedir(basedir.as_deref());
             let input_path = format!("{data_dir}/{name}.txt");
             let normalized_path = format!("{data_dir}/{name}_normalized.txt");
             let wav_path = format!("{data_dir}/{name}_generated.wav");
@@ -662,13 +661,13 @@ async fn main() -> Result<()> {
 
             // Fetch alignment results (non-fatal).
             fetch_align_results(
-                &http, &synth_base_url, &job_id_remote, &name, data_dir, &secret,
+                &http, &synth_base_url, &job_id_remote, &name, &data_dir, &secret,
             )
             .await;
 
             // Update the sidecar with this segment's output files and voice
             // (non-fatal — synthesis output is already saved regardless).
-            segment::record_synthesis(data_dir, &name, &speaker);
+            segment::record_synthesis(&data_dir, &name, &speaker);
 
             // Append run log.
             let entry = serde_json::json!({

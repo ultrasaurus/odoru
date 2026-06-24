@@ -6,6 +6,19 @@ use util::segment_types::{Sidecar, SidecarFiles, SidecarSegment, SidecarSentence
 
 const SCHEMA_VERSION: &str = "0.1";
 
+/// Resolves a `--basedir` argument: if `None`, defaults to `vibe/data`. If
+/// relative, joins it under `vibe/data` (so `--basedir augment/foo` means
+/// `vibe/data/augment/foo`, matching every documented use case). Absolute
+/// paths are used as-is.
+pub fn resolve_basedir(basedir: Option<&str>) -> String {
+    let default_data_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
+    match basedir {
+        None => default_data_dir.to_string(),
+        Some(dir) if std::path::Path::new(dir).is_absolute() => dir.to_string(),
+        Some(dir) => format!("{default_data_dir}/{dir}"),
+    }
+}
+
 /// `<segment_name>_report.json`, as written by `synthesize` after each
 /// segment's forced-alignment QA pass.
 #[derive(Debug, Deserialize)]
@@ -111,8 +124,7 @@ pub fn run(name: &str, basedir: Option<&str>) -> Result<()> {
     // Source documents live in the workspace data/ dir (odoru/data/).
     // Segment files are written to --basedir (default: vibe/data).
     let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
-    let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-    let seg_dir = basedir.unwrap_or(default_seg_dir);
+    let seg_dir = resolve_basedir(basedir);
     let input_path = format!("{src_dir}/{name}.txt");
     let text = std::fs::read_to_string(&input_path)
         .with_context(|| format!("reading {input_path}"))?;
@@ -217,8 +229,7 @@ pub fn record_synthesis(basedir: &str, name: &str, voice_id: &str) {
 /// crashed/interrupted run) and the QA verdict for those that are done.
 /// Lets you resume a run without re-reading every log line.
 pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
-    let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-    let seg_dir = basedir.unwrap_or(default_seg_dir);
+    let seg_dir = resolve_basedir(basedir);
     let sidecar_path = format!("{seg_dir}/{name}.segments.json");
     let sidecar_json = std::fs::read_to_string(&sidecar_path)
         .with_context(|| format!("reading {sidecar_path}"))?;
@@ -271,8 +282,7 @@ pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
 /// pairing until you re-run `synthesize` for them (use `summary` to see
 /// what's missing first, but staleness from edits isn't tracked).
 pub fn segments_from_files(name: &str, basedir: Option<&str>) -> Result<()> {
-    let default_seg_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/data");
-    let seg_dir = basedir.unwrap_or(default_seg_dir);
+    let seg_dir = resolve_basedir(basedir);
 
     let existing: Option<Sidecar> = std::fs::read_to_string(format!("{seg_dir}/{name}.segments.json"))
         .ok()
@@ -301,7 +311,7 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>) -> Result<()> {
     let source_sha256 = existing.as_ref().map(|s| s.source_sha256.clone()).unwrap_or_default();
 
     let prefix = format!("{name}_seg");
-    let mut indices: Vec<u32> = std::fs::read_dir(seg_dir)
+    let mut indices: Vec<u32> = std::fs::read_dir(&seg_dir)
         .with_context(|| format!("reading dir {seg_dir}"))?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {

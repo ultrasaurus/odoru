@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Pre-download and verify VibeVoice models for Docker image."""
+"""Pre-download a single HF model into the Docker image. Pass model_id as argv[1]."""
 
 import os
+import sys
 import time
 from huggingface_hub import snapshot_download
 
@@ -24,20 +25,8 @@ def download_with_retry(model_id, max_retries=3):
     raise RuntimeError(f"Failed to download {model_id} after {max_retries} attempts")
 
 
-def verify_models():
-    """Verify Qwen tokenizer loads correctly (most likely failure point)."""
-    print("\nVerifying Qwen2.5-1.5B tokenizer can be loaded...")
-    try:
-        from transformers import AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen2.5-1.5B')
-        print("  ✓ Qwen2.5-1.5B tokenizer loaded successfully")
-    except Exception as e:
-        print(f"  ✗ Failed to load Qwen tokenizer: {e}")
-        raise
-
-
 if __name__ == '__main__':
-    download_with_retry('vibevoice/VibeVoice-1.5B')
-    download_with_retry('Qwen/Qwen2.5-1.5B')
-    verify_models()
-    print("\n✓ All models downloaded and verified!")
+    if len(sys.argv) != 2:
+        print("Usage: download-models.py <model_id>")
+        sys.exit(1)
+    download_with_retry(sys.argv[1])

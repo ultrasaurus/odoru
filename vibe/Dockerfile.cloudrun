@@ -76,12 +76,15 @@ RUN pip install --no-cache-dir -e /workspace/VibeVoice
 RUN pip install --no-cache-dir hf_transfer
 
 ENV HF_HOME=/workspace/.cache/huggingface
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV HF_HUB_DISABLE_XET=1
 RUN mkdir -p $HF_HOME
 
 COPY vibe/download-models.py /tmp/download-models.py
-RUN python3 /tmp/download-models.py
+COPY vibe/verify-qwen-tokenizer.py /tmp/verify-qwen-tokenizer.py
+RUN python3 /tmp/download-models.py vibevoice/VibeVoice-1.5B
+RUN python3 /tmp/download-models.py Qwen/Qwen2.5-1.5B
+RUN python3 /tmp/download-models.py facebook/wav2vec2-base-960h
+RUN python3 /tmp/verify-qwen-tokenizer.py
 
 COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-service
 
