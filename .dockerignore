@@ -6,3 +6,4 @@ vibe/data/
 out/
 docs/
 **/*.mp3
+**/secret/

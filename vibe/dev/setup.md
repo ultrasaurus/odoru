@@ -34,8 +34,15 @@ gcloud run deploy vibe-cloudrun \
   --no-cpu-throttling \
   --concurrency 1 \
   --min-instances 0 \
-  --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET
+  --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET,GCS_BUCKET=vibe-jobs-a4127f08
 ```
+
+`GCS_BUCKET` enables durable job state (survives instance churn) — see
+`dev/gcs-job-state.md`. On Cloud Run, credentials are ambient (the default
+service account's metadata token), so no key env var is needed. On RunPod,
+also set `GCS_SA_KEY_PATH` to a service-account key file (the entrypoint
+decodes it from a base64 env var). Without `GCS_BUCKET`, job state is
+in-memory only.
 
 ```bash
 cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL

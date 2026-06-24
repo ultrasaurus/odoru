@@ -74,14 +74,13 @@ RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
     && git checkout 07cb79feadd2d3fd7f47530d4c964a12857936a0
 
 RUN pip install --no-cache-dir -e /workspace/VibeVoice
-RUN pip install --no-cache-dir hf_transfer
 
 ENV HF_HOME=/workspace/.cache/huggingface
 ENV HF_HUB_DISABLE_XET=1
 RUN mkdir -p $HF_HOME
 
-COPY vibe/download-models.py /tmp/download-models.py
-COPY vibe/verify-qwen-tokenizer.py /tmp/verify-qwen-tokenizer.py
+COPY vibe/docker/download-models.py /tmp/download-models.py
+COPY vibe/docker/verify-qwen-tokenizer.py /tmp/verify-qwen-tokenizer.py
 RUN python3 /tmp/download-models.py vibevoice/VibeVoice-1.5B
 RUN python3 /tmp/download-models.py Qwen/Qwen2.5-1.5B
 RUN python3 /tmp/download-models.py facebook/wav2vec2-base-960h

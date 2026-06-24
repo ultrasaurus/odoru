@@ -1,10 +1,11 @@
 dist/
 target/
 node_modules/
-.venv
-.env
 .cargo/config.toml
+.env
+.venv
 out/
+secret/
 vibe/data/
 vibe/vv
 voices/

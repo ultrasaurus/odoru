@@ -1,6 +1,9 @@
+mod jobstore;
 mod watchdog;
 
 use anyhow::Result;
+use bytes::Bytes;
+use jobstore::{JobStore, StoredStatus};
 use axum::{
     body::Body,
     extract::{Path, Request, State},
@@ -24,6 +27,7 @@ struct AppState {
     gpu_info: Arc<String>,
     tracker: ActivityTracker,
     jobs: Arc<RwLock<HashMap<String, JobState>>>,
+    store: Arc<dyn JobStore>,
 }
 
 #[derive(Clone, Serialize)]
@@ -172,6 +176,52 @@ async fn create_job_handler(
     Json(JobCreated { job_id, name }).into_response()
 }
 
+/// On a local cache miss, rebuild job status from the durable store
+/// (resurrection after instance churn / restart) and insert a marker into the
+/// cache so later polls are fast. Payload objects (wav/transcript/report) are
+/// fetched lazily by their own handlers, so the resurrected `Done` carries an
+/// empty wav and `None` align.
+///
+/// Stuck-running rule: a job found still at `running` in the store has no
+/// committed result and its instance is gone, so it is treated as dead — a
+/// terminal error rather than an indefinite `running` that never resolves.
+async fn resurrect(state: &AppState, job_id: &str) {
+    if state.jobs.read().await.contains_key(job_id) {
+        return;
+    }
+    let status = match state.store.get_status(job_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return, // unknown job → stays absent → 404
+        Err(e) => {
+            warn!(job_id = %job_id, error = %e, "resurrect: store read failed");
+            return;
+        }
+    };
+    let job = match status.status.as_str() {
+        "done" => JobState::Done {
+            name: status.name,
+            seed: status.seed.unwrap_or(0),
+            wall_secs: status.wall_secs.unwrap_or(0.0),
+            audio_secs: status.audio_secs,
+            rtf: status.rtf,
+            wav_bytes: Arc::new(vec![]), // fetched lazily from store
+            align: None,                 // fetched lazily from store
+        },
+        "error" => JobState::Error {
+            name: status.name,
+            error: status.error.unwrap_or_else(|| "job failed".into()),
+        },
+        _ => {
+            info!(job_id = %job_id, "resurrect: job interrupted mid-run, marking dead");
+            JobState::Error {
+                name: status.name,
+                error: "job interrupted before completion (no result persisted); resubmit".into(),
+            }
+        }
+    };
+    state.jobs.write().await.entry(job_id.to_string()).or_insert(job);
+}
+
 async fn get_job_handler(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
@@ -181,6 +231,7 @@ async fn get_job_handler(
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
+    resurrect(&state, &job_id).await;
     let jobs = state.jobs.read().await;
     match jobs.get(&job_id) {
         None => StatusCode::NOT_FOUND.into_response(),
@@ -197,49 +248,51 @@ async fn get_job_wav_handler(
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    let wav_bytes = {
+    resurrect(&state, &job_id).await;
+
+    // Decide from the cache without holding the lock across the (possible)
+    // store fetch.
+    enum WavSource {
+        Cached(Arc<Vec<u8>>),
+        FetchFromStore,
+        Conflict(&'static str),
+        NotFound,
+    }
+    let source = {
         let jobs = state.jobs.read().await;
         match jobs.get(&job_id) {
-            None => return StatusCode::NOT_FOUND.into_response(),
-            Some(JobState::Done { wav_bytes, .. }) => wav_bytes.clone(),
-            Some(other) => {
-                let status_str = match other {
-                    JobState::Pending { .. } => "pending",
-                    JobState::Running { .. } => "running",
-                    JobState::Error { .. } => "error",
-                    JobState::Done { .. } => unreachable!(),
-                };
-                return (
-                    StatusCode::CONFLICT,
-                    Json(serde_json::json!({ "status": status_str })),
-                )
-                    .into_response();
+            None => WavSource::NotFound,
+            // Locally-run job: wav is in the cache.
+            Some(JobState::Done { wav_bytes, .. }) if !wav_bytes.is_empty() => {
+                WavSource::Cached(wav_bytes.clone())
             }
+            // Resurrected Done: wav not in cache, pull it from the store.
+            Some(JobState::Done { .. }) => WavSource::FetchFromStore,
+            Some(JobState::Pending { .. }) => WavSource::Conflict("pending"),
+            Some(JobState::Running { .. }) => WavSource::Conflict("running"),
+            Some(JobState::Error { .. }) => WavSource::Conflict("error"),
         }
     };
 
-    // Drop wav bytes from job store after fetch; keep align data for subsequent fetches.
-    {
-        let mut jobs = state.jobs.write().await;
-        if let Some(JobState::Done { name, seed, wall_secs, audio_secs, rtf, align, .. }) =
-            jobs.remove(&job_id)
-        {
-            info!(job_id = %job_id, name = ?name, "wav fetched, job removed from memory");
-            jobs.insert(job_id, JobState::Done {
-                name,
-                seed,
-                wall_secs,
-                audio_secs,
-                rtf,
-                wav_bytes: Arc::new(vec![]),
-                align,
-            });
+    let wav_bytes = match source {
+        WavSource::Cached(b) => b.as_ref().clone(),
+        WavSource::FetchFromStore => match state.store.get_object(&job_id, "audio.wav").await {
+            Ok(Some(b)) => b.to_vec(),
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Err(e) => {
+                error!(job_id = %job_id, error = %e, "wav fetch from store failed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        },
+        WavSource::Conflict(s) => {
+            return (StatusCode::CONFLICT, Json(serde_json::json!({ "status": s }))).into_response()
         }
-    }
+        WavSource::NotFound => return StatusCode::NOT_FOUND.into_response(),
+    };
 
     (
         [(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("audio/wav"))],
-        Body::from(wav_bytes.as_ref().clone()),
+        Body::from(wav_bytes),
     )
         .into_response()
 }
@@ -252,13 +305,59 @@ async fn get_job_transcript_handler(
     if !authorized(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let jobs = state.jobs.read().await;
-    match jobs.get(&job_id) {
-        Some(JobState::Done { align: Some(a), .. }) => Json(&a.transcript).into_response(),
-        Some(JobState::Done { align: None, .. }) => StatusCode::NOT_FOUND.into_response(),
-        Some(_) => StatusCode::CONFLICT.into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
+    resurrect(&state, &job_id).await;
+    serve_align_object(&state, &job_id, "transcript.json", |a| &a.transcript).await
+}
+
+/// Shared logic for the transcript/report handlers: serve from the cached
+/// `AlignData` when present, otherwise fetch the stored JSON object (a
+/// resurrected job, or one whose align data isn't in memory). A `Done` job
+/// with no align object yields 404, matching prior behaviour when alignment
+/// failed.
+async fn serve_align_object<T: Serialize>(
+    state: &AppState,
+    job_id: &str,
+    object_name: &str,
+    pick: impl Fn(&AlignData) -> &T,
+) -> Response {
+    enum Decision {
+        Serve(Vec<u8>),
+        FetchFromStore,
+        Conflict,
+        NotFound,
     }
+    let decision = {
+        let jobs = state.jobs.read().await;
+        match jobs.get(job_id) {
+            Some(JobState::Done { align: Some(a), .. }) => {
+                match serde_json::to_vec(pick(a)) {
+                    Ok(bytes) => Decision::Serve(bytes),
+                    Err(_) => Decision::NotFound,
+                }
+            }
+            Some(JobState::Done { align: None, .. }) => Decision::FetchFromStore,
+            Some(_) => Decision::Conflict,
+            None => Decision::NotFound,
+        }
+    };
+    let bytes = match decision {
+        Decision::Serve(b) => b,
+        Decision::FetchFromStore => match state.store.get_object(job_id, object_name).await {
+            Ok(Some(b)) => b.to_vec(),
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Err(e) => {
+                error!(job_id = %job_id, object = object_name, error = %e, "align fetch from store failed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        },
+        Decision::Conflict => return StatusCode::CONFLICT.into_response(),
+        Decision::NotFound => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("application/json"))],
+        Body::from(bytes),
+    )
+        .into_response()
 }
 
 async fn get_job_report_handler(
@@ -269,13 +368,8 @@ async fn get_job_report_handler(
     if !authorized(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let jobs = state.jobs.read().await;
-    match jobs.get(&job_id) {
-        Some(JobState::Done { align: Some(a), .. }) => Json(&a.report).into_response(),
-        Some(JobState::Done { align: None, .. }) => StatusCode::NOT_FOUND.into_response(),
-        Some(_) => StatusCode::CONFLICT.into_response(),
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
+    resurrect(&state, &job_id).await;
+    serve_align_object(&state, &job_id, "report.json", |a| &a.report).await
 }
 
 /// Strip "Speaker N: " prefixes from each line, then join into a single string
@@ -335,6 +429,26 @@ async fn run_alignment(wav_bytes: &[u8], text: &str, name: &str) -> Option<Align
     }
 }
 
+/// Best-effort write of the status marker to the durable store. A failure
+/// only costs durability (the job still lives in the in-memory cache), so we
+/// log and carry on rather than failing the job.
+async fn persist_status(state: &AppState, job_id: &str, status: StoredStatus) {
+    if let Err(e) = state.store.put_status(job_id, &status).await {
+        warn!(job_id = %job_id, error = %e, "failed to persist job status to store");
+    }
+}
+
+/// Persist alignment payloads (transcript + report) as their own objects.
+async fn persist_align(state: &AppState, job_id: &str, a: &AlignData) -> Result<()> {
+    state.store
+        .put_object(job_id, "transcript.json", Bytes::from(serde_json::to_vec(&a.transcript)?))
+        .await?;
+    state.store
+        .put_object(job_id, "report.json", Bytes::from(serde_json::to_vec(&a.report)?))
+        .await?;
+    Ok(())
+}
+
 async fn run_job(state: AppState, job_id: String, req: JobRequest) {
     let name = req.name.as_deref().unwrap_or("(unnamed)");
 
@@ -344,6 +458,15 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
             *j = JobState::Running { name: req.name.clone() };
         }
     }
+    persist_status(&state, &job_id, StoredStatus {
+        status: "running".into(),
+        name: req.name.clone(),
+        seed: None,
+        wall_secs: None,
+        audio_secs: None,
+        rtf: None,
+        error: None,
+    }).await;
 
     info!(job_id = %job_id, name = %name, seed = req.seed, cfg = req.cfg_scale, "job running");
 
@@ -393,12 +516,23 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
     match result {
         Err(e) => {
             warn!(job_id = %job_id, name = %name, error = %e, "job failed");
-            let mut jobs = state.jobs.write().await;
-            if let Some(j) = jobs.get_mut(&job_id) {
-                *j = JobState::Error { name: req.name.clone(), error: e.to_string() };
-            } else {
-                warn!(job_id = %job_id, name = %name, "job_id not found in map when storing error");
+            {
+                let mut jobs = state.jobs.write().await;
+                if let Some(j) = jobs.get_mut(&job_id) {
+                    *j = JobState::Error { name: req.name.clone(), error: e.to_string() };
+                } else {
+                    warn!(job_id = %job_id, name = %name, "job_id not found in map when storing error");
+                }
             }
+            persist_status(&state, &job_id, StoredStatus {
+                status: "error".into(),
+                name: req.name.clone(),
+                seed: None,
+                wall_secs: None,
+                audio_secs: None,
+                rtf: None,
+                error: Some(e.to_string()),
+            }).await;
         }
         Ok((wav_bytes, seed_used)) => {
             let wall = start.elapsed().as_secs_f64();
@@ -415,20 +549,48 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
             // alignment fails.
             let align = run_alignment(&wav_bytes, &req.text, name).await;
 
-            let mut jobs = state.jobs.write().await;
-            if let Some(j) = jobs.get_mut(&job_id) {
-                *j = JobState::Done {
-                    name: req.name.clone(),
-                    seed: seed_used,
-                    wall_secs: wall,
-                    audio_secs,
-                    rtf,
-                    wav_bytes: Arc::new(wav_bytes),
-                    align,
-                };
-            } else {
-                warn!(job_id = %job_id, name = %name, "job_id not found in map when storing result");
+            // Persist payload objects to the durable store BEFORE the status
+            // marker, so a `done` status never points at a missing wav. See
+            // gcs-job-state.md (write-ordering / atomicity).
+            if let Err(e) = state.store
+                .put_object(&job_id, "audio.wav", Bytes::from(wav_bytes.clone()))
+                .await
+            {
+                warn!(job_id = %job_id, error = %e, "failed to persist wav to store");
             }
+            if let Some(a) = &align {
+                if let Err(e) = persist_align(&state, &job_id, a).await {
+                    warn!(job_id = %job_id, error = %e, "failed to persist alignment to store");
+                }
+            }
+
+            {
+                let mut jobs = state.jobs.write().await;
+                if let Some(j) = jobs.get_mut(&job_id) {
+                    *j = JobState::Done {
+                        name: req.name.clone(),
+                        seed: seed_used,
+                        wall_secs: wall,
+                        audio_secs,
+                        rtf,
+                        wav_bytes: Arc::new(wav_bytes),
+                        align,
+                    };
+                } else {
+                    warn!(job_id = %job_id, name = %name, "job_id not found in map when storing result");
+                }
+            }
+
+            // Commit marker last.
+            persist_status(&state, &job_id, StoredStatus {
+                status: "done".into(),
+                name: req.name.clone(),
+                seed: Some(seed_used),
+                wall_secs: Some(wall),
+                audio_secs,
+                rtf,
+                error: None,
+            }).await;
         }
     }
 }
@@ -563,11 +725,33 @@ async fn main() -> Result<()> {
     let tracker = ActivityTracker::default();
     watchdog::spawn_idle_watchdog(tracker.clone());
 
+    // Durable job state. With GCS_BUCKET set, state survives instance churn /
+    // restart; without it, falls back to an in-memory store (same behaviour
+    // as before, not durable).
+    let store: Arc<dyn JobStore> = match std::env::var("GCS_BUCKET") {
+        Ok(bucket) => {
+            // GCS_SA_KEY_PATH: explicit key file for non-GCP hosts (RunPod).
+            // Unset on Cloud Run, where ambient metadata creds are used.
+            let key_path = std::env::var("GCS_SA_KEY_PATH").ok();
+            info!(
+                bucket = %bucket,
+                key = key_path.as_deref().unwrap_or("ambient"),
+                "job state: GCS-backed"
+            );
+            jobstore::gcs_store(&bucket, key_path.as_deref())?
+        }
+        Err(_) => {
+            warn!("GCS_BUCKET not set — job state is in-memory only (not durable)");
+            jobstore::mem_store()
+        }
+    };
+
     let state = AppState {
         secret,
         gpu_info: Arc::new(gpu_info),
         tracker,
         jobs: Arc::new(RwLock::new(HashMap::new())),
+        store,
     };
 
     let app = Router::new()
