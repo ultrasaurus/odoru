@@ -102,3 +102,6 @@ OF12!	O F 12 exclamation point
 (this display)!!"	this display exclamation point exclamation point
 JONES!	Jones exclamation point
 OF4!	O F four exclamation point
+
+# Hypertext '87 keynote
+Johnny-come-lately	John knee come lately
