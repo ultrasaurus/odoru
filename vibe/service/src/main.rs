@@ -72,6 +72,14 @@ struct JobRequest {
     speaker: String,
     #[serde(default = "default_cfg_scale")]
     cfg_scale: f64,
+    /// Sampling temperature. When set, the inference script enables sampling
+    /// (do_sample); when absent, generation is greedy/deterministic.
+    #[serde(default)]
+    temp: Option<f64>,
+    /// Voice speed factor applied to the reference audio. <1 slows the cloned
+    /// voice, >1 speeds it up. Absent (or 1.0) leaves it unchanged.
+    #[serde(default)]
+    speed: Option<f64>,
     name: Option<String>,
 }
 
@@ -605,16 +613,28 @@ async fn run_inference_inner(
     let log_file = std::fs::File::create(log_path)?;
     let log_file2 = log_file.try_clone()?;
 
+    let mut args: Vec<String> = vec![
+        "/workspace/VibeVoice/demo/inference_from_file.py".into(),
+        "--model_path".into(), "vibevoice/VibeVoice-1.5B".into(),
+        "--txt_path".into(), txt_path.into(),
+        "--speaker_names".into(), req.speaker.clone(),
+        "--cfg_scale".into(), req.cfg_scale.to_string(),
+        "--seed".into(), req.seed.to_string(),
+        "--output_dir".into(), out_dir.into(),
+    ];
+    // Optional knobs: only pass when provided so the script keeps its
+    // defaults (greedy decoding; speed unchanged) otherwise.
+    if let Some(temp) = req.temp {
+        args.push("--temp".into());
+        args.push(temp.to_string());
+    }
+    if let Some(speed) = req.speed {
+        args.push("--speed".into());
+        args.push(speed.to_string());
+    }
+
     let mut child = tokio::process::Command::new("python3")
-        .args([
-            "/workspace/VibeVoice/demo/inference_from_file.py",
-            "--model_path", "vibevoice/VibeVoice-1.5B",
-            "--txt_path", txt_path,
-            "--speaker_names", &req.speaker,
-            "--cfg_scale", &req.cfg_scale.to_string(),
-            "--seed", &req.seed.to_string(),
-            "--output_dir", out_dir,
-        ])
+        .args(&args)
         .stdout(std::process::Stdio::from(log_file))
         .stderr(std::process::Stdio::from(log_file2))
         .current_dir("/workspace/VibeVoice")

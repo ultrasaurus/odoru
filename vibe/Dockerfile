@@ -104,5 +104,10 @@ RUN chmod +x /entrypoint.sh
 RUN pip install --no-cache-dir \
     "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.4cxx11abiFALSE-cp311-cp311-linux_x86_64.whl"
 
+# Override the upstream demo script with our copy, which adds --temp and
+# --speed (see vibe/docker/inference_from_file.py). Kept last so editing it
+# doesn't bust the heavy clone/pip/model-download layers above.
+COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
+
 EXPOSE 22 3000
 ENTRYPOINT ["/entrypoint.sh"]

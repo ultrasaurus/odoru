@@ -68,7 +68,7 @@ These are build instructions for the *next* version
 
 Below is current / last pushed version (updated manually, check DockerHub to be sure)
 ```
-VERSION=v17
+VERSION=v18
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
 docker tag vibe:latest dockersaura/vibe:$VERSION
 docker push dockersaura/vibe:$VERSION

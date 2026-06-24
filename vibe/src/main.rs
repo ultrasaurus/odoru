@@ -155,6 +155,14 @@ enum Command {
         speaker: String,
         #[arg(long, default_value_t = 1.3)]
         cfg_scale: f64,
+        /// Sampling temperature. When set, enables sampling (non-deterministic);
+        /// omit for greedy/deterministic generation.
+        #[arg(long)]
+        temp: Option<f64>,
+        /// Voice speed factor applied to the reference audio. <1 slows the
+        /// cloned voice, >1 speeds it up; omit (or 1.0) to leave unchanged.
+        #[arg(long)]
+        speed: Option<f64>,
         /// Random seed (default: 71463)
         #[arg(long, default_value_t = 71463)]
         seed: u64,
@@ -481,6 +489,8 @@ async fn main() -> Result<()> {
             url,
             speaker,
             cfg_scale,
+            temp,
+            speed,
             seed,
             gpu_price,
             port,
@@ -573,7 +583,7 @@ async fn main() -> Result<()> {
             };
 
             // POST /jobs — returns immediately with job_id.
-            info!("submitting job: {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker})");
+            info!("submitting job: {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker}, temp={temp:?}, speed={speed:?})");
             let mut submit_req = http
                 .post(format!("{synth_base_url}/jobs"))
                 .json(&serde_json::json!({
@@ -581,6 +591,8 @@ async fn main() -> Result<()> {
                     "seed": seed,
                     "speaker": speaker,
                     "cfg_scale": cfg_scale,
+                    "temp": temp,
+                    "speed": speed,
                     "name": name,
                 }));
             if let Some(ref s) = secret {
@@ -680,6 +692,8 @@ async fn main() -> Result<()> {
                 "gpu_price_per_hr": gpu_price,
                 "speaker": speaker,
                 "cfg_scale": cfg_scale,
+                "temp": temp,
+                "speed": speed,
                 "seed": seed_used,
                 "inference_wall_secs": wall,
                 "audio_duration_secs": audio_duration_secs,

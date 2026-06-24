@@ -87,6 +87,11 @@ RUN python3 /tmp/verify-qwen-tokenizer.py
 
 COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-service
 
+# Override the upstream demo script with our copy, which adds --temp and
+# --speed (see vibe/docker/inference_from_file.py). Kept last so editing it
+# doesn't bust the heavy clone/pip/model-download layers above.
+COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
+
 # Cloud Run injects $PORT and routes HTTP/WebSocket directly to it — no sshd,
 # no fixed EXPOSE port needed (unlike RunPod's vibe/Dockerfile).
 ENTRYPOINT ["/usr/local/bin/vibe-service"]
