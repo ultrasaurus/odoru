@@ -65,14 +65,14 @@ Build and push from the **repo root** (bump version tag each time — RunPod
 won't re-pull if the tag is unchanged):
 
 These are build instructions for the *next* version
+
+Below is current / last pushed version (updated manually, check DockerHub to be sure)
 ```
-VERSION=v16
+VERSION=v17
 docker build --platform=linux/amd64 -f vibe/Dockerfile -t vibe:latest .
 docker tag vibe:latest dockersaura/vibe:$VERSION
 docker push dockersaura/vibe:$VERSION
 ```
-
-Current image: v15  (updated manually, check DockerHub to be sure)
 
 After pushing, update the RunPod template via the PATCH curl in
 `runpod.md`. We keep current template in: `$TEMPLATE`

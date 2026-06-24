@@ -95,5 +95,14 @@ COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-
 COPY vibe/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Flash Attention 2: VibeVoice's inference_from_file.py requests
+# flash_attention_2 on CUDA and silently falls back to SDPA (slower, and per
+# VibeVoice's own warning, less-tested / lower audio quality) if it's not
+# installed. Prebuilt wheel matched to this base's torch 2.4 / cu12 / py3.11
+# (pip-torch is cxx11abi=FALSE). Kept as the last RUN so it doesn't bust the
+# multi-GB model-download layers above.
+RUN pip install --no-cache-dir \
+    "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.4cxx11abiFALSE-cp311-cp311-linux_x86_64.whl"
+
 EXPOSE 22 3000
 ENTRYPOINT ["/entrypoint.sh"]
