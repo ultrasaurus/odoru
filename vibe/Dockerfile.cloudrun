@@ -92,6 +92,18 @@ COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-
 # doesn't bust the heavy clone/pip/model-download layers above.
 COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
 
+# Flash Attention 2: VibeVoice requests flash_attention_2 on CUDA and silently
+# falls back to SDPA (slower / lower audio quality) if it's missing. Wheel is
+# matched to THIS base (nvcr pytorch 24.05): python 3.10, torch 2.4, cu12,
+# cxx11abi=TRUE — different from RunPod's wheel (py3.11 / abi=FALSE). The base
+# torch is an NVIDIA NGC build (2.4.0a0); if this prebuilt wheel fails to
+# import, the run falls back to SDPA (check the log for
+# "Language model attention: flash_attention_2") and the fix is a source build
+# (`pip install flash-attn --no-build-isolation`). Kept last so it doesn't bust
+# the model-download layers above.
+RUN pip install --no-cache-dir \
+    "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.4cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
+
 # Cloud Run injects $PORT and routes HTTP/WebSocket directly to it — no sshd,
 # no fixed EXPOSE port needed (unlike RunPod's vibe/Dockerfile).
 ENTRYPOINT ["/usr/local/bin/vibe-service"]
