@@ -171,14 +171,31 @@ a retry loop.
 
 ### 4. Stitch segments into one file
 
+A hard concat (no gap) pops at segment boundaries — VibeVoice doesn't fade
+to silence at the end of a segment, so the cut is audible. Use
+`dev/stitch.sh`, which fades each segment in/out (150ms default) and
+inserts a silence gap (800ms default) between segments:
+
+```bash
+dev/stitch.sh $BASEDIR $BASENAME            # defaults: 0.15s fade, 0.8s gap
+dev/stitch.sh $BASEDIR $BASENAME 0.2 1.0    # custom fade/gap
+```
+
+Writes `${BASEDIR}/${BASENAME}_stitched.wav`. Re-run any time after
+regenerating individual segments — it always rebuilds from whatever
+`${BASENAME}_segNN_generated.wav` files currently exist.
+
+For a quick one-off without fades (e.g. to compare against the faded
+version), the plain hard-concat approach still works:
+
 ```bash
 cd $BASEDIR
 printf "file '%s'\n" *_generated.wav > ${BASENAME}_concat_list.txt
-ffmpeg -y -f concat -safe 0 -i ${BASENAME}_concat_list.txt -acodec copy ${BASENAME}_stitched.wav
+ffmpeg -y -f concat -safe 0 -i ${BASENAME}_concat_list.txt -acodec copy ${BASENAME}_stitched_hard.wav
 ```
 
 The `printf` glob (portable bash/zsh) matches only `*_generated.wav`, not
-the `_stitched.wav` output itself if you re-run this.
+the `_stitched*.wav` output itself if you re-run this.
 
 ### 5. Listen and record findings
 
