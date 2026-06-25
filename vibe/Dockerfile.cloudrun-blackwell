@@ -77,7 +77,14 @@ RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
 
 # VibeVoice is pinned to a commit; if it fails to import against torch 2.7,
 # that's the first compat fix to make (transformers/torch API drift).
-RUN pip install --no-cache-dir -e /workspace/VibeVoice
+#
+# PIP_CONSTRAINT= clears the NGC base's pip constraint file
+# (/etc/pip/constraint.txt), which pins NGC-validated versions like
+# dill==0.3.9. VibeVoice pins datasets==3.5.0, which needs dill<0.3.9, so the
+# NGC constraint makes the resolve impossible. Clearing it lets pip honor
+# VibeVoice's own pins. (torch stays as the in-image NGC build — already
+# satisfied, not reinstalled.)
+RUN PIP_CONSTRAINT= pip install --no-cache-dir -e /workspace/VibeVoice
 
 ENV HF_HOME=/workspace/.cache/huggingface
 ENV HF_HUB_DISABLE_XET=1
