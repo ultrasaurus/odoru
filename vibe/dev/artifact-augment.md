@@ -40,3 +40,15 @@ Issues are grouped by type: **TTS artifacts** (hallucinated non-speech audio) vs
   [artifact-authorship.md](artifact-authorship.md) seg04, but not the same
   position pattern. Worth tracking whether mid-segment vs. leading/trailing-edge
   position correlates with anything (segment length, sentence boundary, etc.).
+
+
+- [ ] seg13 -- rerun: all caps header needs override
+
+```bash
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+BASENAME=augment
+BASEDIR=augment/augment-2026-06-22
+for index in {13..18}; do
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg${index}
+done
+```

@@ -20,10 +20,9 @@
 #     candle-CUDA / sm_120 concerns from the Rust side entirely. The GPU is used
 #     only by VibeVoice (Python/torch). Revisit CUDA alignment later (would need
 #     candle kernels rebuilt for sm_120) if the align_secs numbers justify it.
-#   - Flash Attention is NOT installed yet (SDPA). Get Blackwell RTF numbers
-#     first; if promising, add flash-attn — likely a SOURCE build on this NGC
-#     base (prebuilt wheels fail against NGC's patched torch, as on L4), or
-#     reconsider a standard-pip-torch base so a prebuilt wheel can be used.
+#   - Flash Attention is SOURCE-built (see stage 4) — prebuilt wheels fail
+#     against NGC's patched torch (same ABI trap hit on the L4 image), so it
+#     must compile against the in-image torch. ~20-40 min, last layer.
 
 # ── Stage 1: cargo-chef base (CPU-only Rust build) ───────────────────────
 # Same NGC base as the runtime stage so the builder's glibc matches the
@@ -105,6 +104,23 @@ COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from
 
 # Alignment runs on CPU: vibe-service is built without the cuda feature, so the
 # candle aligner is CPU-only by construction (no FORCED_ALIGNMENT_DEVICE needed).
+
+# Flash Attention 2, source-built against the in-image NGC torch (2.7.0a0).
+# Prebuilt wheels don't work here: they're built against stable torch and fail
+# to load against NGC's patched build (undefined symbol: c10::Error::what()),
+# the same trap hit on the L4 image (Dockerfile.cloudrun). Source-building
+# against the actual in-image torch avoids that ABI mismatch entirely.
+#
+# TORCH_CUDA_ARCH_LIST=12.0 targets only Blackwell's sm_120 (this image only
+# ever runs on the RTX Pro 6000) — building every arch would multiply compile
+# time for no benefit here. MAX_JOBS caps parallel compile units to bound peak
+# memory during the build (the docker host, not the GPU instance). ninja
+# speeds up the compile; packaging is a flash-attn setup.py build dependency.
+# Kept last — it's the slowest layer and changes least.
+RUN PIP_CONSTRAINT= pip install --no-cache-dir ninja packaging
+ENV TORCH_CUDA_ARCH_LIST="12.0"
+ENV MAX_JOBS=4
+RUN PIP_CONSTRAINT= pip install --no-cache-dir flash-attn --no-build-isolation
 
 # Cloud Run injects $PORT and routes HTTP directly to it — no EXPOSE needed.
 ENTRYPOINT ["/usr/local/bin/vibe-service"]

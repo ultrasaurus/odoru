@@ -18,7 +18,7 @@ CUDA 12.4 works on a much wider range of machines.
 
 ```
 source vibe/.env
-VERSION=v1
+VERSION=v2
 docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun-blackwell \
   -t vibe-cloudrun-bw:latest .
 docker tag vibe-cloudrun-bw:latest \
@@ -64,6 +64,11 @@ cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_BW_URL segment 
 leave it running in one terminal while you run the test in another
 ```bash
 gcloud beta logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=vibe-cloudrun-bw"
+```
+
+if successful, run
+```bash
+cargo run -- summary augment --basedir augment/augment-2026-06-22
 ```
 
 ### Docker image build -- Runpod

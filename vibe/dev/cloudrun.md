@@ -116,10 +116,103 @@ build commands): image `Dockerfile.cloudrun-blackwell`, tag
 Blackwell binary is built CPU-only, so no `FORCED_ALIGNMENT_DEVICE` is
 needed.
 
+### Results
+
+| Build | Synth RTF | Synth wall | Align (CPU) | Notes |
+|---|---|---|---|---|
+| v1, SDPA | 1.476 | 98.2s | 18.5s | First working Blackwell run; no flash-attn |
+| v2, flash-attn, 1st job | 0.920 | 64.1s | 20.1s | First job after deploy — likely cold-start (cuDNN/kernel autotuning) |
+| v2, flash-attn, steady-state (n=14) | **0.475–0.670, avg ~0.53** | 23.0–46.6s | 7.1–20.1s | augment_seg13–18, varied lengths (137–184 words); one segment (seg13) re-run twice |
+
+flash-attn took the GPU from ~1.5x slower than RunPod to, once warmed up,
+**roughly half RunPod's typical RTF (~1.0)**. `flash_attn_2_cuda` imported
+and executed correctly — no crash, no fallback. The 0.920 first-job sample
+looks like one-time warmup cost, not representative of steady throughput;
+all 14 subsequent jobs clustered tightly in 0.475–0.670 regardless of
+segment length. Alignment (CPU) scaled with segment length as expected
+(7.1s–20.1s); a few segments flagged 1–2 alignment "suspects" (review-worthy,
+not failures) — none filtered/errored.
+
+One run (seg14–18, first pass) used the wrong voice (forgot to set it before
+running) — timing data is still valid and included above, but that batch's
+audio isn't the one to listen-test; seg13–18 second pass has the correct
+voice.
+
+**Surprise**: `pip install flash-attn --no-build-isolation` did **not**
+source-compile despite the flag — install took 1.3s and the resulting
+`flash_attn_2_cuda.cpython-312-…so` carries a March 2025 mtime, meaning pip
+silently grabbed a matching prebuilt PyPI wheel and skipped the sdist build
+entirely. `TORCH_CUDA_ARCH_LIST=12.0` had no effect since nothing compiled.
+This worked out fine here — the wheel's ABI happens to match this NGC
+torch (2.7.0a0) and its kernels run correctly on sm_120 — but it means the
+Dockerfile comment claiming a "source build" is currently inaccurate; the
+actual mechanism is "whatever pip resolves," verified empirically rather
+than guaranteed. Revisit if a future torch/transformers bump changes which
+wheel pip picks.
+
 ### Decision criteria
 
 Measure on a representative segment set (varied cfg-scale / seed / speed):
-- synth RTF (target: ≥3–4× the L4, i.e. roughly RunPod-class or better), and
-- cost-per-segment vs RunPod at $0.25–0.50/hr.
+- synth RTF (target: ≥3–4× the L4, i.e. roughly RunPod-class or better) —
+  **met, comfortably**: steady-state ~0.53 avg, roughly **2x faster** than
+  RunPod's typical ~1.0 RTF (using the single early 0.920 sample
+  understated this — see Results above).
+- cost-per-segment vs RunPod at $0.25–0.50/hr — **closer than it looked,
+  still not a clean win on a single-job basis**. At $1.3148/hr vs RunPod's
+  $0.25–0.50/hr (2.6–5.3x the hourly rate) offset by a ~2x speed advantage,
+  Blackwell's cost-per-segment lands around **1.3–2.6x RunPod's** (using
+  RunPod RTF ~1.0; if RunPod is actually running its best-case 0.29–0.40
+  RTF per `quirks.md`, Blackwell's relative cost is worse, not better).
+  Better than the earlier ~3–4x estimate, but still a premium, not a win.
 
-If single-job is promising, evaluate parallel jobs to exploit the 96 GB.
+So: single-job Blackwell is a clear technical win (fastest synth path we've
+measured, ~2x RunPod) but still costs more per segment than RunPod at
+list price. Two ways the calculus could still favor Blackwell:
+- **Parallel jobs** exploiting the 96 GB (~10 GB used per VibeVoice-1.5B
+  job leaves room for many concurrent jobs on one instance) — at N≈4-8
+  concurrent jobs per instance, cost-per-segment could drop well below
+  RunPod's. This is the natural next step given steady-state numbers hold.
+- **Operational value** (serverless scale-to-zero, no RunPod pod
+  start/stop lifecycle, durable job state) independent of raw cost.
+
+Listen test on the corrected-voice batch (seg13–18, 15 segments total so
+far): quality good.
+
+## Next: parallel-job support (flagged, not started)
+
+Given the cost math above, running multiple jobs concurrently on one
+Blackwell instance is the natural next lever — at N≈4–8 concurrent jobs,
+cost-per-segment could drop well below RunPod's.
+
+What's already in place: `AppState.jobs` (`HashMap<String, JobState>`
+behind an `RwLock`) and the GCS `JobStore` already support multiple
+in-flight jobs keyed by `job_id` — no Rust-side bookkeeping change needed
+for that part.
+
+What's NOT yet handled — the actual constraint is the inference path, not
+job bookkeeping:
+- `run_inference_inner` spawns a **fresh `python3` subprocess per job**
+  (`tokio::process::Command`), which **loads VibeVoice from scratch every
+  time**. N concurrent jobs means N separate model loads into VRAM
+  (~10 GB each), not N requests against one shared loaded model. At
+  96 GB that bounds concurrency to roughly 8-9 just on memory, before
+  considering whether N simultaneous loads/compute on one GPU contend with
+  each other in practice (unverified — needs an empirical test: fire several
+  `synthesize` calls back-to-back without waiting and watch whether wall
+  time per job degrades).
+- Cloud Run's `--concurrency 1` (current deploy setting) bounds simultaneous
+  *HTTP requests being handled*. Since `create_job_handler` returns almost
+  immediately after spawning the background task, this likely isn't the
+  real bottleneck for submitting several jobs in quick succession — but
+  worth confirming, and probably worth raising anyway once subprocess
+  concurrency is handled.
+- Per-job model loading time is currently bundled into each job's `wall`/
+  `rtf` (it's a fresh process), so part of the existing ~0.53 avg RTF is
+  load time, not pure inference. A persistent model server (load once, serve
+  many) would both enable cleaner parallelism and could lower latency
+  further — bigger change than just relaxing concurrency, worth scoping
+  separately if the simpler subprocess-concurrency test looks promising.
+
+Suggested first step: empirically test 2-4 concurrent `synthesize` calls
+against the same Blackwell instance and see how wall time and RTF change,
+before investing in the persistent-model-server redesign.
