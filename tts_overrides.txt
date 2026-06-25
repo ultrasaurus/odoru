@@ -104,4 +104,7 @@ JONES!	Jones exclamation point
 OF4!	O F four exclamation point
 
 # Hypertext '87 keynote
-Johnny-come-lately	John knee come lately
+I'm a Johnny-come-lately	I am A Johnny Come Lately
+MCST	M C S T
+Lib	libb
+I reread a lot of it just a few days	I ree red a lot of it just a few days
