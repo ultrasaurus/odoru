@@ -18,7 +18,7 @@ CUDA 12.4 works on a much wider range of machines.
 
 ```
 source vibe/.env
-VERSION=v2
+VERSION=v3
 docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun-blackwell \
   -t vibe-cloudrun-bw:latest .
 docker tag vibe-cloudrun-bw:latest \
@@ -26,7 +26,13 @@ docker tag vibe-cloudrun-bw:latest \
 docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION
 ```
 
-```
+`MAX_CONCURRENT_JOBS` is set in `vibe/.env` (sourced in the build step
+above) — see `dev/parallel.md` for the testing ramp (2 -> 4 -> 8).
+`HEARTBEAT_SECS` defaults to 60 if unset; lower it (e.g. `10`) when
+testing concurrency on short segments:
+
+```bash
+HEARTBEAT_SECS=10
 gcloud run deploy vibe-cloudrun-bw \
   --image us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION \
   --region us-central1 \
@@ -34,9 +40,9 @@ gcloud run deploy vibe-cloudrun-bw \
   --no-gpu-zonal-redundancy \
   --cpu 20 --memory 80Gi \
   --no-cpu-throttling \
-  --concurrency 1 \
+  --concurrency $MAX_CONCURRENT_JOBS \
   --min-instances 0 \
-  --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET,GCS_BUCKET=vibe-jobs-a4127f08
+  --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET,GCS_BUCKET=vibe-jobs-a4127f08,MAX_CONCURRENT_JOBS=$MAX_CONCURRENT_JOBS,HEARTBEAT_SECS=$HEARTBEAT_SECS
 ```
 
 `GCS_BUCKET` enables durable job state (survives instance churn) — see

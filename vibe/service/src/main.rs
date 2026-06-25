@@ -16,7 +16,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tracing::{info, warn, error};
 use uuid::Uuid;
 use watchdog::ActivityTracker;
@@ -28,6 +28,8 @@ struct AppState {
     tracker: ActivityTracker,
     jobs: Arc<RwLock<HashMap<String, JobState>>>,
     store: Arc<dyn JobStore>,
+    job_semaphore: Arc<Semaphore>,
+    heartbeat_secs: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -463,6 +465,15 @@ async fn persist_align(state: &AppState, job_id: &str, a: &AlignData) -> Result<
 async fn run_job(state: AppState, job_id: String, req: JobRequest) {
     let name = req.name.as_deref().unwrap_or("(unnamed)");
 
+    // Wait for a free synth slot before claiming Running. Held until this
+    // function returns, so it's released whether the job succeeds or
+    // errors. While waiting, the job stays Pending — not Running, not
+    // stuck — see dev/parallel.md.
+    let _permit = match state.job_semaphore.clone().acquire_owned().await {
+        Ok(permit) => permit,
+        Err(_) => return, // semaphore closed; service is shutting down
+    };
+
     {
         let mut jobs = state.jobs.write().await;
         if let Some(j) = jobs.get_mut(&job_id) {
@@ -497,18 +508,22 @@ async fn run_job(state: AppState, job_id: String, req: JobRequest) {
 
     let start = std::time::Instant::now();
 
-    // Log a heartbeat every 60s while inference is running.
+    // Log a heartbeat every `heartbeat_secs` while inference is running
+    // (default 60s; override with HEARTBEAT_SECS for concurrency testing on
+    // segments too short to ever hit the default — see dev/parallel.md).
     let heartbeat_job_id = job_id.clone();
     let heartbeat_name = name.to_string();
+    let heartbeat_secs = state.heartbeat_secs;
     let (heartbeat_cancel_tx, mut heartbeat_cancel_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(heartbeat_secs));
         interval.tick().await; // skip the immediate first tick
         loop {
             tokio::select! {
                 _ = interval.tick() => {
                     // elapsed is approximate; this runs until the cancel fires
-                    tracing::info!(job_id = %heartbeat_job_id, name = %heartbeat_name, "job still running");
+                    let gpu_mem = query_gpu_memory().await;
+                    tracing::info!(job_id = %heartbeat_job_id, name = %heartbeat_name, gpu_mem = %gpu_mem, "job still running");
                 }
                 _ = &mut heartbeat_cancel_rx => break,
             }
@@ -716,6 +731,22 @@ fn query_gpu_info() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Best-effort current VRAM usage, for per-job heartbeat logging during
+/// concurrency testing (see dev/parallel.md). Same silent-fallback style as
+/// `query_gpu_info`; uses `tokio::process::Command` since this runs inside
+/// an async heartbeat loop rather than once at startup.
+async fn query_gpu_memory() -> String {
+    tokio::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=memory.used,memory.total", "--format=csv,noheader"])
+        .output()
+        .await
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 /// Resets the idle watchdog's timer on every request — status polls and
 /// result downloads count as activity too, not just the inference job
 /// itself. Without this, the watchdog could stop the pod while a client is
@@ -748,6 +779,21 @@ async fn main() -> Result<()> {
     let tracker = ActivityTracker::default();
     watchdog::spawn_idle_watchdog(tracker.clone());
 
+    // Cap how many synth subprocesses run at once on this instance. Default
+    // 1 preserves prior single-job behavior; deploys targeting GPUs with
+    // VRAM headroom (e.g. Blackwell) raise this alongside Cloud Run
+    // --concurrency. See dev/parallel.md.
+    let max_concurrent_jobs: usize = std::env::var("MAX_CONCURRENT_JOBS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    info!(max_concurrent_jobs, "job concurrency limit");
+
+    let heartbeat_secs: u64 = std::env::var("HEARTBEAT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+
     // Durable job state. With GCS_BUCKET set, state survives instance churn /
     // restart; without it, falls back to an in-memory store (same behaviour
     // as before, not durable).
@@ -775,6 +821,8 @@ async fn main() -> Result<()> {
         tracker,
         jobs: Arc::new(RwLock::new(HashMap::new())),
         store,
+        job_semaphore: Arc::new(Semaphore::new(max_concurrent_jobs)),
+        heartbeat_secs,
     };
 
     let app = Router::new()
@@ -809,6 +857,8 @@ mod tests {
             tracker: ActivityTracker::default(),
             jobs: Arc::new(RwLock::new(HashMap::new())),
             store: jobstore::mem_store(),
+            job_semaphore: Arc::new(Semaphore::new(8)),
+            heartbeat_secs: 60,
         }
     }
 

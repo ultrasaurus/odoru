@@ -41,8 +41,10 @@ Issues are grouped by type: **TTS artifacts** (hallucinated non-speech audio) vs
   position pattern. Worth tracking whether mid-segment vs. leading/trailing-edge
   position correlates with anything (segment length, sentence boundary, etc.).
 
-
-- [ ] seg13 -- rerun: all caps header needs override
+seg13 
+- [X] rerun: all caps header needs override -- works well
+- [ ] rerun: "progress" override
+-- 13, 19 need listen test (ran in sequence accidentally)
 
 ```bash
 cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
@@ -52,3 +54,37 @@ for index in {13..18}; do
   cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg${index}
 done
 ```
+
+# Test parallelism
+
+## N=2 test — two different segments at once
+```bash
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+BASENAME=augment
+BASEDIR=augment/augment-2026-06-22
+time (
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg23 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg24 &
+  wait
+)
+```
+
+## separate cold start, before running in parallel
+```bash
+
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+BASENAME=augment
+BASEDIR=augment/augment-2026-06-22
+cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg25 || exit 1
+time (
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg26 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg27 &
+  wait
+)
+
+```
+`time` only gives wall-clock for the pair — check per-job RTF/wall in the
+Cloud Run logs (`gcloud logging read 'resource.type=cloud_run_revision
+AND resource.labels.service_name=vibe-cloudrun-bw' --order=asc
+--format='value(textPayload)' --freshness=<window>`), filtered for `job
+done` and `gpu_mem`.

@@ -178,41 +178,62 @@ list price. Two ways the calculus could still favor Blackwell:
 Listen test on the corrected-voice batch (seg13–18, 15 segments total so
 far): quality good.
 
-## Next: parallel-job support (flagged, not started)
+## Parallel-job support (Stage 1 implemented, N=2 tested)
 
 Given the cost math above, running multiple jobs concurrently on one
 Blackwell instance is the natural next lever — at N≈4–8 concurrent jobs,
-cost-per-segment could drop well below RunPod's.
+cost-per-segment could drop well below RunPod's. Full design and ramp
+plan: `dev/parallel.md`.
 
-What's already in place: `AppState.jobs` (`HashMap<String, JobState>`
-behind an `RwLock`) and the GCS `JobStore` already support multiple
-in-flight jobs keyed by `job_id` — no Rust-side bookkeeping change needed
-for that part.
+### What's implemented
 
-What's NOT yet handled — the actual constraint is the inference path, not
-job bookkeeping:
-- `run_inference_inner` spawns a **fresh `python3` subprocess per job**
-  (`tokio::process::Command`), which **loads VibeVoice from scratch every
-  time**. N concurrent jobs means N separate model loads into VRAM
-  (~10 GB each), not N requests against one shared loaded model. At
-  96 GB that bounds concurrency to roughly 8-9 just on memory, before
-  considering whether N simultaneous loads/compute on one GPU contend with
-  each other in practice (unverified — needs an empirical test: fire several
-  `synthesize` calls back-to-back without waiting and watch whether wall
-  time per job degrades).
-- Cloud Run's `--concurrency 1` (current deploy setting) bounds simultaneous
-  *HTTP requests being handled*. Since `create_job_handler` returns almost
-  immediately after spawning the background task, this likely isn't the
-  real bottleneck for submitting several jobs in quick succession — but
-  worth confirming, and probably worth raising anyway once subprocess
-  concurrency is handled.
-- Per-job model loading time is currently bundled into each job's `wall`/
-  `rtf` (it's a fresh process), so part of the existing ~0.53 avg RTF is
-  load time, not pure inference. A persistent model server (load once, serve
-  many) would both enable cleaner parallelism and could lower latency
-  further — bigger change than just relaxing concurrency, worth scoping
-  separately if the simpler subprocess-concurrency test looks promising.
+Stage 1 from `dev/parallel.md`: a `tokio::sync::Semaphore` gates how many
+synth subprocesses run at once, sized from `MAX_CONCURRENT_JOBS` (env var,
+default 1). The semaphore is acquired inside the spawned `run_job` task —
+not in the `POST /jobs` handler — so a job waiting for a free slot stays
+`Pending` rather than looking stuck. `AppState.jobs`/the GCS `JobStore`
+already supported multiple in-flight jobs keyed by `job_id`, so no
+bookkeeping change was needed there. Per-job model loading is unchanged
+(still a fresh `python3` subprocess per job, loading VibeVoice from
+scratch each time) — that redundant-load cost is the trigger for Stage 2
+(persistent model server) if it turns out to matter; see `dev/parallel.md`.
 
-Suggested first step: empirically test 2-4 concurrent `synthesize` calls
-against the same Blackwell instance and see how wall time and RTF change,
-before investing in the persistent-model-server redesign.
+Also added: `HEARTBEAT_SECS` (env var, default 60) controls how often a
+running job logs a heartbeat with current VRAM (`nvidia-smi
+memory.used,memory.total`) — lowered to 10 for the tests below since
+these segments finish well under the default 60s interval.
+
+Deploy wires both through `--set-env-vars`; `--concurrency` is set to
+match `MAX_CONCURRENT_JOBS` so Cloud Run actually routes that many
+requests to one instance. See `dev/setup.md`.
+
+### Results so far (N=2)
+
+VRAM is not the constraint: two concurrent jobs peaked around 12.7 GiB
+combined, far under the 96 GiB budget — plenty of headroom for more than
+2 concurrent jobs on memory alone.
+
+RTF degrades under concurrency, but throughput still wins:
+
+| Scenario | RTF | Notes |
+|---|---|---|
+| Solo, warm instance | ~0.475–0.520 | baseline (no concurrency) |
+| Solo, cold instance | 1.392–2.459 | first request after idle/fresh deploy; model load + CUDA/cuDNN warmup overlap with generation — not a concurrency effect |
+| 2 concurrent, one cold | 0.835–2.459 | seg20/21 pair (0.835/1.095) and seg23/24 pair (1 job hit 2.459) — cold-start contamination, not steady-state |
+| 2 concurrent, both warm | 0.81–0.89 | seg22 pair (0.881/0.887), seg26/27 pair (0.809/0.839) |
+
+Once both jobs are warm, 2-way concurrency costs roughly 60–70% more RTF
+per job than solo (~0.85 vs ~0.5), but completes 2 jobs in ~33s instead of
+~60s sequential (2× solo) — a real net throughput win. Cold-start
+contamination (RTF 2+) is a measurement artifact of testing on a fresh
+instance, not a concurrency cost — **always warm the instance with one
+solo request before timing a concurrency test** (see the pattern in
+`dev/artifact-augment.md`).
+
+### Next
+
+Move to N=4 per the `dev/parallel.md` ramp (2 → 4 → 8), watching for
+whether RTF degradation worsens disproportionately (sign of real GPU
+contention, not just warmup noise) or holds roughly flat. If model-load
+redundancy becomes a meaningful fraction of wall time at higher N, that's
+the trigger for Stage 2 (persistent model server) in `dev/parallel.md`.
