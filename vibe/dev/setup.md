@@ -18,19 +18,21 @@ CUDA 12.4 works on a much wider range of machines.
 
 ```
 source vibe/.env
-VERSION=v5
-docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
-docker tag vibe-cloudrun:latest  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
-docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
+VERSION=v1
+docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun-blackwell \
+  -t vibe-cloudrun-bw:latest .
+docker tag vibe-cloudrun-bw:latest \
+  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION
+docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION
 ```
 
 ```
-gcloud run deploy vibe-cloudrun \
-  --image us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION \
+gcloud run deploy vibe-cloudrun-bw \
+  --image us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION \
   --region us-central1 \
-  --gpu 1 --gpu-type nvidia-l4 \
+  --gpu 1 --gpu-type nvidia-rtx-pro-6000 \
   --no-gpu-zonal-redundancy \
-  --cpu 4 --memory 16Gi \
+  --cpu 20 --memory 80Gi \
   --no-cpu-throttling \
   --concurrency 1 \
   --min-instances 0 \
@@ -44,22 +46,9 @@ also set `GCS_SA_KEY_PATH` to a service-account key file (the entrypoint
 decodes it from a base64 env var). Without `GCS_BUCKET`, job state is
 in-memory only.
 
-**Forced alignment must run on CPU on Cloud Run.** The L4 host driver is too
-old for the CUDA 12.4 PTX the alignment kernels emit, so GPU alignment
-crashes (`CUDA_ERROR_UNSUPPORTED_PTX_VERSION`) and `/transcript` `/report`
-404. `Dockerfile.cloudrun` bakes in `ENV FORCED_ALIGNMENT_DEVICE=cpu`, so
-images built from v6 on are correct without any deploy flag. To fix an
-already-deployed image that predates that (e.g. v5) **without rebuilding**,
-just update the env var on the running service:
-
-```
-gcloud run services update vibe-cloudrun --region us-central1 \
-  --update-env-vars FORCED_ALIGNMENT_DEVICE=cpu
-```
-
-(VibeVoice synth still uses the GPU — only the Rust alignment moves to CPU.
-RunPod leaves this unset and auto-detects CUDA, which its newer driver
-supports.)
+The Blackwell image builds vibe-service CPU-only, so alignment runs on CPU
+with no env var needed. For the L4 path and the CUDA-PTX alignment history,
+see `dev/cloudrun.md`.
 
 ```bash
 cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL
@@ -74,7 +63,7 @@ cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_URL segment aug
 
 leave it running in one terminal while you run the test in another
 ```bash
-gcloud beta logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=vibe-cloudrun"
+gcloud beta logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=vibe-cloudrun-bw"
 ```
 
 ### Docker image build -- Runpod

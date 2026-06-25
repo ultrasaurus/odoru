@@ -1,0 +1,103 @@
+# syntax=docker/dockerfile:1
+#
+# Build from the odoru repo root:
+#   docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun-blackwell \
+#     -t vibe-cloudrun-bw:latest .
+#   docker tag vibe-cloudrun-bw:latest \
+#     us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:<vN>
+#   docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:<vN>
+#
+# Targets Cloud Run GPU = NVIDIA RTX Pro 6000 Blackwell (96 GB). This is a
+# VIABILITY TEST vs the L4 path (vibe/Dockerfile.cloudrun) and RunPod — see
+# vibe/dev/cloudrun.md.
+#
+# Differences from Dockerfile.cloudrun (L4):
+#   - Blackwell is sm_120 → needs CUDA 12.8+ and a torch with sm_120 kernels.
+#     Base bumped to NGC PyTorch 25.x (CUDA 12.8 / torch 2.7). NOTE: confirm
+#     the exact tag carries CUDA 12.8 + sm_120 at build time; bump if needed.
+#   - vibe-service is built CPU-ONLY (no cuda feature). On Cloud Run alignment
+#     runs on CPU anyway, so the Rust binary needs no CUDA — this removes nvcc /
+#     candle-CUDA / sm_120 concerns from the Rust side entirely. The GPU is used
+#     only by VibeVoice (Python/torch). Revisit CUDA alignment later (would need
+#     candle kernels rebuilt for sm_120) if the align_secs numbers justify it.
+#   - Flash Attention is NOT installed yet (SDPA). Get Blackwell RTF numbers
+#     first; if promising, add flash-attn — likely a SOURCE build on this NGC
+#     base (prebuilt wheels fail against NGC's patched torch, as on L4), or
+#     reconsider a standard-pip-torch base so a prebuilt wheel can be used.
+
+# ── Stage 1: cargo-chef base (CPU-only Rust build) ───────────────────────
+# Same NGC base as the runtime stage so the builder's glibc matches the
+# runtime's. The Rust build itself doesn't use CUDA.
+FROM nvcr.io/nvidia/pytorch:25.03-py3 AS chef
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install cargo-chef --locked
+
+WORKDIR /build
+
+# ── Stage 2: dependency recipe ──────────────────────────────────────────
+FROM chef AS planner
+COPY . .
+# vibe/service is its own workspace (members = [".", "service"]) — run chef
+# from inside it.
+RUN cd vibe/service && cargo chef prepare --recipe-path recipe.json
+
+# ── Stage 3: compile vibe-service (CPU-only — no cuda feature) ───────────
+FROM chef AS builder
+
+COPY --from=planner /build/vibe/service/recipe.json vibe/service/recipe.json
+# Manifest tree needed to resolve the workspace (path dep on ../util) before
+# building stub crates. Manifests only, so source edits don't bust this layer.
+COPY vibe/Cargo.toml vibe/Cargo.toml
+COPY vibe/Cargo.lock vibe/Cargo.lock
+COPY vibe/service/Cargo.toml vibe/service/Cargo.toml
+COPY util/Cargo.toml util/Cargo.toml
+RUN cd vibe/service && cargo chef cook --release --recipe-path recipe.json
+
+COPY . .
+RUN cargo build --release \
+    --manifest-path vibe/service/Cargo.toml \
+    --bin vibe-service
+
+# ── Stage 4: Cloud Run GPU image (RTX Pro 6000 Blackwell) ───────────────────
+FROM nvcr.io/nvidia/pytorch:25.03-py3
+
+WORKDIR /workspace
+RUN git clone https://github.com/vibevoice-community/VibeVoice.git VibeVoice \
+    && cd VibeVoice \
+    && git checkout 07cb79feadd2d3fd7f47530d4c964a12857936a0
+
+# VibeVoice is pinned to a commit; if it fails to import against torch 2.7,
+# that's the first compat fix to make (transformers/torch API drift).
+RUN pip install --no-cache-dir -e /workspace/VibeVoice
+
+ENV HF_HOME=/workspace/.cache/huggingface
+ENV HF_HUB_DISABLE_XET=1
+RUN mkdir -p $HF_HOME
+
+COPY vibe/docker/download-models.py /tmp/download-models.py
+COPY vibe/docker/verify-qwen-tokenizer.py /tmp/verify-qwen-tokenizer.py
+RUN python3 /tmp/download-models.py vibevoice/VibeVoice-1.5B
+RUN python3 /tmp/download-models.py Qwen/Qwen2.5-1.5B
+RUN python3 /tmp/download-models.py facebook/wav2vec2-base-960h
+RUN python3 /tmp/verify-qwen-tokenizer.py
+
+COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-service
+
+# Our inference script adds --temp and --speed. Kept last so editing it doesn't
+# bust the heavy clone/pip/model-download layers above.
+COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
+
+# Alignment runs on CPU: vibe-service is built without the cuda feature, so the
+# candle aligner is CPU-only by construction (no FORCED_ALIGNMENT_DEVICE needed).
+
+# Cloud Run injects $PORT and routes HTTP directly to it — no EXPOSE needed.
+ENTRYPOINT ["/usr/local/bin/vibe-service"]
