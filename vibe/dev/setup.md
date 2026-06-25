@@ -18,7 +18,7 @@ CUDA 12.4 works on a much wider range of machines.
 
 ```
 source vibe/.env
-VERSION=v3
+VERSION=v4
 docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun-blackwell \
   -t vibe-cloudrun-bw:latest .
 docker tag vibe-cloudrun-bw:latest \
@@ -27,10 +27,17 @@ docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION
 ```
 
 `MAX_CONCURRENT_JOBS` is set in `vibe/.env` (sourced in the build step
-above) — see `dev/parallel.md` for the testing ramp (2 -> 4 -> 8; N=2
-and N=4 results recorded in `dev/cloudrun.md`, currently set to 8 for
-the next step). `HEARTBEAT_SECS` defaults to 60 if unset; lower it (e.g.
-`10`) when testing concurrency on short segments:
+above) — see `dev/parallel.md` for the N=2/4/8 process-concurrency ramp
+(results recorded in `dev/cloudrun.md`). Now set to **1**: with
+`batch_bench.py`/`POST /bench` in play (also `dev/parallel.md`), a bench
+sweep already exercises batch sizes up to the largest requested inside
+one job-semaphore permit, so any N>1 here would let regular `/jobs`
+synth calls run concurrently with it on the same GPU — stacking
+untested process-level concurrency on top of the untested batch-size
+question this tool exists to isolate. Revisit once batch-size data
+exists and Stage 3 (`parallel.md`) design is underway. `HEARTBEAT_SECS`
+defaults to 60 if unset; lower it (e.g. `10`) when testing concurrency
+on short segments:
 
 ```bash
 HEARTBEAT_SECS=10

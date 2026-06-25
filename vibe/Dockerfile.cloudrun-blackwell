@@ -102,6 +102,19 @@ COPY --from=builder /build/vibe/target/release/vibe-service /usr/local/bin/vibe-
 # bust the heavy clone/pip/model-download layers above.
 COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
 
+# Standalone batched-generate() benchmark (dev/parallel.md "Max batch size is
+# unknown"); not part of the synth request path, just a measurement tool.
+# Sample segments live in vibe/docker/bench_segments/ (copied out of
+# vibe/data/, which .dockerignore excludes wholesale) so the benchmark has
+# real text to sweep over without needing a volume mount on the pod.
+# Triggered via POST /bench, since Cloud Run has no shell/exec access at all.
+COPY vibe/docker/batch_bench.py /workspace/VibeVoice/demo/batch_bench.py
+COPY vibe/docker/bench_segments/ /workspace/VibeVoice/demo/bench_segments/
+
+# Only batch_bench.py's GCS upload needs this (the only way to get files out
+# of a Cloud Run instance) — own late layer so it doesn't bust anything above.
+RUN pip install --no-cache-dir google-cloud-storage
+
 # Alignment runs on CPU: vibe-service is built without the cuda feature, so the
 # candle aligner is CPU-only by construction (no FORCED_ALIGNMENT_DEVICE needed).
 

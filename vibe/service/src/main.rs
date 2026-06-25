@@ -91,6 +91,27 @@ struct JobCreated {
     name: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct BenchRequest {
+    #[serde(default = "default_bench_batch_sizes")]
+    batch_sizes: String,
+    #[serde(default = "default_speaker")]
+    speaker: String,
+    #[serde(default = "default_cfg_scale")]
+    cfg_scale: f64,
+    #[serde(default = "default_seed")]
+    seed: u64,
+}
+
+#[derive(Serialize)]
+struct BenchStarted {
+    request_id: String,
+    gcs_prefix: Option<String>,
+    log_url: String,
+}
+
+fn default_bench_batch_sizes() -> String { "1,2,4,8".into() }
+
 fn default_seed() -> u64 { 71463 }
 fn default_speaker() -> String { "Sarah".into() }
 fn default_cfg_scale() -> f64 { 1.3 }
@@ -184,6 +205,112 @@ async fn create_job_handler(
     });
 
     Json(JobCreated { job_id, name }).into_response()
+}
+
+/// Triggers `demo/batch_bench.py` (dev/parallel.md "Max batch size is
+/// unknown") in the background. Exists because Cloud Run has no shell/exec
+/// into the container — this is the only way to run the benchmark there.
+/// Progress is tailable via the existing `/log/:request_id`; results (wavs +
+/// `batch_bench_runs.jsonl`) are uploaded to GCS by the script itself (ambient
+/// auth, same bucket/mechanism as `jobstore.rs`) since there's no other way
+/// to get files out of a Cloud Run instance. On RunPod this still works the
+/// same way, or can be run directly over SSH instead — this endpoint doesn't
+/// change that path.
+async fn create_bench_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<BenchRequest>,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let request_id = Uuid::new_v4().to_string();
+    let gcs_bucket = std::env::var("GCS_BUCKET").ok();
+    let gcs_prefix = gcs_bucket.as_ref().map(|_| format!("bench/{request_id}"));
+
+    info!(request_id = %request_id, batch_sizes = %req.batch_sizes, "bench started");
+
+    let log_path = format!("/tmp/{request_id}.log");
+    let output_dir = format!("/tmp/bench_{request_id}");
+    let results_jsonl = format!("/tmp/bench_{request_id}.jsonl");
+    let gcs_prefix2 = gcs_prefix.clone();
+    let request_id2 = request_id.clone();
+    let tracker = state.tracker.clone();
+    let job_semaphore = state.job_semaphore.clone();
+
+    tokio::spawn(async move {
+        // Shares the same semaphore as run_job: a bench sweep already
+        // internally exercises batch sizes up to the largest requested, so
+        // letting it run concurrently with regular /jobs synth calls would
+        // stack untested concurrency on top of untested batch size on the
+        // same GPU — exactly what this tool exists to measure cleanly, not
+        // contaminate. MAX_CONCURRENT_JOBS=1 makes this fully exclusive.
+        let _permit = match job_semaphore.acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => return,
+        };
+
+        // Without this, the RunPod idle watchdog (3 min of active_requests==0)
+        // could stop the pod mid-sweep, since otherwise nothing here looks any
+        // different from idle to it. Same guard pattern as run_job.
+        tracker.touch();
+        tracker.increment();
+        struct DecrementGuard(ActivityTracker);
+        impl Drop for DecrementGuard {
+            fn drop(&mut self) { self.0.touch(); self.0.decrement(); }
+        }
+        let _guard = DecrementGuard(tracker);
+
+        if let Err(e) = run_bench_inner(&req, &output_dir, &results_jsonl, &log_path, gcs_prefix2.as_deref()).await {
+            error!(request_id = %request_id2, "bench failed: {e:#}");
+        }
+    });
+
+    Json(BenchStarted {
+        log_url: format!("/log/{request_id}"),
+        request_id,
+        gcs_prefix,
+    }).into_response()
+}
+
+async fn run_bench_inner(
+    req: &BenchRequest,
+    output_dir: &str,
+    results_jsonl: &str,
+    log_path: &str,
+    gcs_prefix: Option<&str>,
+) -> Result<()> {
+    let log_file = std::fs::File::create(log_path)?;
+    let log_file2 = log_file.try_clone()?;
+
+    let mut args: Vec<String> = vec![
+        "demo/batch_bench.py".into(),
+        "--batch_sizes".into(), req.batch_sizes.clone(),
+        "--speaker".into(), req.speaker.clone(),
+        "--cfg_scale".into(), req.cfg_scale.to_string(),
+        "--seed".into(), req.seed.to_string(),
+        "--output_dir".into(), output_dir.into(),
+        "--results_jsonl".into(), results_jsonl.into(),
+    ];
+    if let Some(prefix) = gcs_prefix {
+        args.push("--gcs_prefix".into());
+        args.push(prefix.into());
+    }
+
+    let mut child = tokio::process::Command::new("python3")
+        .args(&args)
+        .stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(log_file2))
+        .current_dir("/workspace/VibeVoice")
+        .spawn()?;
+
+    let status = child.wait().await?;
+    if !status.success() {
+        let tail = tail_log(log_path).await;
+        anyhow::bail!("batch_bench.py exited {status}\n{tail}");
+    }
+    Ok(())
 }
 
 /// On a local cache miss, rebuild job status from the durable store
@@ -828,6 +955,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/jobs", post(create_job_handler))
+        .route("/bench", post(create_bench_handler))
         .route("/jobs/:job_id", get(get_job_handler))
         .route("/jobs/:job_id/wav", get(get_job_wav_handler))
         .route("/jobs/:job_id/transcript", get(get_job_transcript_handler))

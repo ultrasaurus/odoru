@@ -109,5 +109,17 @@ RUN pip install --no-cache-dir \
 # doesn't bust the heavy clone/pip/model-download layers above.
 COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
 
+# Standalone batched-generate() benchmark (dev/parallel.md "Max batch size is
+# unknown") with its sample segments (seg41-71, copied out of vibe/data/
+# since .dockerignore excludes that wholesale). Not part of the synth request
+# path — trigger via POST /bench (works on Cloud Run, no shell access there)
+# or run over SSH directly (`cargo run -- ssh <pod_id>`) and scp the output.
+COPY vibe/docker/batch_bench.py /workspace/VibeVoice/demo/batch_bench.py
+COPY vibe/docker/bench_segments/ /workspace/VibeVoice/demo/bench_segments/
+
+# Only batch_bench.py's optional GCS upload (for the no-shell-access Cloud Run
+# path) needs this — own late layer so it doesn't bust anything above.
+RUN pip install --no-cache-dir google-cloud-storage
+
 EXPOSE 22 3000
 ENTRYPOINT ["/entrypoint.sh"]
