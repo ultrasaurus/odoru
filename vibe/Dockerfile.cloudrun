@@ -104,6 +104,15 @@ COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from
 RUN pip install --no-cache-dir \
     "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.4cxx11abiTRUE-cp310-cp310-linux_x86_64.whl"
 
+# Force CPU forced-alignment. vibe-service is built with the cuda feature, but
+# Cloud Run's L4 host driver is too old for the CUDA 12.4 PTX the candle
+# kernels emit (DriverError CUDA_ERROR_UNSUPPORTED_PTX_VERSION) — alignment
+# would crash and /transcript /report would 404. forced-alignment v0.2.1 reads
+# this env var and the "cpu" path works even with the cuda feature compiled in.
+# (RunPod leaves this unset → auto-detects CUDA, which its newer driver
+# supports.) VibeVoice synth still runs on the GPU — it's a separate process.
+ENV FORCED_ALIGNMENT_DEVICE=cpu
+
 # Cloud Run injects $PORT and routes HTTP/WebSocket directly to it — no sshd,
 # no fixed EXPOSE port needed (unlike RunPod's vibe/Dockerfile).
 ENTRYPOINT ["/usr/local/bin/vibe-service"]

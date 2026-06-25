@@ -410,16 +410,19 @@ async fn run_alignment(wav_bytes: &[u8], text: &str, name: &str) -> Option<Align
     }
 
     let align_text = strip_speaker_prefixes(text);
+    let start = std::time::Instant::now();
     let result = tokio::task::spawn_blocking(move || {
         let samples = forced_alignment::audio::load_audio(&tmp_path, forced_alignment::SAMPLE_RATE)?;
         let _ = std::fs::remove_file(&tmp_path);
         forced_alignment::align(&samples, &align_text)
     })
     .await;
+    let align_secs = start.elapsed().as_secs_f64();
     match result {
         Ok(Ok((transcript, report))) => {
             info!(
                 name = %name,
+                align_secs = format!("{align_secs:.1}"),
                 suspects = report.suspect.len(),
                 filtered = report.filtered.len(),
                 "alignment done"
