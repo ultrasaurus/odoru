@@ -12,12 +12,14 @@ use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
 /// Convert markdown to plain text suitable for sentence splitting and TTS.
 pub fn to_plain_text(markdown: &str) -> String {
+    let markdown = strip_silent(markdown);
+
     let mut blocks: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_code_block = false;
     let mut in_image = false;
 
-    for event in Parser::new(markdown) {
+    for event in Parser::new(&markdown) {
         match event {
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
@@ -47,6 +49,75 @@ pub fn to_plain_text(markdown: &str) -> String {
     push_block(&mut blocks, &current);
 
     blocks.join("\n\n")
+}
+
+/// Remove "silent" spans — bracketed text immediately followed by a
+/// `<!--silent-->` comment, e.g. `[Doug Engelbart]<!--silent-->`. These are
+/// displayed in the rendered document but excluded from speech synthesis.
+/// See `dev/silent-text.md`.
+///
+/// Operates line by line: silent spans are stripped from each line, and a
+/// line that became empty (or only heading `#` markers) *because* of the
+/// stripping is dropped entirely — so a fully-silent heading produces no
+/// spoken block. Originally-blank lines are preserved so paragraph
+/// boundaries survive.
+fn strip_silent(markdown: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in markdown.lines() {
+        let removed = remove_silent_spans(line);
+        let trimmed = removed.trim();
+        let emptied_by_strip = removed != line
+            && (trimmed.is_empty() || trimmed.chars().all(|c| c == '#'));
+        if emptied_by_strip {
+            continue;
+        }
+        out.push(removed);
+    }
+    out.join("\n")
+}
+
+/// Remove every `[...]<!--silent-->` span from a single line, keeping any
+/// other text. A `<!--silent-->` comment not preceded by a bracket span has
+/// only the comment removed.
+fn remove_silent_spans(line: &str) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some((start, end)) = find_silent_comment(rest) {
+        let before = &rest[..start];
+        if before.ends_with(']') {
+            if let Some(open) = before.rfind('[') {
+                out.push_str(&before[..open]);
+                rest = &rest[end..];
+                continue;
+            }
+        }
+        out.push_str(before);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Find the next `<!--silent-->` comment (whitespace around `silent`
+/// tolerated), returning its byte range `(start, end)` within `s`.
+fn find_silent_comment(s: &str) -> Option<(usize, usize)> {
+    let mut from = 0;
+    while let Some(rel) = s[from..].find("<!--") {
+        let start = from + rel;
+        let inner_start = start + 4;
+        match s[inner_start..].find("-->") {
+            Some(erel) => {
+                let inner_end = inner_start + erel;
+                let end = inner_end + 3;
+                if s[inner_start..inner_end].trim() == "silent" {
+                    return Some((start, end));
+                }
+                from = end;
+            }
+            None => return None,
+        }
+    }
+    None
 }
 
 /// Trim and collapse internal whitespace runs (left by dropped inline
@@ -96,5 +167,30 @@ mod tests {
     fn skips_images() {
         let md = "Look: ![alt text](pic.png) done.";
         assert_eq!(to_plain_text(md), "Look: done.");
+    }
+
+    #[test]
+    fn drops_silent_heading() {
+        let md = "## [Doug Engelbart]<!--silent-->\n\nHe invented the mouse.";
+        assert_eq!(to_plain_text(md), "He invented the mouse.");
+    }
+
+    #[test]
+    fn drops_standalone_silent_paragraph() {
+        let md = "First.\n\n[An aside]<!--silent-->\n\nSecond.";
+        assert_eq!(to_plain_text(md), "First.\n\nSecond.");
+    }
+
+    #[test]
+    fn preserves_paragraph_boundaries_around_silent() {
+        // The blank lines separating paragraphs must survive stripping.
+        let md = "# [Intro]<!--silent-->\n\nFirst para.\n\nSecond para.";
+        assert_eq!(to_plain_text(md), "First para.\n\nSecond para.");
+    }
+
+    #[test]
+    fn tolerates_whitespace_in_marker() {
+        let md = "## [Ted Nelson]<!-- silent -->\n\nHe coined hypertext.";
+        assert_eq!(to_plain_text(md), "He coined hypertext.");
     }
 }

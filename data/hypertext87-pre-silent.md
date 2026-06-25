@@ -1,11 +1,11 @@
-# [Hypertext '87 Keynote Address]<!--silent-->
+# Hypertext '87 Keynote Address
 
-## [Introduction]<!--silent-->
+## Introduction
 
 I'm a Johnny-come-lately to hypertext: I didn't get started until 1967, and what is especially fun about being here is that I can pay public tribute to the two real trailblazers who have inspired me and hordes of my students who have gone off to do their own independent hypertext projects. The first is the incomparable, one and only Doug Engelbart, who has been working at this since the late 1950s. Many people don't know that. Some of them may go back in ancient history and remember his mind-blowing demonstration at the 1968 Fall Joint Computer Conference, but at that point he had already been working in this area for a decade. And he invented just about everything the rest of us have been doing since then. I will just mention two of his major contributions.
 
 
-## [Doug Engelbart]<!--silent-->
+## Doug Engelbart
 
 
 The first is office automation; he was doing office automation, in particular word processing, before the terms had even been coined. IBM invented the phrase, in connection with the MCST, the magnetic card selectric typewriter. Word processing was the right term, since words were all you could process. However, you were lucky if you could replace a small word with a larger word and not have it flow off the edges of the card. At that time Doug Engelbart was really working on idea processing. He was, of course, the inventor of outline processing, as it is known today. He had links, he had text searches with a variety of wild-card options. How many of today's commercial hypertext systems let you perform text searches with wild cards and all kinds of other conditions? Not very many, I believe. He spent a great deal of time on the user interface. He had a variety of interesting command language shells that were at once the singular strength of his NLS system and, to those who were not willing to invest the time to learn them, also a weakness. He invented the mouse and the five-key chord input device and lots of other things.
@@ -17,7 +17,7 @@ So there is this whole catalog of stuff that Doug's group at SRI implemented in 
 The second major contribution, and the one that most people don't know at all, even if they know something about Doug's efforts toward the augmentation of human intellect, is that he is the father of software engineering in the modern sense. Long before scientists such as Dijkstra and Bauer started writing about formal software engineering, Doug and his crew had been living it. This really was a bootstrap community of tool builders and tool users. So on that little timesharing system on the 940, they had meta-assemblers and compiler-compilers and ways of generating special-purpose problem-oriented languages. They had any number of tools and understood the value of building tools. To me that was a revelation. In my group at Brown University we were assembly-language hackers, and what was important to us was efficiency and writing the tightest possible code so that we could get sophisticated programs to run in real time. The whole idea of spending a lot of time and energy on first building tools was really novel.
 
 
-## [Ted Nelson]<!--silent-->
+## Ted Nelson
 
 
 So much for my paean of praise to Doug Engelbart. 1 think we are all here because of him and also because of Ted Nelson, the second trailblazer, who coined the word "hypertext" and dozens of other words-being wordsmith and master showman par excellence and also a polemicist of the first rank. Ted is a self-proclaimed visionary who deserves the title, and he turned on generations of people with "Computer Lib/Dream Machines", a landmark work that still today-I reread a lot of it just a few days ago to prepare myself for this talk- is good reading. Ted coined that wonderful phrase, "If computers are the wave of the future, displays are the surfboards." Well, I've used that bon mot ever since, and I think he is absolutely right: displays are the way to go. But one of the neat things is that we are discovering lots of other media that fit in: it's not just display technology, it's not just text and graphics any more. Video, high-quality sound and other media are also available now.
@@ -35,10 +35,11 @@ One of the most important things he taught me was that this is a new medium and 
 The other important thing he really led me to focus on is that there is a great application for hypertext and hypermedia, not just for research, not just for maintaining your own personal database, but in teaching. And that is one of my major themes here: how we have used hypertext and hypermedia in teaching at Brown University.
 
 
-## [Hypertext '87 Workshop Significance]<!--silent-->
+## Hypertext '87 Workshop Significance
 
 
-Well, here we are at the first hypertext workshop and we have to ask, perhaps rhetorically, has hypertext arrived? has the millennium arrived? And of course there are several answers to those questions. The state of the art is reviewed in Jeff Conklin's excellent article in IEEE Computer of September 1987. There are also articles in the press hyping hypertext, and about the hype in hypertext. Conversely, some of the recent major books on computing in the humanities don't mention hypertext, don't mention hypermedia, don't really deal with the issue of branching texts. They are more concerned with typography, telecommunications and other issues that are very important. Even this 1986 book by Eugene Provenzo, "Beyond the Gutenberg Galaxy", which is delightful reading, does not mention it. And the forthcoming book by Christopher Turk about humanities computing, "The Computer and the Scholar", does not devote a chapter to this phenomenon, although electronic communication is certainly mentioned a lot, as are tools for processing text.
+Well, here we are at the first hypertext workshop and we have to ask, perhaps rhetorically, has hypertext arrived? has the millennium arrived? And of course there are several answers to those questions. The state of the art is reviewed in Jeff Conklin's excellent article in IEEE Computer of September 1987. There are also
+articles in the press hyping hypertext, and about the hype in hypertext. Conversely, some of the recent major books on computing in the humanities don't mention hypertext, don't mention hypermedia, don't really deal with the issue of branching texts. They are more concerned with typography, telecommunications and other issues that are very important. Even this 1986 book by Eugene Provenzo, "Beyond the Gutenberg Galaxy", which is delightful reading, does not mention it. And the forthcoming book by Christopher Turk about humanities computing, "The Computer and the Scholar", does not devote a chapter to this phenomenon, although electronic communication is certainly mentioned a lot, as are tools for processing text.
 
 
 When you look at the publicity and at systems such as Xerox's NoteCards, Owl's Guide, and especially Apple's HyperCard, you get the impression that we are about to go over the knee of the exponential curve. I really believe we are. HyperCard in particular, despite all its limitations, is beautifully engineered, and has a wonderful user interface, especially for hypertext-style linking. It will really acculturate our computer user community. It is simple enough, despite its complexity, that a lot of people can get access to it at a relatively simple level. There is a lot of traffic on networks already about it and people are exchanging stackware. I think it will be a mass-media cult phenomenon, rather like MacPaint and MacDraw. I think Apple has done a really brilliant job of getting it out there, and although it's a fraction of what Doug and Ted and others of us believe to be the potential of hypertext or hypermedia, I think it's very strong and will do a lot to get people interested in our field. Presumably, it will be improved in future generations.
@@ -56,7 +57,7 @@ Next, let's ask what is different about hypertext? Is there really anything new 
 Why did it take so long to have this workshop, to have HyperCard, when the technology certainly has been out there and there have been a lot of proof-of-concept demonstrations? Well, the first reason is the classical inertia problem. Why did it take twenty years for Doug Engelbart's mouse to be commercialized? One reason is there is tremendous inertia in this so-called progressive field. New ideas take forever to be popularized. The second reason is, of course, that there are technology problems. It takes a long time to develop something as cheap and as user-friendly as the Macintosh, for example, and to displace the idiosyncratic interfaces we have all created and been forced to live with. Now the technology is definitely here, and there is certainly no excuse for waiting any longer.
 
 
-## [HES (Hypertext Editing System)]<!--silent-->
+## HES (Hypertext Editing System)
 
 
 Next I'm going to give you my own personal view of some hypertext chronology at Brown University and then do some wrapping up. I ran into Ted Nelson completely by accident at the 1967 Spring Joint Computer Conference, and gossiped with him about what we had both been doing since we left Swarthmore College. He told me about his ideas on hypertext, and one thing led to another and Ted started coming to Providence, using, as he is proud to say in Computer Lib, his own money. We started working on the Hypertext Editing System, which was essentially dual-purpose. One purpose was to produce printed documents nicely and efficiently, since at that time the technology on IBM/360 systems was batch cards for editing (mag card selectrics were not yet common). But the main purpose was to explore this hypertext concept.
@@ -89,7 +90,7 @@ The last lesson learned during that period: real estate, screen real estate. We 
 In 1968,1 finally met Doug Engelbart and experienced his landmark demonstration at the Fall Joint Computer Conference, about as gutsy and risky a demo as I have ever seen. He was doing multiperson collaboration, using all of his tools on-line interactively-it was a tour de force. He did outline processing, browsing and jumping around through multiple files with text and graphics, using key words and other view specs to act as viewing filters over his data, using text-searching capabilities, and so on.
 
 
-## [FRESS (File Retrieval and Editing System)]<!--silent-->
+## FRESS (File Retrieval and Editing System)
 
 
 Later that year I went on with my students to design FRESS, a File Retrieval and Editing System. My design goal was to steal or improve on the best ideas from Doug's NLS and put in some things we really liked from the Hypertext Editing System-a more freeform editing style, no limits to statement size, for example. But the intellectual debt is clearly to Doug's NLS.
@@ -134,7 +135,7 @@ The reason I encouraged such annotations was that I remembered that when I was i
 What we discovered from that experiment is that people could follow trails and enjoyed it. But what we did not see was a lot of people blazing trails. There wasn't enough time, the interface wasn't good enough, response wasn't fast enough-a variety of reasons. So we never really proved a central hypothesis, that people can and will blaze trails, not just follow them. I will make a statement that says, despite the experience with Xerox's NoteCards system, despite whatever other experiences there are out there with programming environment browsers and so on, by and large the hypothesis remains unproven that, with little guidance, people can construct really good trails, really good webs that help them and help other readers. I think we still need to test that hypothesis in a major way.
 
 
-## [DPS (Document Presentation System)]<!--silent-->
+## DPS (Document Presentation System)
 
 
 The next thing we did after FRESS was put to bed in the late 1970s was to make a rather different hypertext system, our third by that time. What we were interested in then was power tools for producing primarily graphical documents. I want to describe to you very quickly some of the things we did in our electronic document project.
@@ -149,16 +150,17 @@ We spent a lot of time figuring out how to elide, that is, hide, information gra
 The system had three automatically created navigation aids. First, it had a time line, as shown in Figure 3, that you could use to travel back in time, consisting of buttons of miniature page icons stamped with time and date, with color coding keying you to chapters. This is little bit like the 'recent page' in HyperCard, but here we are time traveling: we are not just going back to an image, we are going back to the state that accompanied our view of that image, because a page, as you remember, can change over time. Another was the 'neighbors' display: the current page is displayed in context with (on the left) a filmstrip of all the places you could have come from, and (on the right) all the places you could go to, and again you can pick any of these miniatures and go there directly. In general, this could be an arbitrarily complicated display with dozens of sources and destinations; then you use iconic scroll bars to move over these filmstrips. The third navigation aid was a visual index of buttons of page miniatures arranged by key words, color-coded by chapter.
 
 
-We learned some new lessons from this third system. It had great power tools for the author, but it still involved a tremendous amount of hand work. What you really would like in making fairly regular documents, like maintenance and repair manuals, is to drive the creation of the pictorial or textual, audio, video, etc., explanations directly from deep knowledge about the problem domain, the particular problem to be solved, the design rules for creating explanations in the various media, and the user of the manual. You want, in effect, to produce an automated authoring capability in which most of these things can be driven from these knowledge bases. Steve Feiner's Ph.D. dissertation and his work since then describes such automated authoring.
+We learned some new lessons from this third system. It had great power tools for the author, but it still involved a tremendous amount of hand work. What you really would like in making fairly regular documents, like maintenance and repair manuals, is to drive the creation of the pictorial or textual, audio, video, etc., explanations directly from deep knowledge about the problem domain, the particular problem to be solved,
+the design rules for creating explanations in the various media, and the user of the manual. You want, in effect, to produce an automated authoring capability in which most of these things can be driven from these knowledge bases. Steve Feiner's Ph.D. dissertation and his work since then describes such automated authoring.
 
 
-## [BALSA (Brown ALgorithm Simulator and Animator)]<!--silent-->
+## BALSA (Brown ALgorithm Simulator and Animator)
 
 
 The next system I would like to mention briefly is not a hypertext system, but it formed our thinking about ingredients at the nodes of a hypertext. This is the BALSA (Brown ALgorithm Simulator and Animator) environment, created in 1983 by Bob Sedgewick, who is now chairman of computer science at Princeton University, and Marc Brown, who last year received an ACM distinguished dissertation award for this work. In the course of a lecture we use BALSA on a network of workstations in the classroom to look at dynamic visualizations of programs implementing algorithms and data structures. If a picture is worth a thousand words, a dynamic picture of time-varying objects is worth a thousand static ones. We need dynamics at the nodes, not just static pictures and text. Something one learns quickly about user-controlled real-time animation is that hardware power is really essential. If it takes 10 seconds to put up the next picture because that's how long the hardware needs, you do not have kinesthetic feedback, you do not have smoothness and visual continuity, it is not responsive. It makes a great demo, but it drives you crazy in real life.
 
 
-## [IRIS (Institute for Research on Information and Scholarship)]<!--silent-->
+## IRIS (Institute for Research on Information and Scholarship)
 
 
 We have been using electronically assisted teaching now for five years and our new building contains two workstation auditoriums. BALSA has been integrated into a variety of courses in computer science and math, as well as in neural science and even political science. These experiences led to Brown's wholesale commitment to workstations and in fact to the creation in 1983 of IRIS, our Institute for Research on Information and Scholarship. IRIS not only creates scholars' workstation software but also has a completely symmetrical program evaluation branch where social scientists with an interest in this area study needs, requirements and impact of this technology on scholarly work. And by the way, 'scholarly work' to us is not just the work of faculty members but also that of students-we're all scholars on this bus.
@@ -167,16 +169,16 @@ We have been using electronically assisted teaching now for five years and our n
 We set up IRIS at a time when there was a lot of enthusiasm in front-running universities for buying into the workstation revolution, looking at the Xerox PARC model of distributed computation and saying, "We want to deliver tools that really take advantage of the expressive power of such workstations." So IRIS and other organizations on other campuses were created to develop scholarly tools. I think, though, that there is still a paucity of such scholarly tools and we are at the very beginning of understanding what they might be.
 
 
-## [Nine Issues]<!--silent-->
+## Nine Issues
 
 
-### [1. User-Controlled 3D Animation]<!--silent-->
+### 1. User-Controlled 3D Animation
 
 
 I'm going to sum up what I think are some key areas we all ought to be looking at. Here are nine quick items. My first concern is that systems may develop great infrastructure, great hypertext glue, but what's at the nodes? As with the 2D animation in BALSA, I think we should be aiming at user-controlled 3D animation, where the interactive user has control over what is being shown, the level of detail, the visualizations employed, and so on. This is just a wide-open area that needs a lot of study, not to mention vast hardware power.
 
 
-### [2. Standards]<!--silent-->
+### 2. Standards
 
 
 Second, Ted talks a lot about the docuverse, a mythical entity out there that is all-inclusive and contains everything. But instead, right now we are building docu-islands; none of our systems talk to each other, they are wholly incompatible. So we are all working the same agenda, more or less, but we can't exchange stuff; there is no exchange format, there is no universality, and furthermore, our systems are closed systems. In a sense, they are making the same mistake as the all-in-one environments in personal computing. Yes, they give you a word processor and a spreadsheet editor and a business graphics package, etc., but none of them are really satisfactory. And our experience with FRESS, where we had to escape to command language, showed that it is really important to be able to go outside. So it's not enough to bundle the HyperCard package with every Mac you buy. It really ought to be migrated down, become part of the toolbox, so that application programmers can take their applications and take advantage of a standard linking protocol that works within and between applications.
@@ -185,19 +187,19 @@ Second, Ted talks a lot about the docuverse, a mythical entity out there that is
 So I'm going to raise a red-flag word: standards. I'm a firm believer in standards. And everybody will say it is absolutely premature to standardize when we don't even know what the hell we're talking about. We are still in the experimental phase. I believe that. But if we don't start thinking about standards, five years from now we are going to have a wealth of these little docu-islands which are totally incompatible, and that's crazy.
 
 
-### [3. Real-World Domain Size]<!--silent-->
+### 3. Real-World Domain Size
 
 
 Point number three is size. We are still in the toy problem stage. There has not been a decent-sized hypertext built yet. And we won't know what it is like until we deal with the kinds of documentation problems that people in the real world deal with. People have graphed the number of pages of technical manuals for fighter aircraft against time. In World War 11, we had 1K page documentation per fighter aircraft; in Korea, 10K; in Vietnam, 100K. It's an exponential curve. The F-16 has 600K pages, and the advanced tactical fighter will probably have somewhere around a million and a half pages of technical documentation. It is, in effect, a giant hypertext that should be linked, and done with change control.
 
 
-### [4. Versioning]<!--silent-->
+### 4. Versioning
 
 
 And that is my fourth point. We have to do something about versioning and change control in the large. But we won't have a fighting chance to kill paper and become an on-line community until we tackle the kinds of problems that paper solves for us today. Paper is convenient, you can carry it around and versions are easily created and maintained. Hypertext is not as accessible as paper, and it certainly isn't prepared to deal with the size problems as paper does.
 
 
-### [5. Navigation]<!--silent-->
+### 5. Navigation
 
 
 The fifth problem is navigation, lost in hyperspace. Some people say we need content and structure query, we need virtual structures, composites; others say we need pruning. All of this is true. I find the notion of dynamically constructing a hypertext very intriguing, but very difficult to do in general. My point of view is that in a sense hypertext gives us a goto, and a goto, as we all know, produces spaghetti. At most we have invented the if-then-else-if, with hierarchy. That's our one structured flow-of-control concept, where you have some sense of what you are looking at in your hyperdocument. Well, we need to discover what the equivalents of other constructs are. As Ted did at the start, we have to invent other document forms that somehow become standard so that people have pattern recognition and say, "Ah, yes, I know how that one works." So we need new forms, new flow of control kinds of constructs besides just unbridled goto-ness of directed graph structures.
@@ -206,28 +208,29 @@ The fifth problem is navigation, lost in hyperspace. Some people say we need con
 The other navigation aid we need is a tell-me-what you've-got, which probably entails Al. Instead of just syntax, we need some notion of semantics at the nodes. We need to be able to derive new knowledge from old, using inference engines. Just storing billions and billions of facts that are tied together is not going to do it for us; that will just drown us in associations.
 
 
-### [6. Hypermedia Designers]<!--silent-->
+### 6. Hypermedia Designers
 
 
-The sixth point is that we need hypermedia designers. Remember how crazy everybody went when they got the ability to print multiple fonts? We got 'fontitis.' Then people discovered color screens and we got 'coloritis,' without any rules, without any design discipline. Now we've got linkitis,' and people with no graphic design experience or talent are going to throw stuff together and it will look terrible. You all know that one of the interesting things that happened after Gutenberg was typography. For a while after Gutenberg, type designers were using manuscript letterforms. And they were using erasers and paintbrushes to doctor the stuff the typesetting machine had set so it would look more like an old-fashioned manuscript and people would be familiar with it. It took a long while for people to understand that this new medium demanded a new style, a new typography. So typography is an invention, and it is nearly as important as the printing press in the first place. We don't want to mimic the old manuscript form in our hypertexts.
+The sixth point is that we need hypermedia designers. Remember how crazy everybody went when they got the ability to print multiple fonts? We got 'fontitis.' Then people discovered color screens and we got 'coloritis,' without any rules, without any design discipline. Now we've got linkitis,' and people with no graphic design experience or talent are going to throw stuff together and it will look terrible.
+You all know that one of the interesting things that happened after Gutenberg was typography. For a while after Gutenberg, type designers were using manuscript letterforms. And they were using erasers and paintbrushes to doctor the stuff the typesetting machine had set so it would look more like an old-fashioned manuscript and people would be familiar with it. It took a long while for people to understand that this new medium demanded a new style, a new typography. So typography is an invention, and it is nearly as important as the printing press in the first place. We don't want to mimic the old manuscript form in our hypertexts.
 
 
 Aldus Manutius discovered modern pages. And pages gave us a new way to cross-reference, to talk about content, to index, and that technology took a while, but it made information a great deal more accessible. So we need people who are concerned about layout and design and typography of hypermedia and can think about classification and indexing and how we put things together.
 
 
-### [7. Don't Metaphor Me In]<!--silent-->
+### 7. Don't Metaphor Me In
 
 
 But we don't want to put things together in such a way that there is one point of view, because if we've learned one thing from interactive tools up to now is that multiview is the way people work. You can not have it just one way. We need an update to Larry Tesler's "Don't mode me in." Jim Foley and I recently came up with "Don't metaphor me in." Don't give me a little card image and say, "That's all you've got, because that's what I thought you should want for your virtual shoebox." There have got to be multiple modalities and the designers have to be able to deal with that. So that was issue number seven: don't metaphor me in, don't give me only one way of looking at things.
 
 
-### [8. Accessibility/Portability]<!--silent-->
+### 8. Accessibility/Portability
 
 
 Point eight: accessibility, portability-I want a laptop Dynabook. And I also want wallscreen-size displays. I want my whiteboard-sized hypertext display, and not until it's that big do I think we can really start working with hypertext. Hoker performs the following experiment. Take The Wall Street Journal and move around a little cutout the size of a Mac screen and see how happy you are with The Wall Street Journal, versus looking at a page of it in its entirety and immediately picking up what you might be interested in reading. A very persuasive point.
 
 
-### [9. Sociopolitico-Economic Problems]<!--silent-->
+### 9. Sociopolitico-Economic Problems
 
 
 And finally, point number nine: we must think about the sociopolitico-economic problems. We have not come to grips with issues of intellectual property rights and compensation. Congress and the U.S. Patent Office and copyright lawyers and so on do not understand what is involved here and need to be educated. If we shrink away from those issues and leave it to them, there is going to be absolute chaos. Ted, again, has written extensively on this issue and has postulated some interesting mechanisms for coping with the problems.

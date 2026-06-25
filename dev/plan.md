@@ -12,6 +12,7 @@ build incrementally to support word-level timestamps, pre-req for transclusion
 - pause/play icons — easy to see state + what action will happen
 - Synthesis time display: ~2161m 45s should be H:MM:SS
 - Error bar: currently only in Edit view; should be in a shared layout wrapper
+- with Andy voice, Error: Synthesis error: synthesis failed on sentence 0: ValueError: Reference audio must be 24 kHz (got 48000 Hz). Convert with: ffmpeg -i input.wav -ac 1 -ar 24000 ref.wav sentence: "I am A Johnny Come Lately to hypertext: I didn't get started until nineteen sixty seven, and what is especially fun about being here is that I can pay public tribute to the two real trailblazers who have inspired me and hordes of my students who have gone off to do their own independent hypertext projects."
 
 ## Later (or as needed to streamline testing or authoring of demo)
 - Outline view for editor

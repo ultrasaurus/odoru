@@ -38,6 +38,50 @@ function restorePlaceholders(text: string): string {
 // Only needs to handle what trafilatura produces: bold, italic, code, links.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Silent text — bracketed spans followed by a `<!--silent-->` comment, e.g.
+// `[Doug Engelbart]<!--silent-->`. Displayed (brackets kept) but excluded from
+// TTS and playback. See dev/silent-text.md. Mirrors strip_silent in
+// tts/src/markdown.rs.
+// ---------------------------------------------------------------------------
+
+const SILENT_SPAN = /\[[^\]]*\]\s*<!--\s*silent\s*-->/g
+
+// True when a whole block (heading/paragraph) is nothing but a single silent
+// span — the only case handled in this first pass (mid-sentence inline silent
+// is deferred).
+const FULLY_SILENT = /^\s*\[[^\]]*\]\s*<!--\s*silent\s*-->\s*$/
+
+function isFullySilent(text: string): boolean {
+  return FULLY_SILENT.test(text)
+}
+
+// The bracketed display text for a silent span, with the comment stripped and
+// the brackets kept (the editorial-insertion convention).
+function silentDisplayText(text: string): string {
+  return text.replace(/<!--\s*silent\s*-->/g, '').trim()
+}
+
+// Outline label for a heading: bracketed display text if silent, otherwise
+// the inline-stripped plain text.
+function silentOrPlain(text: string): string {
+  return isFullySilent(text) ? silentDisplayText(text) : stripInline(text)
+}
+
+// Remove silent spans to derive the plain text fed to TTS. Drops a line that
+// became empty (or only heading `#` markers) because of the stripping;
+// preserves originally-blank lines so paragraph boundaries survive.
+export function stripSilent(markdown: string): string {
+  const out: string[] = []
+  for (const line of markdown.split('\n')) {
+    const removed = line.replace(SILENT_SPAN, '')
+    const trimmed = removed.trim()
+    if (removed !== line && (trimmed === '' || /^#+$/.test(trimmed))) continue
+    out.push(removed)
+  }
+  return out.join('\n')
+}
+
 function stripInline(text: string): string {
   return text
     .replace(/\*\*(.*?)\*\*/gs, '$1')
@@ -85,6 +129,16 @@ function mergeOutlineLabels(sentences: string[]): string[] {
     }
   }
   return out
+}
+
+// Splits a markdown block's text into sentences, treating intra-block single
+// newlines as soft breaks (collapsed to a space) rather than hard sentence
+// breaks — mirrors the server's CommonMark handling in tts/src/markdown.rs
+// (`Event::SoftBreak | Event::HardBreak => current.push(' ')`). Blocks never
+// contain blank lines internally, so any `\n` here is a soft/hard break, not
+// a paragraph boundary.
+function splitBlockText(text: string): string[] {
+  return splitLines(text.replace(/\n+/g, ' '))
 }
 
 function splitLines(text: string): string[] {
@@ -177,15 +231,28 @@ function renderToken(
       const el = document.createElement(`h${token.depth}`)
       el.className = 'md-heading'
       const sentenceIndex = globalIdx
-      globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
+      if (isFullySilent(token.text)) {
+        // Display-only navigation heading: shown in body + outline, never
+        // spoken. No span woven, globalIdx unchanged, so it points at the
+        // next real sentence — the natural scroll target.
+        el.classList.add('silent')
+        el.textContent = silentDisplayText(token.text)
+      } else {
+        globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
+      }
       container.appendChild(el)
-      headings.push({ depth: token.depth, text: stripInline(token.text), element: el, sentenceIndex })
+      headings.push({ depth: token.depth, text: silentOrPlain(token.text), element: el, sentenceIndex })
       break
     }
     case 'paragraph': {
       const el = document.createElement('p')
       el.className = 'md-paragraph'
-      globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
+      if (isFullySilent(token.text)) {
+        el.classList.add('silent')
+        el.textContent = silentDisplayText(token.text)
+      } else {
+        globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
+      }
       container.appendChild(el)
       break
     }
@@ -263,11 +330,13 @@ function weaveSpans(
   pendingSpans: HTMLElement[],
 ): number {
   // Count sentences via stripped plain text — matches what the server sees.
-  const plainSentences = splitLines(stripInline(rawText))
+  // Intra-block newlines are soft/hard breaks (collapsed to a space), not
+  // sentence boundaries — see splitBlockText.
+  const plainSentences = splitBlockText(stripInline(rawText))
   const count = plainSentences.length
 
   // Raw markdown sentences for inline rendering. Should be the same count.
-  const rawSentences = splitLines(rawText)
+  const rawSentences = splitBlockText(rawText)
 
   for (let i = 0; i < count; i++) {
     const span = document.createElement('span')

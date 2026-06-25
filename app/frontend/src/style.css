@@ -1667,6 +1667,20 @@ html, body {
   color: var(--text);
 }
 
+/* Silent text — displayed (with editorial brackets) but never spoken.
+   See dev/silent-text.md. Muted + italic, with a small "not read aloud" cue. */
+:is(.transcript-container, .article-content) .silent {
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 0.7;
+}
+:is(.transcript-container, .article-content) .silent::after {
+  content: " 🔇";
+  font-size: 0.7em;
+  opacity: 0.6;
+  font-style: normal;
+}
+
 /* Inline formatting within spans */
 :is(.transcript-container, .article-content) .segment strong { font-weight: 600; }
 :is(.transcript-container, .article-content) .segment em     { font-style: italic; }

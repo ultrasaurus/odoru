@@ -49,6 +49,8 @@ next view, so timers and audio always stop on navigation.
   - Defaults to first document in list; empty state shown if none published
   - On load, checks for an active job on the document — auto-polls via `pollJob` if found
 - Outline tracks active heading from playback position; click → instant jump, no audio change
+- Silent text (`[text]<!--silent-->`) renders display-only — shown in body + outline,
+  no span woven, no sentence index consumed; excluded from TTS. See `dev/silent-text.md`
 - "Synthesize in background" button shown when audio not cached and no active job exists
 - Job progress shown in header; polls `GET /jobs/:id` every 4s via `pollJob` utility
 - Auto-scroll checkbox (default on) — when on, active sentence scrolls into view

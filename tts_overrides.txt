@@ -108,3 +108,6 @@ I'm a Johnny-come-lately	I am A Johnny Come Lately
 MCST	M C S T
 Lib	libb
 I reread a lot of it just a few days	I ree red a lot of it just a few days
+
+# Augment
+OBJECTIVE OF THE STUDY	Objective of the Study

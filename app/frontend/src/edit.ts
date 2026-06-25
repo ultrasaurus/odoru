@@ -1,5 +1,5 @@
 import { Player } from './player'
-import { renderMarkdown, type HeadingEntry } from './markdown'
+import { renderMarkdown, stripSilent, type HeadingEntry } from './markdown'
 import { Document, type DocumentState } from './document'
 import { ReaderCore } from './reader-core'
 import {
@@ -816,7 +816,9 @@ export function mount(onReader: () => void): () => void {
 
   async function stripMarkdown(raw: string): Promise<string> {
     const { marked } = await import('marked')
-    const html = marked.parse(raw, { async: false }) as string
+    // Strip silent spans first so they never reach plain_text / TTS, matching
+    // strip_silent in tts/src/markdown.rs. See dev/silent-text.md.
+    const html = marked.parse(stripSilent(raw), { async: false }) as string
     return html
       .replace(/<[^>]*>/g, '')
       .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")

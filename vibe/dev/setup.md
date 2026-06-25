@@ -51,14 +51,14 @@ with no env var needed. For the L4 path and the CUDA-PTX alignment history,
 see `dev/cloudrun.md`.
 
 ```bash
-cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL
-cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_URL segment augment_seg01
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_BW_URL segment augment_seg01
 ```
 
 current test:
 ```bash
-cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_URL
-cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_URL segment augment/augment-2026-06-22/augment_seg13
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+cargo run -- synthesize --speaker Sarah --seed 71463 --url $VIBE_BW_URL segment augment/augment-2026-06-22/augment_seg13
 ```
 
 leave it running in one terminal while you run the test in another
