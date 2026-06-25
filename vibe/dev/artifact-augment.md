@@ -87,4 +87,25 @@ time (
 Cloud Run logs (`gcloud logging read 'resource.type=cloud_run_revision
 AND resource.labels.service_name=vibe-cloudrun-bw' --order=asc
 --format='value(textPayload)' --freshness=<window>`), filtered for `job
+done`, `gpu_mem`.
+
+## N=4 test — warm up, then four different segments at once
+```bash
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+BASENAME=augment
+BASEDIR=augment/augment-2026-06-22
+cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg28 || exit 1
+time (
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg29 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg30 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg31 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg13 &
+  wait
+)
+```
+Requires `MAX_CONCURRENT_JOBS=4` on the deployed instance (see
+`dev/setup.md`) — otherwise the semaphore caps these at fewer concurrent
+jobs and this won't actually test N=4. Same caveat as above: `time` only
+gives pair/batch wall-clock — check per-job RTF and `gpu_mem` in the
+Cloud Run logs.
 done` and `gpu_mem`.

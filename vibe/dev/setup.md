@@ -27,8 +27,9 @@ docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION
 ```
 
 `MAX_CONCURRENT_JOBS` is set in `vibe/.env` (sourced in the build step
-above) — see `dev/parallel.md` for the testing ramp (2 -> 4 -> 8).
-`HEARTBEAT_SECS` defaults to 60 if unset; lower it (e.g. `10`) when
+above) — see `dev/parallel.md` for the testing ramp (2 -> 4 -> 8; N=2
+results recorded in `dev/cloudrun.md`, currently set to 4 for the next
+step). `HEARTBEAT_SECS` defaults to 60 if unset; lower it (e.g. `10`) when
 testing concurrency on short segments:
 
 ```bash

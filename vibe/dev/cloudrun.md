@@ -178,7 +178,7 @@ list price. Two ways the calculus could still favor Blackwell:
 Listen test on the corrected-voice batch (seg13–18, 15 segments total so
 far): quality good.
 
-## Parallel-job support (Stage 1 implemented, N=2 tested)
+## Parallel-job support (Stage 1 implemented, N=2 and N=4 tested)
 
 Given the cost math above, running multiple jobs concurrently on one
 Blackwell instance is the natural next lever — at N≈4–8 concurrent jobs,
@@ -230,10 +230,79 @@ instance, not a concurrency cost — **always warm the instance with one
 solo request before timing a concurrency test** (see the pattern in
 `dev/artifact-augment.md`).
 
+### Results so far (N=4)
+
+VRAM still not the constraint: four concurrent jobs peaked around
+25.5 GiB combined — well under the 96 GiB budget, same conclusion as N=2.
+
+RTF degradation roughly doubled vs. N=2, and unevenly across the batch:
+
+| Segment | Wall | RTF |
+|---|---|---|
+| seg31 (1st to finish) | 55.8s | 1.391 |
+| seg13 | 74.7s | 1.187 |
+| seg29 | 87.3s | 1.143 |
+| seg30 (last to finish) | 89.2s | 1.150 |
+
+All 4 jobs entered `Running` within ~45ms of each other (semaphore let
+all 4 through at once, confirmed via `job concurrency limit
+max_concurrent_jobs=4` in the logs) and ran concurrently for their full
+duration (overlapping `gpu_mem` heartbeats throughout) — this is real GPU
+contention, not cold-start noise.
+
+**Alignment (CPU, `spawn_blocking`) was not contended in this run** —
+but check the actual overlap before trusting that at higher N. Synth
+finished at staggered times (55.8s/74.7s/87.3s/89.2s), so alignment never
+had all 4 jobs in flight at once here: seg31 (7.2s) and seg13 (11.0s)
+each ran alone; only seg29/seg30 overlapped (~12s overlap, 13.9s/14.4s
+each). Normalized by word count, that overlapping pair ran at
+~0.071–0.076 s/word — squarely inside the normal *solo* alignment
+variance seen elsewhere in this doc (0.060–0.110 s/word), so no
+detectable CPU contention even during the 2-way overlap. This doesn't
+prove alignment is clean at true 4-way concurrency, though — this run
+just didn't exercise that case due to how synth completion happened to
+stagger. Worth watching directly at N=8, where wider RTF spread under
+heavier GPU contention makes 3-4-way alignment overlap more likely. The job that started first finished
+fastest; the rest stretched out as compute contention increased, a
+classic GPU-scheduling fairness pattern under load.
+
+Throughput still wins, but the margin is shrinking: 4 jobs completed
+within an 89.2s window vs. ~120s for 4× sequential at the warm-solo
+baseline (~30s each) — roughly 35% faster, down from N=2's ~45% gain
+(33s vs ~60s sequential). The RTF cost roughly doubled (N=2: ~0.85, N=4:
+~1.14–1.39) while the throughput gain shrank, meaning **the curve is
+already past its best point** — GPU compute, not VRAM, is now the
+binding constraint, and it's degrading faster than concurrency is adding
+value.
+
 ### Next
 
-Move to N=4 per the `dev/parallel.md` ramp (2 → 4 → 8), watching for
-whether RTF degradation worsens disproportionately (sign of real GPU
-contention, not just warmup noise) or holds roughly flat. If model-load
-redundancy becomes a meaningful fraction of wall time at higher N, that's
-the trigger for Stage 2 (persistent model server) in `dev/parallel.md`.
+Diminishing/possibly negative returns are likely at N=8 given this trend
+— the N=2→N=4 step alone roughly doubled per-job RTF while the
+throughput gain fell from ~45% to ~35%. Worth testing N=8 anyway to
+confirm where the curve actually turns (and to fully rule out VRAM as a
+factor, since headroom is still ample), but go in expecting it may net
+out worse than N=4, not better. If so, N=4 — or even N=2-3 — may be the
+practical sweet spot for raw process-level concurrency on Blackwell.
+
+Important distinction for whatever comes after that: **the N=4 result is
+GPU compute contention** (N concurrent forward passes time-slicing the
+same SMs/tensor cores), not redundant model-loading overhead. Stage 2 in
+`dev/parallel.md` (a persistent model server that loads VibeVoice once
+and serves many jobs) only removes the *load* cost — it does nothing for
+compute contention, since the GPU still has to do N times the matmul
+work in roughly the same window whether each job has its own loaded copy
+or they share one resident model. Stage 2 is still worth doing
+eventually (the redundant load time is real, measurable waste), but it
+won't move the RTF-under-concurrency numbers measured here.
+
+The lever that actually addresses compute contention is **true request
+batching** — combining N requests into a single batched forward pass
+(one matmul over a batch dimension) instead of N independent ones
+time-slicing the GPU. That's a bigger change than Stage 2: it needs
+VibeVoice's inference code to support batched generation, plus a
+request-queueing layer to accumulate a batch before running it, and a
+persistent model process is a prerequisite for it (you can't batch
+across independent subprocesses). Worth scoping separately, and only if
+the throughput numbers at N=4–8 don't already meet the cost target on
+their own.
