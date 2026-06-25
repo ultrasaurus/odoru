@@ -108,4 +108,31 @@ Requires `MAX_CONCURRENT_JOBS=4` on the deployed instance (see
 jobs and this won't actually test N=4. Same caveat as above: `time` only
 gives pair/batch wall-clock — check per-job RTF and `gpu_mem` in the
 Cloud Run logs.
-done` and `gpu_mem`.
+
+## N=8 test — warm up (rerun seg13), then eight segments at once
+```bash
+cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL
+BASENAME=augment
+BASEDIR=augment/augment-2026-06-22
+cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg13 || exit 1
+time (
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg33 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg34 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg35 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg36 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg37 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg38 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg39 &
+  cargo run -- synthesize --seed 71463 --url $VIBE_BW_URL --basedir $BASEDIR segment ${BASENAME}_seg40 &
+  wait
+)
+```
+Requires `MAX_CONCURRENT_JOBS=8` on the deployed instance (see
+`dev/setup.md`) — otherwise the semaphore caps concurrency lower and this
+won't actually test N=8. Per the N=4 findings in `dev/cloudrun.md`,
+expect RTF to degrade further (possibly past the point of net throughput
+gain) — check per-job RTF/wall and `gpu_mem` in the Cloud Run logs, and
+also check whether alignment (`alignment starting`/`alignment done`)
+ever has more than 2 jobs overlapping at once, since N=4 only exercised
+a 2-way alignment overlap and didn't prove CPU-side concurrency is clean
+at higher N.

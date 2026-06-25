@@ -80,10 +80,19 @@ is far more powerful and its 96 GB VRAM opens up parallelism.
 - **Hardware**: 96 GB GDDR7.
 - **Instance requirements**: min 20 vCPU / 80 GiB memory (up to 44 vCPU /
   176 GB).
-- **Cost**: $1.3148/hour, vs the $0.25–0.50/hour we typically pay on RunPod
-  — roughly 3–4× more per hour.
-- **Break-even**: it needs to be ~3–4× faster per segment to match RunPod's
-  cost-per-segment; given Blackwell vs RTX 3090/A40, that is plausible.
+- **Cost — GPU is not the whole bill.** GPU itself is $1.3148/hour, but
+  Cloud Run bills CPU and memory separately at $0.000024/vCPU-sec and
+  $0.0000025/GiB-sec, and the RTX Pro 6000 *requires* at least 20 vCPU /
+  80 GiB attached. That's $1.728/hr (CPU) + $0.72/hr (memory) — **$2.448/hr
+  on top of the GPU**, i.e. CPU+memory alone cost almost twice the GPU and
+  make up ~65% of the real total. **True instance cost: ~$3.76/hour**, not
+  $1.31/hour. This is fixed by the GPU's minimum vCPU/memory requirement —
+  it doesn't shrink with concurrency, since `MAX_CONCURRENT_JOBS` doesn't
+  change the instance's CPU/memory allocation.
+- **Break-even revised accordingly**: vs RunPod's $0.25–0.50/hr, the real
+  hourly gap is ~7.5–15x, not ~3–4x. See the Results/cost sections below
+  for what this means once parallelism is factored in — short version: it
+  doesn't close the gap.
 - **Upside beyond speed**: 96 GB VRAM (vs ~10 GB used per VibeVoice-1.5B
   inference) could run **many jobs in parallel** on one instance, which
   changes throughput-per-dollar substantially. If the single-job numbers
@@ -157,28 +166,34 @@ Measure on a representative segment set (varied cfg-scale / seed / speed):
   **met, comfortably**: steady-state ~0.53 avg, roughly **2x faster** than
   RunPod's typical ~1.0 RTF (using the single early 0.920 sample
   understated this — see Results above).
-- cost-per-segment vs RunPod at $0.25–0.50/hr — **closer than it looked,
-  still not a clean win on a single-job basis**. At $1.3148/hr vs RunPod's
-  $0.25–0.50/hr (2.6–5.3x the hourly rate) offset by a ~2x speed advantage,
-  Blackwell's cost-per-segment lands around **1.3–2.6x RunPod's** (using
-  RunPod RTF ~1.0; if RunPod is actually running its best-case 0.29–0.40
-  RTF per `quirks.md`, Blackwell's relative cost is worse, not better).
-  Better than the earlier ~3–4x estimate, but still a premium, not a win.
+- cost-per-segment vs RunPod at $0.25–0.50/hr — **not met, and worse than
+  first estimated.** The true Blackwell instance cost is **~$3.76/hr**
+  (GPU $1.3148 + the *required* 20 vCPU/80 GiB billed separately at
+  ~$2.448/hr — see Option 2 above), not the $1.3148/hr GPU-only price used
+  in earlier passes of this doc. Against RunPod's $0.25–0.50/hr (7.5–15x
+  the hourly rate) offset by only a ~2x speed advantage, Blackwell's
+  cost-per-segment lands around **3.8–7.5x RunPod's** on a single job —
+  worse than every earlier estimate in this doc, which didn't account for
+  CPU/memory billing.
 
 So: single-job Blackwell is a clear technical win (fastest synth path we've
-measured, ~2x RunPod) but still costs more per segment than RunPod at
-list price. Two ways the calculus could still favor Blackwell:
+measured, ~2x RunPod) but costs substantially more per segment than RunPod
+at list price — more than initially estimated, once CPU/memory billing is
+included. Two ways the calculus could still favor Blackwell:
 - **Parallel jobs** exploiting the 96 GB (~10 GB used per VibeVoice-1.5B
-  job leaves room for many concurrent jobs on one instance) — at N≈4-8
-  concurrent jobs per instance, cost-per-segment could drop well below
-  RunPod's. This is the natural next step given steady-state numbers hold.
+  job leaves room for many concurrent jobs on one instance) — the CPU/
+  memory cost is fixed regardless of `MAX_CONCURRENT_JOBS`, so parallelism
+  at least amortizes that fixed cost across more segments. **Update after
+  N=4/N=8 testing, with CPU/memory included: it helps, but doesn't come
+  close to closing the gap** — see the cost table in the Parallel-job
+  section below.
 - **Operational value** (serverless scale-to-zero, no RunPod pod
   start/stop lifecycle, durable job state) independent of raw cost.
 
 Listen test on the corrected-voice batch (seg13–18, 15 segments total so
 far): quality good.
 
-## Parallel-job support (Stage 1 implemented, N=2 and N=4 tested)
+## Parallel-job support (Stage 1 implemented, N=2/4/8 tested)
 
 Given the cost math above, running multiple jobs concurrently on one
 Blackwell instance is the natural next lever — at N≈4–8 concurrent jobs,
@@ -207,13 +222,14 @@ Deploy wires both through `--set-env-vars`; `--concurrency` is set to
 match `MAX_CONCURRENT_JOBS` so Cloud Run actually routes that many
 requests to one instance. See `dev/setup.md`.
 
-### Results so far (N=2)
+### Results so far (N=2, N=4, N=8)
 
-VRAM is not the constraint: two concurrent jobs peaked around 12.7 GiB
-combined, far under the 96 GiB budget — plenty of headroom for more than
-2 concurrent jobs on memory alone.
+VRAM is not the constraint at any tested N: combined usage scaled
+roughly linearly with N (~6.3 GiB/job) — 12.7 GiB at N=2, 25.5 GiB at
+N=4, ~51 GiB at N=8 — all comfortably under the 96 GiB budget. Headroom
+on memory alone would support going well past N=8.
 
-RTF degrades under concurrency, but throughput still wins:
+RTF degrades under concurrency at every step:
 
 | Scenario | RTF | Notes |
 |---|---|---|
@@ -221,69 +237,117 @@ RTF degrades under concurrency, but throughput still wins:
 | Solo, cold instance | 1.392–2.459 | first request after idle/fresh deploy; model load + CUDA/cuDNN warmup overlap with generation — not a concurrency effect |
 | 2 concurrent, one cold | 0.835–2.459 | seg20/21 pair (0.835/1.095) and seg23/24 pair (1 job hit 2.459) — cold-start contamination, not steady-state |
 | 2 concurrent, both warm | 0.81–0.89 | seg22 pair (0.881/0.887), seg26/27 pair (0.809/0.839) |
+| 4 concurrent, all warm | 1.14–1.39 | seg31/13/29/30 — see breakdown below |
+| 8 concurrent, all warm | 2.03–2.69 | seg33–40 — see breakdown below |
 
-Once both jobs are warm, 2-way concurrency costs roughly 60–70% more RTF
-per job than solo (~0.85 vs ~0.5), but completes 2 jobs in ~33s instead of
-~60s sequential (2× solo) — a real net throughput win. Cold-start
-contamination (RTF 2+) is a measurement artifact of testing on a fresh
-instance, not a concurrency cost — **always warm the instance with one
-solo request before timing a concurrency test** (see the pattern in
-`dev/artifact-augment.md`).
-
-### Results so far (N=4)
-
-VRAM still not the constraint: four concurrent jobs peaked around
-25.5 GiB combined — well under the 96 GiB budget, same conclusion as N=2.
-
-RTF degradation roughly doubled vs. N=2, and unevenly across the batch:
+N=4 breakdown (seg31 started first, finished fastest; the rest stretched
+out as contention increased — classic GPU-scheduling fairness pattern):
 
 | Segment | Wall | RTF |
 |---|---|---|
-| seg31 (1st to finish) | 55.8s | 1.391 |
+| seg31 | 55.8s | 1.391 |
 | seg13 | 74.7s | 1.187 |
 | seg29 | 87.3s | 1.143 |
-| seg30 (last to finish) | 89.2s | 1.150 |
+| seg30 | 89.2s | 1.150 |
 
-All 4 jobs entered `Running` within ~45ms of each other (semaphore let
-all 4 through at once, confirmed via `job concurrency limit
-max_concurrent_jobs=4` in the logs) and ran concurrently for their full
-duration (overlapping `gpu_mem` heartbeats throughout) — this is real GPU
-contention, not cold-start noise.
+N=8 breakdown (same fairness pattern, more pronounced):
 
-**Alignment (CPU, `spawn_blocking`) was not contended in this run** —
-but check the actual overlap before trusting that at higher N. Synth
-finished at staggered times (55.8s/74.7s/87.3s/89.2s), so alignment never
-had all 4 jobs in flight at once here: seg31 (7.2s) and seg13 (11.0s)
-each ran alone; only seg29/seg30 overlapped (~12s overlap, 13.9s/14.4s
-each). Normalized by word count, that overlapping pair ran at
-~0.071–0.076 s/word — squarely inside the normal *solo* alignment
-variance seen elsewhere in this doc (0.060–0.110 s/word), so no
-detectable CPU contention even during the 2-way overlap. This doesn't
-prove alignment is clean at true 4-way concurrency, though — this run
-just didn't exercise that case due to how synth completion happened to
-stagger. Worth watching directly at N=8, where wider RTF spread under
-heavier GPU contention makes 3-4-way alignment overlap more likely. The job that started first finished
-fastest; the rest stretched out as compute contention increased, a
-classic GPU-scheduling fairness pattern under load.
+| Segment | Words | Wall | RTF |
+|---|---|---|---|
+| seg40 | 82 | 86.9s | 2.693 |
+| seg33 | 114 | 107.5s | 2.512 |
+| seg36 | 147 | 110.2s | 2.474 |
+| seg38 | 184 | 138.3s | 2.105 |
+| seg35 | 182 | 148.1s | 2.358 |
+| seg37 | 214 | 150.6s | 2.103 |
+| seg34 | 207 | 154.4s | 2.032 |
+| seg39 | 198 | 154.5s | 2.066 |
 
-Throughput still wins, but the margin is shrinking: 4 jobs completed
-within an 89.2s window vs. ~120s for 4× sequential at the warm-solo
-baseline (~30s each) — roughly 35% faster, down from N=2's ~45% gain
-(33s vs ~60s sequential). The RTF cost roughly doubled (N=2: ~0.85, N=4:
-~1.14–1.39) while the throughput gain shrank, meaning **the curve is
-already past its best point** — GPU compute, not VRAM, is now the
-binding constraint, and it's degrading faster than concurrency is adding
-value.
+All jobs at each N entered `Running` within tens of milliseconds of each
+other (semaphore let all N through at once, confirmed via `job
+concurrency limit max_concurrent_jobs=N` in the logs) and ran
+concurrently for their full duration (overlapping `gpu_mem` heartbeats
+throughout) — this is real GPU compute contention, not cold-start noise.
+Cold-start contamination (RTF 2+ on a single solo job) is a separate,
+measurement-only artifact of testing on a fresh instance — **always warm
+the instance with one solo request before timing a concurrency test**
+(see the pattern in `dev/artifact-augment.md`).
+
+**Throughput** (the metric that actually matters: audio-seconds produced
+per wall-clock second, computed as Σ(wall/RTF) ÷ makespan — this
+normalizes for segments of different lengths, unlike comparing raw
+wall-clock times):
+
+| N | Throughput | Marginal gain over previous N |
+|---|---|---|
+| Solo | ~2.0x | — |
+| N=2 | ~2.4x | +0.4x |
+| N=4 | ~2.9x | +0.5x |
+| N=8 | ~3.0x | +0.1x |
+
+The curve is flattening hard but **did not reverse** — N=8 is still a
+net throughput win over N=4, just barely. An earlier draft of this doc
+predicted N=8 might net out *worse* than N=4; that was wrong, and is
+corrected here based on the actual N=8 data. The practical takeaway:
+N=4 already captures most of the available throughput gain on this
+workload/hardware; N=8 buys very little extra and costs much higher
+per-job RTF, so N=4 is the more practical operating point unless the
+marginal 0.1x matters for your use case.
+
+**Alignment (CPU, `spawn_blocking`) holds up even under genuine 4-way
+overlap** — resolving the open question from the N=4 test, which only
+exercised a 2-way overlap. At N=8, alignment for seg35/37/34/39
+overlapped 4 ways simultaneously (~17:59:29–17:59:34). Normalized by
+word count, those four ran at 0.064–0.075 s/word — within the normal
+*solo* alignment variance seen throughout this doc (0.060–0.110 s/word).
+No detectable CPU contention even at true 4-way concurrency.
+
+**Cost-per-segment at each N — corrected for CPU/memory billing.** The
+$1.3148/hr figure used in earlier passes of this analysis is the GPU
+*alone*. The RTX Pro 6000 requires a minimum 20 vCPU / 80 GiB attached,
+billed separately ($0.000024/vCPU-sec, $0.0000025/GiB-sec) — that's
+**$1.728/hr CPU + $0.72/hr memory = $2.448/hr**, on top of the GPU, for a
+**true instance cost of ~$3.76/hr**. Unlike the GPU's per-job throughput
+gain, this CPU/memory cost is fixed per instance regardless of
+`MAX_CONCURRENT_JOBS` — so parallelism amortizes it across more segments,
+but it never goes away.
+
+| N | Throughput | Blackwell cost-per-audio-sec vs RunPod |
+|---|---|---|
+| Solo | 2.0x | 3.76x–7.53x more expensive |
+| N=4 | 2.9x | **2.60x–5.19x** |
+| N=8 | 3.0x | 2.51x–5.02x |
+
+This is the real number, and it reverses the earlier (GPU-only) read of
+"roughly parity." Even at N=8 — past the point of diminishing throughput
+returns — Blackwell costs **2.5x to 5x more per segment than RunPod**,
+not "roughly parity." Parallelism helps (it nearly halves the N=1 gap),
+but CPU/memory billing dominates the total enough that no amount of
+synth-side speedup or process-level concurrency closes it; that would
+need either a fundamentally cheaper way to get the GPU without the
+20 vCPU/80 GiB minimum, or RunPod becoming meaningfully more expensive
+than its current $0.25–0.50/hr. Whether Blackwell is still "worth it"
+now rests entirely on operational value (serverless, durable state) —
+not on cost.
+
+**Caveat: the table above assumes RunPod runs at RTF≈1.0.** `quirks.md`
+documents RunPod hitting RTF 0.29–0.40 in its best case (throughput
+2.5x–3.45x, not 1.0x). If RunPod is actually running at that best case
+rather than RTF≈1.0, the gap is meaningfully worse than the table shows
+— at N=8, recomputing against RunPod's best-case RTF range gives roughly
+**6.3x–17.3x**, not 2.5x–5.0x. The 2.5x–5.0x figures above are a
+floor, not a typical case; whether they're realistic depends on which
+RunPod RTF this workload actually sees in practice (see `quirks.md` for
+what's been measured there).
 
 ### Next
 
-Diminishing/possibly negative returns are likely at N=8 given this trend
-— the N=2→N=4 step alone roughly doubled per-job RTF while the
-throughput gain fell from ~45% to ~35%. Worth testing N=8 anyway to
-confirm where the curve actually turns (and to fully rule out VRAM as a
-factor, since headroom is still ample), but go in expecting it may net
-out worse than N=4, not better. If so, N=4 — or even N=2-3 — may be the
-practical sweet spot for raw process-level concurrency on Blackwell.
+N=4 looks like the practical sweet spot for raw process-level
+concurrency on this workload — N=8 is a real but marginal throughput
+gain (+0.1x) for a much higher per-job RTF cost. Going further (N=16+)
+is not expected to help based on this flattening curve, and VRAM
+headroom (still ample at ~51 GiB/8 jobs) was never the actual
+constraint — GPU compute is.
 
 Important distinction for whatever comes after that: **the N=4 result is
 GPU compute contention** (N concurrent forward passes time-slicing the
