@@ -23,7 +23,7 @@ dotenvy = "0.15"
 object_store = { version = "0.14", features = ["gcp"] }
 async-trait = "0.1"
 bytes = "1"
-forced-alignment = { git = "https://github.com/ultrasaurus/forced-alignment-rs.git", tag = "v0.2.1" }
+forced-alignment = { git = "https://github.com/ultrasaurus/forced-alignment-rs.git", tag = "v0.2.2" }
 
 [features]
 cuda = ["forced-alignment/cuda"]

@@ -1062,8 +1062,8 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "forced-alignment"
-version = "0.2.1"
-source = "git+https://github.com/ultrasaurus/forced-alignment-rs.git?tag=v0.2.1#af5b686f574746b8ccb45fee0a5e30edd7023d9c"
+version = "0.2.2"
+source = "git+https://github.com/ultrasaurus/forced-alignment-rs.git?tag=v0.2.2#fe5832941f62ad8177bb4f98f3898550d084a147"
 dependencies = [
  "anyhow",
  "candle-core",

@@ -232,9 +232,21 @@ Both open questions from this section are answered, at least directionally:
   qualitative conclusion (real batching avoids the time-slicing
   contention seen in N=2/4/8) is a sound mechanism-level argument
   independent of this data and very likely still correct, but the
-  specific numbers need a repeat run (and pushing past N=16, since
-  nothing here suggests a ceiling) before locking in a production
+  specific numbers need a repeat run before locking in a production
   batch size off this curve.
+- **Sharper version of that caveat, discovered after the fact: this run
+  used unnormalized text.** `batch_bench.py`'s `load_texts()` reads raw
+  `.txt` directly — it never calls `util::normalizer::normalize`, the
+  step the CLI's `synthesize` command applies before sending text to
+  the server. Unnormalized text (acronyms, em-dashes, number/ID
+  formatting `normalize-future.md` tracks) can cause the model to
+  truncate or repeat (`quirks.md`'s seg07/seg20 history) — and that
+  kind of artifact often runs *faster*, not slower. So the throughput
+  curve may be partly an artifact of bad input, not just measurement
+  noise — a different and somewhat worse problem than "wall-clock isn't
+  reliable yet." `seg41`–`seg71` need to be re-run with normalized text
+  regardless (see below), which doubles as a from-scratch repeat of
+  this measurement with clean input.
 - Results: full log + wavs at
   `gs://vibe-jobs-a4127f08/bench/2c677d7b-2582-4ee0-a164-c4314f4395c8/`;
   `batch_bench_runs.jsonl` copied to `vibe/bench_runs.jsonl` (tracked,
@@ -533,7 +545,44 @@ records. A thin `batch_id` just groups job_ids for submission.
   path. That's blocked on Task 3 (client) for a full round-trip, though
   it could be curl-tested standalone first, same as `/bench` was.
 
-### 3. Server execution: language boundary
+**First real `/batches` call (v5 image, `seg41`-`43`, normalized text)
+found and fixed a real bug, unrelated to anything scoped above.**
+`status: "done"`, all 3 wavs produced correctly, but only 1 of 3 got a
+transcript/report — Cloud Run logs showed `alignment failed name=
+augment_seg41 error=Lock acquisition failed:
+/root/.cache/huggingface/hub/models--facebook--wav2vec2-base-960h/
+blobs/...lock` (and same for `seg43`). Root cause: `forced-alignment`
+(`model.rs`) calls `hf_hub::api::sync::Api::new()`, which resolves the
+model cache via `Cache::default()` — which **ignores `HF_HOME`
+entirely** and always uses `~/.cache/huggingface`. Meanwhile
+`download-models.py` downloads `facebook/wav2vec2-base-960h` into
+`$HF_HOME=/workspace/.cache/huggingface` at image build time
+(`Dockerfile.cloudrun-blackwell:88,96`) — a path the Rust side never
+reads. So the wav2vec2 model was never actually pre-warmed on the Rust
+side; every fresh instance has always done a live runtime download on
+first alignment call, regardless of batching. Batching's `JoinSet`
+(section 4) just made this visible by firing 3 first-time downloads at
+the same instant instead of one at a time, so 2 of 3 lost the race on
+the lock file (`run_alignment`'s existing non-fatal error handling
+degraded gracefully — audio was unaffected, just 2 missing
+transcripts).
+
+Fixed at the source: `forced-alignment-rs` (separate repo, git-tag
+dependency) `model.rs` now uses `ApiBuilder::from_env().build()?`
+instead of `Api::new()`, so it honors `HF_HOME` like the rest of this
+project's tooling already does — tagged `v0.2.2`, `vibe/service/
+Cargo.toml` bumped to match, `Cargo.lock` updated, `cargo build`/`cargo
+test -p vibe-service` both still pass (19 tests).
+
+**Confirmed fixed on v6 (fresh instance, same `seg41`-`43` batch
+resubmitted):** all 3 `alignment starting` logs again fired at the same
+instant (genuine 3-way concurrency, not avoided), and this time all 3
+completed cleanly — `alignment done` for each (0 suspects/filtered),
+real `transcript.json`/`report.json` for every segment (18.6-26.2 KB
+transcripts, no empty files, no `Lock acquisition failed` in the logs).
+First fully clean end-to-end `/batches` round trip: 3 segments, 1
+batched `generate()` call, 3 concurrent alignments, 3 complete job
+records with audio + transcript + report.
 
 Worth being explicit about what's negotiable here and what isn't,
 given the long-term interest in eventually moving more of this to Rust
