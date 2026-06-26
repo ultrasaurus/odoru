@@ -129,7 +129,7 @@ time (
 ```
 Requires `MAX_CONCURRENT_JOBS=8` on the deployed instance (see
 `dev/setup.md`) — otherwise the semaphore caps concurrency lower and this
-won't actually test N=8. Per the N=4 findings in `dev/cloudrun.md`,
+won't actually test N=8. Per the N=4 findings in `dev/cloudrun/cloudrun-blackwell.md`,
 expect RTF to degrade further (possibly past the point of net throughput
 gain) — check per-job RTF/wall and `gpu_mem` in the Cloud Run logs, and
 also check whether alignment (`alignment starting`/`alignment done`)

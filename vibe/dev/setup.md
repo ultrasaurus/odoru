@@ -28,7 +28,7 @@ docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun-bw:$VERSION
 
 `MAX_CONCURRENT_JOBS` is set in `vibe/.env` (sourced in the build step
 above) — see `dev/parallel.md` for the N=2/4/8 process-concurrency ramp
-(results recorded in `dev/cloudrun.md`). Now set to **1**: with
+(results recorded in `dev/cloudrun/cloudrun-blackwell.md`). Now set to **1**: with
 `batch_bench.py`/`POST /bench` in play (also `dev/parallel.md`), a bench
 sweep already exercises batch sizes up to the largest requested inside
 one job-semaphore permit, so any N>1 here would let regular `/jobs`
@@ -62,7 +62,7 @@ in-memory only.
 
 The Blackwell image builds vibe-service CPU-only, so alignment runs on CPU
 with no env var needed. For the L4 path and the CUDA-PTX alignment history,
-see `dev/cloudrun.md`.
+see `dev/cloudrun/cloudrun-L4.md`.
 
 ```bash
 cargo run -- upload-voice --name Sarah --gender woman --wav-path ../voices/sarah/ref.wav --url $VIBE_BW_URL

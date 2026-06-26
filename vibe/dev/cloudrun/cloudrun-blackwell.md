@@ -1,78 +1,7 @@
-# Cloud Run GPU evaluation
+# Cloud Run: NVIDIA RTX Pro 6000 Blackwell (96 GB) — active synth target
 
-vibe-service runs on both RunPod (primary, performance path) and Google
-Cloud Run (serverless, scale-to-zero). This documents what we learned
-evaluating Cloud Run's GPU options for VibeVoice synthesis.
-
-The durable job-state work (`gcs-job-state.md`) is independent of all this
-and works on Cloud Run regardless — ambient GCS auth via the metadata
-server is proven. The open question here is purely whether Cloud Run's GPUs
-are a viable *synthesis* target vs RunPod.
-
-## Build / deploy
-
-See `dev/setup.md` for the `Dockerfile.cloudrun` build + `gcloud run deploy`
-commands. Cloud Run specifics that bit us are below.
-
-## Option 1: NVIDIA L4 (24 GB) — works, but not competitive
-
-Status: **end-to-end working, but too slow to be the synth target.**
-
-- **VRAM is fine.** L4 has 24 GB, which meets our documented minimum (the
-  artifact/hallucination problems were the 16 GB RTX A4000, not 24 GB).
-- **Too slow.** Observed synth RTF ~2.4–3.0 (e.g. a 180-word segment:
-  wall 139.6 s, RTF 2.43) vs ~1.0 on RunPod's RTX cards (0.29–0.40 on the
-  24 GB cards per `quirks.md`). Roughly 3× slower.
-- **Flash Attention does not work on the NGC base.** VibeVoice requests
-  `flash_attention_2` on CUDA. The Cloud Run base is `nvcr pytorch 24.05`,
-  which ships NVIDIA's patched torch `2.4.0a0`. Prebuilt flash-attn wheels
-  are built against *stable* torch 2.4.0, so the `.so` fails to load with
-  `undefined symbol: _ZNK3c105Error4whatEv` (`c10::Error::what()`). Worse:
-  because `transformers` auto-imports `flash_attn` when it's installed, that
-  import error **crashes synth entirely** — not a graceful SDPA fallback.
-  So on this base flash-attn must be **source-built** against the in-image
-  torch (`pip install flash-attn --no-build-isolation`, ~20–40 min compile),
-  which we did not pursue given L4's other limits. L4 therefore runs synth
-  on SDPA (slower, and per VibeVoice's own warning, less-tested quality).
-- **CUDA forced-alignment crashes on L4.** The candle alignment kernels are
-  compiled with the CUDA 12.4 toolchain; Cloud Run's L4 host driver is too
-  old to accept that PTX → `DriverError(CUDA_ERROR_UNSUPPORTED_PTX_VERSION)`,
-  which makes `/transcript` and `/report` 404. Fix: run alignment on CPU via
-  `FORCED_ALIGNMENT_DEVICE=cpu` (forced-alignment v0.2.1 honors this even
-  with the cuda feature compiled in). `Dockerfile.cloudrun` bakes this ENV
-  in. VibeVoice synth still uses the GPU — only the Rust aligner moves to
-  CPU. (RunPod leaves the var unset and auto-detects CUDA; its newer driver
-  accepts the 12.4 PTX.)
-
-Net: L4 proves the Cloud Run *plumbing* (durable state, ambient auth,
-CPU alignment) but is ~3× too slow for synth and can't easily use flash
-attention. Not the synth target.
-
-For reference:
-
-```
-source vibe/.env
-VERSION=v5
-docker build --platform=linux/amd64 -f vibe/Dockerfile.cloudrun -t vibe-cloudrun:latest .
-docker tag vibe-cloudrun:latest  us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
-docker push us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION
-```
-
-```
-gcloud run deploy vibe-cloudrun \
-  --image us-central1-docker.pkg.dev/$PROJECT/vibe/vibe-cloudrun:$VERSION \
-  --region us-central1 \
-  --gpu 1 --gpu-type nvidia-l4 \
-  --no-gpu-zonal-redundancy \
-  --cpu 4 --memory 16Gi \
-  --no-cpu-throttling \
-  --concurrency 1 \
-  --min-instances 0 \
-  --set-env-vars VIBE_SERVICE_SECRET=$VIBE_SERVICE_SECRET,GCS_BUCKET=vibe-jobs-a4127f08
-```
-
-
-## Option 2: NVIDIA RTX Pro 6000 Blackwell (96 GB) — to evaluate
+See [cloudrun.md](cloudrun.md) for the overview and how this fits next
+to the L4 path.
 
 Cloud Run also offers the RTX Pro 6000 Blackwell. Worth testing because it
 is far more powerful and its 96 GB VRAM opens up parallelism.
@@ -98,9 +27,9 @@ is far more powerful and its 96 GB VRAM opens up parallelism.
   changes throughput-per-dollar substantially. If the single-job numbers
   look good, parallel synth is the follow-up worth the engineering (relates
   to the parked Cloud Run Jobs / N-parallel-segments idea in
-  `gcs-job-state.md`).
+  `../gcs-job-state.md`).
 
-### Dependency upgrades required for Blackwell
+## Dependency upgrades required for Blackwell
 
 RTX Pro 6000 Blackwell is compute capability **sm_120**, which needs **CUDA
 12.8+**. Our current images are CUDA 12.4 and will not run on it. Expected
@@ -116,16 +45,16 @@ changes (to be confirmed during the build):
   needing the candle CUDA kernels rebuilt for sm_120). Revisit CUDA
   alignment later if the driver accepts a 12.8-built PTX.
 
-### Build / deploy (viability test)
+## Build / deploy (viability test)
 
-Build/deploy commands live in `dev/setup.md` (the canonical home for active
+Build/deploy commands live in `../setup.md` (the canonical home for active
 build commands): image `Dockerfile.cloudrun-blackwell`, tag
 `vibe-cloudrun-bw`, deployed with the RTX Pro 6000 GPU type and 20 vCPU /
 80 GiB. The L4 `Dockerfile.cloudrun` stays as a working fallback. The
 Blackwell binary is built CPU-only, so no `FORCED_ALIGNMENT_DEVICE` is
 needed.
 
-### Results
+## Results
 
 | Build | Synth RTF | Synth wall | Align (CPU) | Notes |
 |---|---|---|---|---|
@@ -159,7 +88,7 @@ actual mechanism is "whatever pip resolves," verified empirically rather
 than guaranteed. Revisit if a future torch/transformers bump changes which
 wheel pip picks.
 
-### Decision criteria
+## Decision criteria
 
 Measure on a representative segment set (varied cfg-scale / seed / speed):
 - synth RTF (target: ≥3–4× the L4, i.e. roughly RunPod-class or better) —
@@ -169,12 +98,12 @@ Measure on a representative segment set (varied cfg-scale / seed / speed):
 - cost-per-segment vs RunPod at $0.25–0.50/hr — **not met, and worse than
   first estimated.** The true Blackwell instance cost is **~$3.76/hr**
   (GPU $1.3148 + the *required* 20 vCPU/80 GiB billed separately at
-  ~$2.448/hr — see Option 2 above), not the $1.3148/hr GPU-only price used
-  in earlier passes of this doc. Against RunPod's $0.25–0.50/hr (7.5–15x
-  the hourly rate) offset by only a ~2x speed advantage, Blackwell's
-  cost-per-segment lands around **3.8–7.5x RunPod's** on a single job —
-  worse than every earlier estimate in this doc, which didn't account for
-  CPU/memory billing.
+  ~$2.448/hr — see the cost breakdown above), not the $1.3148/hr GPU-only
+  price used in earlier passes of this doc. Against RunPod's $0.25–0.50/hr
+  (7.5–15x the hourly rate) offset by only a ~2x speed advantage,
+  Blackwell's cost-per-segment lands around **3.8–7.5x RunPod's** on a
+  single job — worse than every earlier estimate in this doc, which
+  didn't account for CPU/memory billing.
 
 So: single-job Blackwell is a clear technical win (fastest synth path we've
 measured, ~2x RunPod) but costs substantially more per segment than RunPod
@@ -198,11 +127,11 @@ far): quality good.
 Given the cost math above, running multiple jobs concurrently on one
 Blackwell instance is the natural next lever — at N≈4–8 concurrent jobs,
 cost-per-segment could drop well below RunPod's. Full design and ramp
-plan: `dev/parallel.md`.
+plan: `../parallel.md`.
 
 ### What's implemented
 
-Stage 1 from `dev/parallel.md`: a `tokio::sync::Semaphore` gates how many
+Stage 1 from `../parallel.md`: a `tokio::sync::Semaphore` gates how many
 synth subprocesses run at once, sized from `MAX_CONCURRENT_JOBS` (env var,
 default 1). The semaphore is acquired inside the spawned `run_job` task —
 not in the `POST /jobs` handler — so a job waiting for a free slot stays
@@ -211,7 +140,7 @@ already supported multiple in-flight jobs keyed by `job_id`, so no
 bookkeeping change was needed there. Per-job model loading is unchanged
 (still a fresh `python3` subprocess per job, loading VibeVoice from
 scratch each time) — that redundant-load cost is the trigger for Stage 2
-(persistent model server) if it turns out to matter; see `dev/parallel.md`.
+(persistent model server) if it turns out to matter; see `../parallel.md`.
 
 Also added: `HEARTBEAT_SECS` (env var, default 60) controls how often a
 running job logs a heartbeat with current VRAM (`nvidia-smi
@@ -220,7 +149,7 @@ these segments finish well under the default 60s interval.
 
 Deploy wires both through `--set-env-vars`; `--concurrency` is set to
 match `MAX_CONCURRENT_JOBS` so Cloud Run actually routes that many
-requests to one instance. See `dev/setup.md`.
+requests to one instance. See `../setup.md`.
 
 ### Results so far (N=2, N=4, N=8)
 
@@ -271,7 +200,7 @@ throughout) — this is real GPU compute contention, not cold-start noise.
 Cold-start contamination (RTF 2+ on a single solo job) is a separate,
 measurement-only artifact of testing on a fresh instance — **always warm
 the instance with one solo request before timing a concurrency test**
-(see the pattern in `dev/artifact-augment.md`).
+(see the pattern in `../artifact-augment.md`).
 
 **Throughput** (the metric that actually matters: audio-seconds produced
 per wall-clock second, computed as Σ(wall/RTF) ÷ makespan — this
@@ -330,14 +259,14 @@ than its current $0.25–0.50/hr. Whether Blackwell is still "worth it"
 now rests entirely on operational value (serverless, durable state) —
 not on cost.
 
-**Caveat: the table above assumes RunPod runs at RTF≈1.0.** `quirks.md`
+**Caveat: the table above assumes RunPod runs at RTF≈1.0.** `../quirks.md`
 documents RunPod hitting RTF 0.29–0.40 in its best case (throughput
 2.5x–3.45x, not 1.0x). If RunPod is actually running at that best case
 rather than RTF≈1.0, the gap is meaningfully worse than the table shows
 — at N=8, recomputing against RunPod's best-case RTF range gives roughly
 **6.3x–17.3x**, not 2.5x–5.0x. The 2.5x–5.0x figures above are a
 floor, not a typical case; whether they're realistic depends on which
-RunPod RTF this workload actually sees in practice (see `quirks.md` for
+RunPod RTF this workload actually sees in practice (see `../quirks.md` for
 what's been measured there).
 
 ### Next
@@ -352,7 +281,7 @@ constraint — GPU compute is.
 Important distinction for whatever comes after that: **the N=4 result is
 GPU compute contention** (N concurrent forward passes time-slicing the
 same SMs/tensor cores), not redundant model-loading overhead. Stage 2 in
-`dev/parallel.md` (a persistent model server that loads VibeVoice once
+`../parallel.md` (a persistent model server that loads VibeVoice once
 and serves many jobs) only removes the *load* cost — it does nothing for
 compute contention, since the GPU still has to do N times the matmul
 work in roughly the same window whether each job has its own loaded copy

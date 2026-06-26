@@ -1079,7 +1079,8 @@ async fn run_batch_job(state: AppState, job_ids: Vec<String>, req: BatchRequest)
 
             // Alignment fired concurrently across the batch, not in a
             // sequential loop — see dev/parallel.md section 4. CPU-side,
-            // already shown to handle genuine N-way overlap (cloudrun.md).
+            // already shown to handle genuine N-way overlap
+            // (dev/cloudrun/cloudrun-blackwell.md).
             let mut align_tasks: JoinSet<(String, Option<AlignData>)> = JoinSet::new();
             for seg in &req.segments {
                 if let Some(wav_bytes) = wav_by_name.get(&seg.name).cloned() {

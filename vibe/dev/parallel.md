@@ -2,7 +2,7 @@
 
 Goal: run multiple synth jobs concurrently on one GPU instance (Cloud Run
 Blackwell first; same code should apply to RunPod once its CUDA driver
-issue is fixed — see `cloudrun.md` for why RunPod is currently blocked on
+issue is fixed — see `cloudrun/cloudrun-blackwell.md` for why RunPod is currently blocked on
 newer CUDA). Nothing here should be Cloud-Run-specific.
 
 Correction to an earlier assumption: Cloud Run `--concurrency` is a
@@ -98,7 +98,7 @@ env var, no architecture change.
 
 Originally framed as "is redundant per-job model load time a meaningful
 fraction of job time?" — that was never directly measured. It turned out
-not to be the right question: the N=2/4/8 results (`cloudrun.md`,
+not to be the right question: the N=2/4/8 results (`cloudrun/cloudrun-blackwell.md`,
 "Parallel-job support" section) show RTF degrading smoothly with N in a
 GPU-scheduling-fairness pattern (~1.0x solo → 1.14-1.39x at N=4 →
 2.0-2.7x at N=8) while VRAM scales cleanly linear (~6.3 GiB/job, never
@@ -107,7 +107,7 @@ independent forward passes time-slicing the same SMs — not redundant
 model loading, which would show up as roughly constant per-job overhead
 regardless of N, not a curve that tracks contention this smoothly.
 
-`cloudrun.md` draws the conclusion directly: a persistent model server
+`cloudrun/cloudrun-blackwell.md` draws the conclusion directly: a persistent model server
 removes redundant *load* cost (real, but it's not what's being measured
 here) and does nothing for compute contention, since the GPU still has
 to do N times the matmul work in roughly the same window whether each
@@ -169,7 +169,7 @@ model once, sweeps a comma-separated list of batch sizes
 (`--batch_sizes 1,2,4,8,16`), and for each size logs wall time, peak
 VRAM (`torch.cuda.max_memory_allocated()`), and throughput
 (audio-seconds produced ÷ wall-clock seconds — same definition used for
-the N=2/4/8 throughput table in `cloudrun.md`) to
+the N=2/4/8 throughput table in `cloudrun/cloudrun-blackwell.md`) to
 `batch_bench_runs.jsonl`. Stops escalating on CUDA OOM rather than
 crashing the sweep, and saves one wav per batch item per size for a
 quick listen-check that quality doesn't degrade under batching. COPYed
@@ -201,14 +201,14 @@ Both open questions from this section are answered, at least directionally:
 - **Throughput keeps climbing, no flattening yet** — 2.3x → 22.5x, and
   N=16 is the best point measured, not a plateau. This is a
   fundamentally different shape than the N=2/4/8 process-concurrency
-  curve in `cloudrun.md`, which flattened hard by N=8 (~3.0x) from GPU
+  curve in `cloudrun/cloudrun-blackwell.md`, which flattened hard by N=8 (~3.0x) from GPU
   compute contention. Real batching is avoiding that contention
   entirely, as expected — one fused forward pass instead of N
   independent kernels time-slicing the same SMs.
 - **Caveat — this is one run, each N tested once, and wall times are
   non-monotonic** (N=8's 43.3s is higher than N=4's 20.9s despite 2x
   the work), consistent with cold-start/scheduling noise rather than a
-  real per-N effect — same kind of contamination `cloudrun.md` flagged
+  real per-N effect — same kind of contamination `cloudrun/cloudrun-blackwell.md` flagged
   for the process-concurrency tests.
 - **Checked: this isn't a "got easy segments at high N" confound.**
   `batch_bench.py`'s `run_batch()` already records per-item `words` and
@@ -345,7 +345,7 @@ call returns N wavs at once, so alignment becomes N separate
 `spawn_blocking` calls fired together after the batch completes, not
 one call per job as today. We have plenty of CPU headroom for this —
 the N=8 Blackwell test already confirmed genuine 4-way alignment overlap
-with no detectable contention (see `cloudrun.md`, "Alignment ... holds
+with no detectable contention (see `cloudrun/cloudrun-blackwell.md`, "Alignment ... holds
 up even under genuine 4-way overlap"), and Tokio's blocking-task pool
 schedules these independently. So this should parallelize without extra
 work, as long as the N alignment calls are fired concurrently
@@ -667,7 +667,7 @@ that's Task 2 below.
   wrong cost to check, and the right one needs an explicit measurement
   before this is settled. Checkpoint load (`Loading checkpoint shards`
   completing in under a second once weights are warm in local cache)
-  isn't the cost that matters: `cloudrun.md` already measured a
+  isn't the cost that matters: `cloudrun/cloudrun-blackwell.md` already measured a
   *different* cold-start cost directly — the first job after a fresh
   Blackwell deploy ran at RTF 0.92 vs. steady-state ~0.53, attributed to
   CUDA/cuDNN kernel autotuning and flash-attn warmup, not checkpoint
@@ -676,7 +676,7 @@ that's Task 2 below.
   which is exactly the cost a persistent server would eliminate — and
   it's not what the under-a-second checkpoint-load number speaks to at
   all.
-  Good news: `cloudrun.md` already has the data to answer this, just
+  Good news: `cloudrun/cloudrun-blackwell.md` already has the data to answer this, just
   not framed this way — all 14 jobs in that steady-state sequence
   (`augment_seg13–18`, RTF 0.475–0.670) were each their own fresh
   `python3` subprocess (the documented baseline architecture: "loads
