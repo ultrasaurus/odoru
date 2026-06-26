@@ -422,6 +422,37 @@ the synth step runs (N segments in one `generate()` call instead of N
 subprocesses) and how results get demuxed back into N pre-existing job
 records. A thin `batch_id` just groups job_ids for submission.
 
+### 1. Client (`vibe` CLI) — done
+
+- Implemented as planned: new `SynthInput::Segments { spec }` variant
+  alongside the existing `Segment { name }` (CLI: `synthesize ... segments
+  augment_seg41-43` or `synthesize ... segments
+  augment_seg41,augment_seg43,augment_seg50`). `SynthInput::Doc` left as
+  the unimplemented stub it already was — not touched.
+- `parse_segment_list`/`expand_range_token` (`main.rs`) parse the spec:
+  comma-separated tokens, each either a literal name or a
+  `<prefix><digits>-<digits>` range, zero-padded to match the width of the
+  start number as typed (so `seg08-10` → `seg08`,`seg09`,`seg10`; no
+  regex dependency needed, just string ops). 6 unit tests in
+  `segment_list_tests`.
+- Extracted two helpers shared by both the single-segment and batch
+  paths, to avoid duplicating the existing logic: `resolve_synth_target`
+  (the `--url`/pod_id → reachable base URL → `/health` wait → direct-IP
+  lookup chain) and `fetch_job_result` (status check + wav fetch +
+  alignment fetch for one completed job_id). The single-segment path was
+  refactored to use both; behavior unchanged, just less duplication.
+- Batch path: normalizes all N segment files, `POST /batches` once, then
+  polls `GET /batches/:id` once (not per-job — see below), then loops
+  `fetch_job_result` per job_id/name pair to pull each wav/transcript/
+  report and append its own `runs.jsonl` row (now also carrying
+  `batch_id` alongside `job_id`).
+- Implements the documented churn fallback: if `GET /batches/:id` 404s,
+  falls back to polling each job_id individually via `GET /jobs/:id`
+  (the job_ids are already in hand from the `POST /batches` response, so
+  this degrades gracefully rather than failing outright).
+- `cargo build`/`cargo test` in `vibe/` pass (15 tests, including the new
+  ones). Not yet run end-to-end against a live batch (that's Task 5).
+
 ### 1. Client (`vibe` CLI)
 
 - **Not "whole document" — an explicit list/range of segment names.**

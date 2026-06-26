@@ -1,9 +1,11 @@
 mod config;
 mod runpod;
 mod segment;
+mod synth;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use synth::SynthInput;
 use tracing::{info, warn};
 
 #[derive(Parser)]
@@ -183,22 +185,6 @@ enum Command {
     },
 }
 
-/// What to synthesize: a pre-split segment file or a whole document.
-#[derive(Subcommand)]
-enum SynthInput {
-    /// Synthesize a pre-split segment file: reads <basedir>/<name>.txt.
-    Segment {
-        /// Stem of <basedir>/<name>.txt (no extension, e.g. authorship_seg01)
-        name: String,
-    },
-    /// Segment a whole document and synthesize each part in sequence.
-    /// Reads <basedir>/<name>.txt, writes <basedir>/<name>_seg*.txt, then
-    /// synthesizes each segment in order.
-    Doc {
-        /// Stem of vibe/data/<name>.txt (no extension, e.g. authorship)
-        name: String,
-    },
-}
 
 /// Run a command, streaming its output, and bail if it fails.
 fn run(argv: &[String]) -> Result<()> {
@@ -229,84 +215,6 @@ fn run_output(argv: &[String]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Append a JSON line to runs.jsonl for later cost/perf analysis.
-fn append_run_log(entry: serde_json::Value) -> Result<()> {
-    let vibe_dir = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{vibe_dir}/runs.jsonl");
-    let line = serde_json::to_string(&entry)? + "\n";
-    use std::io::Write;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?
-        .write_all(line.as_bytes())?;
-    Ok(())
-}
-
-async fn fetch_align_results(
-    http: &reqwest::Client,
-    base_url: &str,
-    job_id: &str,
-    name: &str,
-    data_dir: &str,
-    secret: &Option<String>,
-) {
-    for (suffix, file_suffix) in [("transcript", "_transcript.json"), ("report", "_report.json")] {
-        let url = format!("{base_url}/jobs/{job_id}/{suffix}");
-        let mut req = http.get(&url).timeout(std::time::Duration::from_secs(30));
-        if let Some(s) = secret {
-            req = req.bearer_auth(s);
-        }
-        match req.send().await {
-            Err(e) => {
-                warn!("fetch alignment {suffix} for {name}: {e}");
-                continue;
-            }
-            Ok(r) if !r.status().is_success() => {
-                warn!("fetch alignment {suffix} for {name}: HTTP {}", r.status());
-                continue;
-            }
-            Ok(r) => match r.bytes().await {
-                Err(e) => warn!("reading alignment {suffix} for {name}: {e}"),
-                Ok(bytes) => {
-                    let path = format!("{data_dir}/{name}{file_suffix}");
-                    if let Err(e) = std::fs::write(&path, &bytes) {
-                        warn!("writing {path}: {e}");
-                    } else {
-                        // Print QA summary from report.
-                        if suffix == "report" {
-                            print_align_qa(name, &bytes);
-                        }
-                        info!("saved {path}");
-                    }
-                }
-            },
-        }
-    }
-}
-
-fn print_align_qa(name: &str, report_bytes: &[u8]) {
-    let Ok(report) = serde_json::from_slice::<segment::AlignReport>(report_bytes) else { return };
-
-    if report.suspect.is_empty() && report.filtered.is_empty() {
-        info!("QA {name}: clean");
-        return;
-    }
-
-    let truncated = report.truncated();
-    if !truncated.is_empty() {
-        let words: Vec<_> = truncated.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
-        warn!("QA {name}: ⚠ TRUNCATED — {}", words.join(" "));
-    }
-    let low = report.low_score();
-    if !low.is_empty() {
-        let words: Vec<_> = low.iter().map(|s| format!("{}({:.2})", s.word, s.score)).collect();
-        warn!("QA {name}: low-score — {}", words.join(" "));
-    }
-    if !report.filtered.is_empty() {
-        info!("QA {name}: {} filtered word(s)", report.filtered.len());
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -496,214 +404,11 @@ async fn main() -> Result<()> {
             port,
             basedir,
         } => {
-            let name = match &input {
-                SynthInput::Segment { name } => name.clone(),
-                SynthInput::Doc { .. } => {
-                    anyhow::bail!("synthesize doc is not yet implemented — run `segment <name>` first, then synthesize each segment");
-                }
-            };
-            let data_dir = segment::resolve_basedir(basedir.as_deref());
-            let input_path = format!("{data_dir}/{name}.txt");
-            let normalized_path = format!("{data_dir}/{name}_normalized.txt");
-            let wav_path = format!("{data_dir}/{name}_generated.wav");
-
-            info!("normalizing {input_path}");
-            let input = std::fs::read_to_string(&input_path)
-                .with_context(|| format!("reading {input_path}"))?;
-            let normalized: String = input
-                .lines()
-                .map(|line| {
-                    // Preserve "Speaker N: " prefix — normalize only the content.
-                    if let Some(rest) = line.strip_prefix("Speaker 1: ") {
-                        format!("Speaker 1: {}", util::normalizer::normalize(rest))
-                    } else {
-                        util::normalizer::normalize(line)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            std::fs::write(&normalized_path, normalized.clone() + "\n")
-                .with_context(|| format!("writing {normalized_path}"))?;
-
-            let base_url = match &url {
-                Some(u) => u.clone(),
-                None => {
-                    let pod_id = pod_id.as_deref().context("pod_id or --url is required")?;
-                    format!("https://{pod_id}-{port}.proxy.runpod.net")
-                }
-            };
-            let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
-
-            // Poll /health via proxy until ready (proxy URL works before the pod
-            // IP/portMappings are populated, so we use it here).
-            info!("waiting for vibe-service at {base_url}/health ...");
-            let http = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()?;
-            let (gpu_name, gpu_vram_mb) = loop {
-                match http.get(format!("{base_url}/health")).send().await {
-                    Ok(r) if r.status().is_success() => {
-                        let body: serde_json::Value = r.json().await.unwrap_or_default();
-                        if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
-                            let gpu_info = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
-                            info!("service ready — GPU: {gpu_info}");
-                            let mut parts = gpu_info.splitn(2, ',');
-                            let gpu_name = parts.next().unwrap_or("unknown").trim().to_string();
-                            let gpu_vram_mb = parts.next()
-                                .and_then(|s| s.trim().trim_end_matches(" MiB").parse::<u64>().ok());
-                            break (gpu_name, gpu_vram_mb);
-                        }
-                        if let Some(msg) = body.get("message").and_then(|v| v.as_str()) {
-                            anyhow::bail!("service reported error: {msg}");
-                        }
-                    }
-                    Ok(r) => info!("health: HTTP {} — retrying", r.status()),
-                    Err(e) => info!("health: {e} — retrying"),
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            };
-
-            // After health is confirmed, fetch pod details for direct IP —
-            // only applies to RunPod; a --url target has no such concept.
-            let (synth_base_url, via) = if url.is_some() {
-                (base_url, "url")
-            } else {
-                let pod_id = pod_id.as_deref().context("pod_id or --url is required")?;
-                let pod = client.get_pod(pod_id).await?;
-                match runpod::http_direct_url(&pod, port) {
-                    Some(direct) => {
-                        info!("using direct IP: {direct}");
-                        (direct, "http-direct")
-                    }
-                    None => {
-                        warn!("no portMappings[{port}] found — falling back to proxy (may timeout on long segments)");
-                        (base_url, "http-proxy")
-                    }
-                }
-            };
-
-            // POST /jobs — returns immediately with job_id.
-            info!("submitting job: {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker}, temp={temp:?}, speed={speed:?})");
-            let mut submit_req = http
-                .post(format!("{synth_base_url}/jobs"))
-                .json(&serde_json::json!({
-                    "text": normalized,
-                    "seed": seed,
-                    "speaker": speaker,
-                    "cfg_scale": cfg_scale,
-                    "temp": temp,
-                    "speed": speed,
-                    "name": name,
-                }));
-            if let Some(ref s) = secret {
-                submit_req = submit_req.bearer_auth(s);
-            }
-            let submit_resp = submit_req.send().await.context("POST /jobs")?;
-            if !submit_resp.status().is_success() {
-                let body = submit_resp.text().await.unwrap_or_default();
-                anyhow::bail!("job submission failed: {body}");
-            }
-            let job: serde_json::Value = submit_resp.json().await.context("reading job response")?;
-            let job_id_remote = job["job_id"].as_str().context("missing job_id in response")?.to_string();
-            info!("job submitted: job_id={job_id_remote} name={name}");
-
-            // Poll GET /jobs/:id until done or error.
-            let poll_client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()?;
-            let job_url = format!("{synth_base_url}/jobs/{job_id_remote}");
-            let synth_start = std::time::Instant::now();
-            let (seed_used, wall, audio_duration_secs, rtf) = loop {
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                let mut poll_req = poll_client.get(&job_url);
-                if let Some(ref s) = secret {
-                    poll_req = poll_req.bearer_auth(s);
-                }
-                match poll_req.send().await {
-                    Err(e) => {
-                        warn!("poll job_id={job_id_remote} name={name}: {e} — retrying");
-                        continue;
-                    }
-                    Ok(r) if !r.status().is_success() => {
-                        anyhow::bail!("GET /jobs/{job_id_remote} returned HTTP {}", r.status());
-                    }
-                    Ok(r) => {
-                        let j: serde_json::Value = r.json().await.context("reading job status")?;
-                        let status = j["status"].as_str().unwrap_or("unknown");
-                        let elapsed = synth_start.elapsed().as_secs_f64();
-                        info!("job_id={job_id_remote} name={name} status={status} elapsed={elapsed:.0}s");
-                        match status {
-                            "done" => {
-                                let seed_used = j["seed"].as_u64().unwrap_or(seed);
-                                let wall = j["wall_secs"].as_f64()
-                                    .unwrap_or_else(|| synth_start.elapsed().as_secs_f64());
-                                let audio_secs = j["audio_secs"].as_f64();
-                                let rtf = j["rtf"].as_f64();
-                                break (seed_used, wall, audio_secs, rtf);
-                            }
-                            "error" => {
-                                let err = j["error"].as_str().unwrap_or("unknown error");
-                                anyhow::bail!("job failed: {err}");
-                            }
-                            _ => {
-                                warn!("job_id={job_id_remote} name={name} unexpected status={status} body={j}");
-                                continue;
-                            }
-                        }
-                    }
-                }
-            };
-
-            // Fetch wav.
-            let mut wav_req = http.get(format!("{synth_base_url}/jobs/{job_id_remote}/wav"))
-                .timeout(std::time::Duration::from_secs(120));
-            if let Some(ref s) = secret {
-                wav_req = wav_req.bearer_auth(s);
-            }
-            let wav_resp = wav_req.send().await.context("GET /jobs/:id/wav")?;
-            if !wav_resp.status().is_success() {
-                anyhow::bail!("wav fetch failed: HTTP {}", wav_resp.status());
-            }
-            let wav_bytes = wav_resp.bytes().await.context("reading wav bytes")?;
-            std::fs::write(&wav_path, &wav_bytes).with_context(|| format!("writing {wav_path}"))?;
-            info!("saved wav to {wav_path} ({} bytes)", wav_bytes.len());
-            if let Some(d) = audio_duration_secs {
-                info!("audio: {d:.1}s  RTF: {:.2}x", rtf.unwrap_or(wall / d));
-            }
-
-            // Fetch alignment results (non-fatal).
-            fetch_align_results(
-                &http, &synth_base_url, &job_id_remote, &name, &data_dir, &secret,
+            synth::run(
+                &client, input, pod_id, url, speaker, cfg_scale, temp, speed, seed, gpu_price,
+                port, basedir,
             )
-            .await;
-
-            // Update the sidecar with this segment's output files and voice
-            // (non-fatal — synthesis output is already saved regardless).
-            segment::record_synthesis(&data_dir, &name, &speaker);
-
-            // Append run log.
-            let entry = serde_json::json!({
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-                "segment": name,
-                "pod_id": pod_id,
-                "job_id": job_id_remote,
-                "gpu_name": gpu_name,
-                "gpu_vram_mb": gpu_vram_mb,
-                "gpu_price_per_hr": gpu_price,
-                "speaker": speaker,
-                "cfg_scale": cfg_scale,
-                "temp": temp,
-                "speed": speed,
-                "seed": seed_used,
-                "inference_wall_secs": wall,
-                "audio_duration_secs": audio_duration_secs,
-                "rtf": rtf,
-                "via": via,
-            });
-            if let Err(e) = append_run_log(entry) {
-                warn!("failed to write run log: {e}");
-            }
-            info!("done: {wav_path}");
+            .await?;
         }
         Command::WatchPod { pod_id, interval_secs } => {
             loop {
