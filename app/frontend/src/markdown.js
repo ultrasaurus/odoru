@@ -125,6 +125,22 @@ function mergeOutlineLabels(sentences) {
 function splitBlockText(text) {
     return splitLines(text.replace(/\n+/g, ' '));
 }
+// Same sentence-boundary logic as splitBlockText, but for text that will be
+// rendered (not just counted): a CommonMark hard break (line ending in 2+
+// spaces, or a backslash) keeps its visual line break, converted to a
+// literal <br> so marked.parseInline renders it; a soft break still
+// collapses to a space. Used only for rawSentences in weaveSpans — never
+// for the count itself, so it must always tokenize into the same number of
+// sentences as splitBlockText.
+function collapseHardBreaksToBr(text) {
+    return text
+        .replace(/ {2,}\n/g, ' <br>')
+        .replace(/\\\n/g, '<br>')
+        .replace(/\n/g, ' ');
+}
+function splitBlockTextForRender(text) {
+    return splitLines(collapseHardBreaksToBr(text));
+}
 function splitLines(text) {
     const sentences = [];
     for (const line of text.split('\n')) {
@@ -274,7 +290,10 @@ function weaveSpans(rawText, container, allSentences, globalIdx, pendingSpans) {
     const plainSentences = splitBlockText(stripInline(rawText));
     const count = plainSentences.length;
     // Raw markdown sentences for inline rendering. Should be the same count.
-    const rawSentences = splitBlockText(rawText);
+    // Hard breaks are preserved as <br> (see collapseHardBreaksToBr) so
+    // poem-style line breaks still render; only soft breaks collapse to a
+    // space here.
+    const rawSentences = splitBlockTextForRender(rawText);
     for (let i = 0; i < count; i++) {
         const span = document.createElement('span');
         span.className = 'segment pending';
