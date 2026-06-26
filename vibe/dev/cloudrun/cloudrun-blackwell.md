@@ -231,6 +231,39 @@ word count, those four ran at 0.064–0.075 s/word — within the normal
 *solo* alignment variance seen throughout this doc (0.060–0.110 s/word).
 No detectable CPU contention even at true 4-way concurrency.
 
+**Update: that finding does not hold at N=49.** Real batched
+`generate()` (`dev/parallel.md` Stage 3) made synth itself fast enough
+that CPU-side alignment is now the dominant cost, and at real
+document-scale batch sizes it does contend:
+
+- Test: one client batch call, 49 segments (`hypertext87_seg01-49`),
+  on a single Cloud Run Blackwell instance (20 vCPU).
+- Generation (batched, GPU): ~77s for all 49 segments — fast, per the
+  batch-size throughput data above.
+- Alignment (CPU, `spawn_blocking`, all 49 fired concurrently via
+  `tokio::task::JoinSet`): **~100s wall-clock for the full set**, with
+  individual per-segment align times climbing steadily as more piled
+  on — 47s for the first segments done, up to 100.2s for the last.
+  That climbing-time pattern is the same GPU-scheduling-fairness shape
+  seen in the N=4/N=8 *synth* concurrency tests above, just on the CPU
+  side: 49 CPU-bound alignment tasks competing for 20 vCPUs contends
+  for real, unlike the N=4/N=8 alignment test which only exercised
+  true 4-way overlap and stayed within solo variance.
+- Net: **alignment, not synth, is now the larger share of total batch
+  wall-clock** at this scale (~100s alignment vs ~77s generation for
+  the same 49 segments) — a reversal from the single-segment era where
+  CPU alignment was a minor tail cost after GPU synth.
+- No failures — alignment degrades gracefully under this contention
+  (slower, not broken), same as synth did under GPU contention at
+  N=4/N=8.
+
+This reopens the CUDA-alignment question that `cloudrun-L4.md` parked
+(the L4 driver couldn't accept the CUDA-12.4-built PTX, so alignment
+moved to CPU for the Blackwell image too, even though Blackwell's own
+driver was never the blocker). `forced-alignment` does support a CUDA
+feature — worth pursuing next now that it's the real bottleneck at
+batch scale, not a parked nice-to-have.
+
 **Cost-per-segment at each N — corrected for CPU/memory billing.** The
 $1.3148/hr figure used in earlier passes of this analysis is the GPU
 *alone*. The RTX Pro 6000 requires a minimum 20 vCPU / 80 GiB attached,

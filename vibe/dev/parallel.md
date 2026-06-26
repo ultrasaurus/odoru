@@ -650,6 +650,16 @@ that's Task 2 below.
 - N `spawn_blocking` calls (via `run_alignment`, unchanged) fired
   concurrently after the batch returns, using `tokio::task::JoinSet`
   rather than a sequential loop — implemented in `run_batch_job`.
+- **Real-scale result: alignment is now the bigger cost, not synth.**
+  A 49-segment client batch (`hypertext87_seg01-49`) on Blackwell
+  finished generation in ~77s but took ~100s for all 49 CPU-side
+  alignments to complete, with per-segment align time climbing under
+  the 49-way contention (the N=4/N=8 "no detectable contention"
+  finding doesn't hold at this scale). Full numbers and analysis:
+  `cloudrun/cloudrun-blackwell.md` ("Update: that finding does not
+  hold at N=49"). `forced-alignment` supports a CUDA feature — worth
+  pursuing next, since it's the real bottleneck at batch scale rather
+  than a parked nice-to-have.
 
 ### 5. Watchdog / semaphore — done
 

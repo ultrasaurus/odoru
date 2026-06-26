@@ -78,9 +78,15 @@ Steps
    - [x] rerun - test augment segments to validate skipping
    - [x] Move to Blackwell GPU - Dockerfile.cloudrun-blackwell
 11. Validation
-   - [ ] Full doc run of Hypertext87 => test CLI import with audio
+   - [X] Full doc run of Hypertext87
+     - [ ] listen test
+     - [ ] test CLI import with audio
    - [ ] implement playback of partial synth => test with unfinished Augment 
-11. Consider additional improvements
+12. Improve Workflow part 2
+   - [ ] CUDA alignment (now the real bottleneck at batch scale —
+     see `dev/cloudrun/cloudrun-blackwell.md` N=49 alignment finding)
+   - [ ] continue batch testing 64+
+13. Consider additional improvements
    - background noise removal
    - use forced-alignment to find original headers and add silence
 
