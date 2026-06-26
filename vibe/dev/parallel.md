@@ -445,7 +445,7 @@ records. A thin `batch_id` just groups job_ids for submission.
   job_id each, since those payloads genuinely differ per segment, but
   that's a fetch fan-out, not a polling fan-out.
 
-### 2. Server API (`vibe-service`)
+### 2. Server API (`vibe-service`) — done, see review notes below
 
 - New `POST /batches`: body is `{segments: [{text, name}, ...], seed,
   speaker, cfg_scale, temp, speed}` (one shared set of knobs for the
@@ -483,6 +483,56 @@ records. A thin `batch_id` just groups job_ids for submission.
     back to polling job_ids individually," not as a hard failure) —
     not because the churn risk doesn't exist.
 
+**Implementation notes (what actually landed, in `service/src/main.rs`):**
+- `BatchRequest`/`BatchSegment`/`BatchCreated`/`BatchStatus` structs;
+  `AppState.batches: Arc<RwLock<HashMap<batch_id, Vec<job_id>>>>`
+  (in-memory, per the decision above — comment on the field states the
+  churn caveat and client mitigation explicitly, not left implicit).
+- `create_batch_handler`: validates non-empty `segments`, mints
+  `batch_id` + N `job_ids`, inserts N `JobState::Pending`, records the
+  batch map entry, spawns `run_batch_job` in the background, returns
+  immediately — same fire-and-forget shape as `create_job_handler`.
+- `get_batch_handler`: 404 if the batch_id isn't in the in-memory map
+  (the accepted gap); otherwise calls `resurrect` per job_id (so
+  individual job status still survives churn even though the batch
+  grouping doesn't) and aggregates into the thin `pending`/`running`/
+  `done`/`error` status, `error` taking priority and listing which
+  job_ids errored.
+- `run_batch_job`: acquires `job_semaphore` (see "Watchdog / semaphore"
+  below), marks all N jobs `Running`, increments `ActivityTracker` once
+  per segment with a `DecrementGuard` that decrements N times on drop,
+  runs a heartbeat task (same pattern as `run_job`'s, since batches can
+  run at least as long as a single segment), calls
+  `run_batch_inference_inner`, then on success fires alignment for all
+  N segments concurrently via `tokio::task::JoinSet` (not a sequential
+  loop — satisfies section 4 below) before writing each job's
+  `wav_bytes`/`align`/`StoredStatus` individually. A segment with no
+  produced wav (shouldn't happen, but checked) errors just that job_id
+  rather than the whole batch. Whole-batch subprocess failure errors
+  all N job_ids together, per section 6 below.
+- `run_batch_inference_inner`: spawns `batch_inference.py`, writes the
+  batch JSON to its stdin (per the stdin-not-tempfile decision),
+  scrapes `"Seed used:"` from the log same as `run_inference_inner`
+  does, then reads back `<name>.wav` per segment from the output dir.
+- **Unit tests added** for `GET /batches/:id`'s aggregation logic,
+  factored out into a pure `aggregate_batch_status(job_ids, current)`
+  function so it's testable without spinning up jobs/resurrect/HTTP.
+  Writing these caught a real bug before it shipped: the original
+  aggregation OR'd `Pending` into the same bucket as `Running`, which
+  made the `"pending"` status unreachable — any all-`Pending` batch
+  (nothing started yet) incorrectly reported `"running"`. Fixed by
+  tracking `done_count`/`running_count` separately. 7 new tests cover:
+  all-pending → pending (the regression case), pending+running mix →
+  running, pending+done mix → running, all-done → done, any-error →
+  error (with correct `errored_job_ids`), a missing job_id treated like
+  pending, and `BatchRequest`'s shared-knob defaults deserializing
+  correctly. `cargo test -p vibe-service`: 19 passing (12 existing + 7
+  new), no new warnings.
+- Not yet exercised against a real `/batches` call or real CUDA — unit
+  tests cover the aggregation logic, not the actual subprocess/CUDA
+  path. That's blocked on Task 3 (client) for a full round-trip, though
+  it could be curl-tested standalone first, same as `/bench` was.
+
 ### 3. Server execution: language boundary
 
 Worth being explicit about what's negotiable here and what isn't,
@@ -515,14 +565,22 @@ for performance:
   per-segment data out of the Python log without moving the call
   itself.
 
-**The new script itself**, not a reuse of `inference_from_file.py`
-as-is — that script's "wrap in list" batching is for multiple speakers
-within one script (one output), not N independent segment requests with N
-  separate outputs. The batching logic already exists in
-  `batch_bench.py`'s `run_batch()`: N texts in, N wavs out, demuxed by
-  name. Production version = `run_batch()` minus the benchmarking
-  instrumentation (VRAM tracking, sweep loop), plus writing results in
-  whatever format the Rust side reads back per job_id.
+**The new script itself: done.** `vibe/docker/batch_inference.py` —
+not a reuse of `inference_from_file.py` as-is (that script's "wrap in
+list" batching is for multiple speakers within one script/one output,
+not N independent segment requests with N separate outputs), but
+reuses its `parse_txt_script`/`adjust_voice_speed`/temp-handling logic
+by hand (separate process, no shared package) for behavioral parity
+with the existing single-job path — this is the production script, not
+`batch_bench.py`'s benchmarking-only text handling. Reads one JSON
+batch request from stdin (`{segments: [{text, name}], seed, speaker,
+cfg_scale, temp, speed}` — one shared set of knobs, per the resolved
+question above), writes `<name>.wav` per segment to `--output_dir`,
+prints `"Seed used: <seed>"` once at the end matching the existing
+stdout-scraping pattern. COPYed into both `Dockerfile` and
+`Dockerfile.cloudrun-blackwell` alongside `inference_from_file.py`.
+Not yet wired to a real `/batches` caller or run against real CUDA —
+that's Task 2 below.
 - A fresh subprocess-per-batch-call (like today's per-job subprocess,
   just handed N texts instead of 1) ships first, and **may turn out to
   be all that's needed** — but the checkpoint-load timing below was the
@@ -570,19 +628,26 @@ within one script (one output), not N independent segment requests with N
   objects via the existing
   `JobStore` trait.
 
-### 4. Alignment
+### 4. Alignment — done
 
-- Already scoped above: N `spawn_blocking` calls fired concurrently
-  after the batch returns (`FuturesUnordered`/`join_all`), not a
-  sequential loop. No new design needed, just implementation.
+- N `spawn_blocking` calls (via `run_alignment`, unchanged) fired
+  concurrently after the batch returns, using `tokio::task::JoinSet`
+  rather than a sequential loop — implemented in `run_batch_job`.
 
-### 5. Watchdog / semaphore
+### 5. Watchdog / semaphore — done
 
-- `ActivityTracker`: increment once per segment in the batch (not once
-  per batch call), decrement as each segment's alignment finishes —
-  matches the per-segment semantics `run_job` already uses.
-- `job_semaphore` (currently `MAX_CONCURRENT_JOBS=1`, gates both
-  `/jobs` and `/bench`): a batch call should also acquire it — but this
+- `ActivityTracker`: increment once per segment via a loop, decrement
+  N times via one `DecrementGuard::drop`. Originally scoped as
+  "decrement as each segment's alignment finishes" (implying staggered
+  per-segment timing) — what actually got built decrements all N
+  together once the whole batch (including all N alignments) is fully
+  persisted. These are equivalent in practice here: `run_batch_job`
+  already waits for the entire alignment `JoinSet` to drain before
+  persisting any result, so there's no staggered "this one segment
+  finished alignment, decrement just it" moment to hook into — by the
+  time any segment's result gets persisted, they're all ready.
+- `job_semaphore` (currently `MAX_CONCURRENT_JOBS=1`, gates `/jobs`,
+  `/bench`, and now `/batches`): a batch call also acquires it — but this
   needs to be a deliberate redefinition of what the knob means, not a
   silent reuse of whatever value the old architecture used. The N=2/4/8
   tuning (eventually expected to settle around N=4) was for independent
@@ -598,15 +663,22 @@ within one script (one output), not N independent segment requests with N
   it's a different knob with a different meaning that happens to share
   a name and a default value.
 
-### 6. Error handling
+### 6. Error handling — done (plus one case not originally scoped)
 
 - If the batch-level subprocess fails entirely (bad input, crash), all
   N job_ids in that batch transition to `JobState::Error` together —
-  mirrors today's single-job error path applied N times.
-- Per-segment failure *within* a successful batch call is the same
-  open risk already logged above ("accepted, not blocking") — no new
-  design needed, just a reminder this is still unresolved if it ever
-  surfaces.
+  implemented in `run_batch_job`'s `Err(e)` branch.
+- Not originally called out, added during implementation: a segment
+  that produces no wav despite the subprocess exiting successfully
+  (shouldn't happen, but `run_batch_inference_inner` logs a warning
+  and just omits it from the returned map rather than failing the
+  whole batch) now errors only that one job_id, not all N — handled in
+  `run_batch_job`'s per-segment loop after a successful batch call.
+- Per-segment failure *within* a successful batch call (a CUDA
+  error/NaN on one sample taking down the whole `generate()` call) is
+  the same open risk already logged above ("accepted, not blocking") —
+  no new design needed, just a reminder this is still unresolved if it
+  ever surfaces.
 
 ### Suggested phasing
 

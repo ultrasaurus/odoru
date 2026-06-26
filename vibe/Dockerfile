@@ -109,6 +109,11 @@ RUN pip install --no-cache-dir \
 # doesn't bust the heavy clone/pip/model-download layers above.
 COPY vibe/docker/inference_from_file.py /workspace/VibeVoice/demo/inference_from_file.py
 
+# Production batched-generate() entry point for POST /batches (dev/parallel.md
+# "Stage 3 implementation plan"). Reads one JSON batch request from stdin,
+# writes one wav per segment — see batch_inference.py's docstring.
+COPY vibe/docker/batch_inference.py /workspace/VibeVoice/demo/batch_inference.py
+
 # Standalone batched-generate() benchmark (dev/parallel.md "Max batch size is
 # unknown") with its sample segments (seg41-71, copied out of vibe/data/
 # since .dockerignore excludes that wholesale). Not part of the synth request

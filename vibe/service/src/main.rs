@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
+use tokio::task::JoinSet;
 use tracing::{info, warn, error};
 use uuid::Uuid;
 use watchdog::ActivityTracker;
@@ -27,6 +28,12 @@ struct AppState {
     gpu_info: Arc<String>,
     tracker: ActivityTracker,
     jobs: Arc<RwLock<HashMap<String, JobState>>>,
+    /// batch_id -> job_ids. In-memory only — accepted gap (dev/parallel.md):
+    /// individual job_ids are durable via `store`/resurrect, but a batch_id
+    /// doesn't survive instance churn. Client mitigation: it already has the
+    /// job_ids array from POST /batches's response, so it can fall back to
+    /// per-job polling if GET /batches/:id 404s.
+    batches: Arc<RwLock<HashMap<String, Vec<String>>>>,
     store: Arc<dyn JobStore>,
     job_semaphore: Arc<Semaphore>,
     heartbeat_secs: u64,
@@ -115,6 +122,48 @@ fn default_bench_batch_sizes() -> String { "1,2,4,8".into() }
 fn default_seed() -> u64 { 71463 }
 fn default_speaker() -> String { "Sarah".into() }
 fn default_cfg_scale() -> f64 { 1.3 }
+
+#[derive(Deserialize, Serialize, Clone)]
+struct BatchSegment {
+    text: String,
+    name: String,
+}
+
+/// One shared set of generation knobs for the whole batch — matches current
+/// workflow (one set of knobs per CLI invocation already, even across a
+/// `for seg in ...` shell loop); see dev/parallel.md "Stage 3 implementation
+/// plan" for why per-segment overrides weren't added.
+#[derive(Deserialize)]
+struct BatchRequest {
+    segments: Vec<BatchSegment>,
+    #[serde(default = "default_seed")]
+    seed: u64,
+    #[serde(default = "default_speaker")]
+    speaker: String,
+    #[serde(default = "default_cfg_scale")]
+    cfg_scale: f64,
+    #[serde(default)]
+    temp: Option<f64>,
+    #[serde(default)]
+    speed: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct BatchCreated {
+    batch_id: String,
+    job_ids: Vec<String>,
+}
+
+/// Deliberately thin: pending/running/done/error, "any job errored" reported
+/// as error plus which ones. No partial-status semantics yet — we haven't
+/// had a single-job failure to learn what richer reporting should look like
+/// (see dev/parallel.md).
+#[derive(Serialize)]
+struct BatchStatus {
+    status: &'static str,
+    job_ids: Vec<String>,
+    errored_job_ids: Vec<String>,
+}
 
 async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
@@ -814,6 +863,376 @@ async fn run_inference_inner(
     Ok((wav_bytes, seed_used))
 }
 
+/// `POST /batches` — submits N segments as one batched `generate()` call.
+/// Reuses the per-segment `job_id`/`JobState`/`JobStore` machinery so
+/// `/jobs/:id`, `/jobs/:id/wav`, `/jobs/:id/transcript`, `/jobs/:id/report`
+/// don't need to change shape at all — only the synth step is batched and
+/// the result gets demuxed back into N pre-existing job records. See
+/// dev/parallel.md "Stage 3 implementation plan".
+async fn create_batch_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<BatchRequest>,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if req.segments.is_empty() {
+        return (StatusCode::BAD_REQUEST, "segments must be non-empty").into_response();
+    }
+
+    let batch_id = Uuid::new_v4().to_string();
+    let job_ids: Vec<String> = req.segments.iter().map(|_| Uuid::new_v4().to_string()).collect();
+
+    {
+        let mut jobs = state.jobs.write().await;
+        for (job_id, seg) in job_ids.iter().zip(&req.segments) {
+            jobs.insert(job_id.clone(), JobState::Pending { name: Some(seg.name.clone()) });
+        }
+    }
+    state.batches.write().await.insert(batch_id.clone(), job_ids.clone());
+
+    info!(batch_id = %batch_id, segments = req.segments.len(), "batch created");
+
+    let state2 = state.clone();
+    let job_ids2 = job_ids.clone();
+    tokio::spawn(async move {
+        run_batch_job(state2, job_ids2, req).await;
+    });
+
+    Json(BatchCreated { batch_id, job_ids }).into_response()
+}
+
+/// `GET /batches/:id` — thin aggregation over the batch's job_ids (see
+/// `BatchStatus` for why the semantics are kept minimal). 404 if the
+/// in-memory batch map doesn't have this id (e.g. instance churned mid-batch
+/// — accepted gap, see `AppState::batches`); the client already has the
+/// job_ids from `POST /batches`'s response and should fall back to polling
+/// them individually via the existing `/jobs/:id`, which does survive churn.
+async fn get_batch_handler(
+    State(state): State<AppState>,
+    Path(batch_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let job_ids = match state.batches.read().await.get(&batch_id) {
+        Some(ids) => ids.clone(),
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let mut current = Vec::with_capacity(job_ids.len());
+    for job_id in &job_ids {
+        resurrect(&state, job_id).await;
+        current.push(state.jobs.read().await.get(job_id).cloned());
+    }
+
+    let (status, errored) = aggregate_batch_status(&job_ids, &current);
+    Json(BatchStatus { status, job_ids, errored_job_ids: errored }).into_response()
+}
+
+/// Pure aggregation logic for `GET /batches/:id`, factored out of the
+/// handler so it's unit-testable without spinning up jobs/resurrect/HTTP.
+/// `current[i]` is the looked-up state for `job_ids[i]` (`None` = not found
+/// at all, distinct from `Pending`).
+fn aggregate_batch_status(job_ids: &[String], current: &[Option<JobState>]) -> (&'static str, Vec<String>) {
+    let mut errored = Vec::new();
+    let mut done_count = 0;
+    let mut running_count = 0;
+    for (job_id, state) in job_ids.iter().zip(current) {
+        match state {
+            Some(JobState::Error { .. }) => errored.push(job_id.clone()),
+            Some(JobState::Done { .. }) => done_count += 1,
+            Some(JobState::Running { .. }) => running_count += 1,
+            Some(JobState::Pending { .. }) | None => {}
+        }
+    }
+
+    let status = if !errored.is_empty() {
+        "error"
+    } else if done_count == job_ids.len() {
+        "done"
+    } else if running_count > 0 || done_count > 0 {
+        // Something has started or finished, but not everything — distinct
+        // from "pending" (nothing has started yet). Fixes a bug caught
+        // while writing tests for this: the original version OR'd Pending
+        // into the same bucket as Running, which made the "pending" status
+        // unreachable (any all-Pending batch reported "running" instead).
+        "running"
+    } else {
+        "pending"
+    };
+
+    (status, errored)
+}
+
+async fn run_batch_job(state: AppState, job_ids: Vec<String>, req: BatchRequest) {
+    // Shares the same semaphore as run_job/run_bench — deliberately, not by
+    // default. Real batching's whole point is one fused call avoiding GPU
+    // time-slicing; running multiple concurrent batch calls would reintroduce
+    // that exact contention one level up (N batches time-slicing instead of N
+    // segments). MAX_CONCURRENT_JOBS=1 here means "one batch call owns the
+    // GPU at a time" — batch size, not process count, is the scaling lever.
+    // See dev/parallel.md section 5.
+    let _permit = match state.job_semaphore.clone().acquire_owned().await {
+        Ok(permit) => permit,
+        Err(_) => return,
+    };
+
+    for (job_id, seg) in job_ids.iter().zip(&req.segments) {
+        {
+            let mut jobs = state.jobs.write().await;
+            if let Some(j) = jobs.get_mut(job_id) {
+                *j = JobState::Running { name: Some(seg.name.clone()) };
+            }
+        }
+        persist_status(&state, job_id, StoredStatus {
+            status: "running".into(),
+            name: Some(seg.name.clone()),
+            seed: None,
+            wall_secs: None,
+            audio_secs: None,
+            rtf: None,
+            error: None,
+        }).await;
+    }
+
+    info!(segments = req.segments.len(), seed = req.seed, cfg = req.cfg_scale, "batch running");
+
+    // Increment once per segment (not once per batch call) — matches the
+    // per-segment semantics run_job already uses for ActivityTracker.
+    state.tracker.touch();
+    for _ in &req.segments {
+        state.tracker.increment();
+    }
+    struct DecrementGuard(ActivityTracker, usize);
+    impl Drop for DecrementGuard {
+        fn drop(&mut self) {
+            self.0.touch();
+            for _ in 0..self.1 {
+                self.0.decrement();
+            }
+        }
+    }
+    let _guard = DecrementGuard(state.tracker.clone(), req.segments.len());
+
+    let request_id = Uuid::new_v4().to_string();
+    let out_dir = format!("/tmp/{request_id}_out");
+    let log_path = format!("/tmp/{request_id}.log");
+
+    let start = std::time::Instant::now();
+
+    // Same heartbeat pattern as run_job — batches can run longer than a
+    // single segment, so this matters at least as much here.
+    let heartbeat_request_id = request_id.clone();
+    let heartbeat_segments = req.segments.len();
+    let heartbeat_secs = state.heartbeat_secs;
+    let (heartbeat_cancel_tx, mut heartbeat_cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(heartbeat_secs));
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let gpu_mem = query_gpu_memory().await;
+                    tracing::info!(request_id = %heartbeat_request_id, segments = heartbeat_segments, gpu_mem = %gpu_mem, "batch still running");
+                }
+                _ = &mut heartbeat_cancel_rx => break,
+            }
+        }
+    });
+
+    let result = async {
+        tokio::fs::create_dir_all(&out_dir).await?;
+        run_batch_inference_inner(&req, &out_dir, &log_path).await
+    }
+    .await;
+
+    let _ = heartbeat_cancel_tx.send(());
+
+    match result {
+        Err(e) => {
+            warn!(error = %e, "batch failed");
+            for (job_id, seg) in job_ids.iter().zip(&req.segments) {
+                let mut jobs = state.jobs.write().await;
+                if let Some(j) = jobs.get_mut(job_id) {
+                    *j = JobState::Error { name: Some(seg.name.clone()), error: e.to_string() };
+                }
+                drop(jobs);
+                persist_status(&state, job_id, StoredStatus {
+                    status: "error".into(),
+                    name: Some(seg.name.clone()),
+                    seed: None,
+                    wall_secs: None,
+                    audio_secs: None,
+                    rtf: None,
+                    error: Some(e.to_string()),
+                }).await;
+            }
+        }
+        Ok((wav_by_name, seed_used)) => {
+            let wall = start.elapsed().as_secs_f64();
+
+            // Alignment fired concurrently across the batch, not in a
+            // sequential loop — see dev/parallel.md section 4. CPU-side,
+            // already shown to handle genuine N-way overlap (cloudrun.md).
+            let mut align_tasks: JoinSet<(String, Option<AlignData>)> = JoinSet::new();
+            for seg in &req.segments {
+                if let Some(wav_bytes) = wav_by_name.get(&seg.name).cloned() {
+                    let name = seg.name.clone();
+                    let text = seg.text.clone();
+                    align_tasks.spawn(async move {
+                        let align = run_alignment(&wav_bytes, &text, &name).await;
+                        (name, align)
+                    });
+                }
+            }
+            let mut align_by_name: HashMap<String, Option<AlignData>> = HashMap::new();
+            while let Some(res) = align_tasks.join_next().await {
+                match res {
+                    Ok((name, align)) => { align_by_name.insert(name, align); }
+                    Err(e) => warn!(error = %e, "alignment task join failed"),
+                }
+            }
+
+            for (job_id, seg) in job_ids.iter().zip(&req.segments) {
+                let Some(wav_bytes) = wav_by_name.get(&seg.name).cloned() else {
+                    warn!(job_id = %job_id, name = %seg.name, "no wav produced for segment");
+                    let mut jobs = state.jobs.write().await;
+                    if let Some(j) = jobs.get_mut(job_id) {
+                        *j = JobState::Error {
+                            name: Some(seg.name.clone()),
+                            error: "no audio output for this segment".into(),
+                        };
+                    }
+                    drop(jobs);
+                    persist_status(&state, job_id, StoredStatus {
+                        status: "error".into(),
+                        name: Some(seg.name.clone()),
+                        seed: None,
+                        wall_secs: None,
+                        audio_secs: None,
+                        rtf: None,
+                        error: Some("no audio output for this segment".into()),
+                    }).await;
+                    continue;
+                };
+                let audio_secs = wav_duration_secs(&wav_bytes);
+                let rtf = audio_secs.map(|d| wall / d);
+                let align = align_by_name.remove(&seg.name).flatten();
+
+                if let Err(e) = state.store
+                    .put_object(job_id, "audio.wav", Bytes::from(wav_bytes.clone()))
+                    .await
+                {
+                    warn!(job_id = %job_id, error = %e, "failed to persist wav to store");
+                }
+                if let Some(a) = &align {
+                    if let Err(e) = persist_align(&state, job_id, a).await {
+                        warn!(job_id = %job_id, error = %e, "failed to persist alignment to store");
+                    }
+                }
+
+                {
+                    let mut jobs = state.jobs.write().await;
+                    if let Some(j) = jobs.get_mut(job_id) {
+                        *j = JobState::Done {
+                            name: Some(seg.name.clone()),
+                            seed: seed_used,
+                            wall_secs: wall,
+                            audio_secs,
+                            rtf,
+                            wav_bytes: Arc::new(wav_bytes),
+                            align,
+                        };
+                    }
+                }
+                persist_status(&state, job_id, StoredStatus {
+                    status: "done".into(),
+                    name: Some(seg.name.clone()),
+                    seed: Some(seed_used),
+                    wall_secs: Some(wall),
+                    audio_secs,
+                    rtf,
+                    error: None,
+                }).await;
+            }
+            info!(segments = req.segments.len(), wall = format!("{wall:.1}s"), "batch done");
+        }
+    }
+}
+
+/// Spawns `batch_inference.py`, writing the batch request as JSON to its
+/// stdin (not a temp file — the `/tmp/<id>.txt` pattern in
+/// `run_inference_inner` exists only because `inference_from_file.py`'s CLI
+/// expects `--txt_path`, inherited from the upstream demo script; the new
+/// script has no such interface to match, and stdin avoids shell-escaping
+/// problems for arbitrary segment text). Returns each segment's wav bytes
+/// keyed by name, plus the shared seed actually used.
+async fn run_batch_inference_inner(
+    req: &BatchRequest,
+    out_dir: &str,
+    log_path: &str,
+) -> Result<(HashMap<String, Vec<u8>>, u64)> {
+    let log_file = std::fs::File::create(log_path)?;
+    let log_file2 = log_file.try_clone()?;
+
+    let stdin_payload = serde_json::json!({
+        "segments": req.segments,
+        "seed": req.seed,
+        "speaker": req.speaker,
+        "cfg_scale": req.cfg_scale,
+        "temp": req.temp,
+        "speed": req.speed,
+    });
+
+    let mut child = tokio::process::Command::new("python3")
+        .args([
+            "/workspace/VibeVoice/demo/batch_inference.py",
+            "--model_path", "vibevoice/VibeVoice-1.5B",
+            "--output_dir", out_dir,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(log_file2))
+        .current_dir("/workspace/VibeVoice")
+        .spawn()?;
+
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child.stdin.take().ok_or_else(|| anyhow::anyhow!("failed to open child stdin"))?;
+        stdin.write_all(serde_json::to_vec(&stdin_payload)?.as_slice()).await?;
+        stdin.shutdown().await?;
+    }
+
+    let status = child.wait().await?;
+    if !status.success() {
+        let tail = tail_log(log_path).await;
+        anyhow::bail!("batch_inference.py exited {status}\n{tail}");
+    }
+
+    let log_contents = tokio::fs::read_to_string(log_path).await.unwrap_or_default();
+    let seed_used = log_contents
+        .lines()
+        .find(|l| l.contains("Seed used:"))
+        .and_then(|l| l.split_whitespace().last())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(req.seed);
+
+    let mut wav_by_name = HashMap::new();
+    for seg in &req.segments {
+        let wav_path = std::path::Path::new(out_dir).join(format!("{}.wav", seg.name));
+        match tokio::fs::read(&wav_path).await {
+            Ok(bytes) => { wav_by_name.insert(seg.name.clone(), bytes); }
+            Err(e) => warn!(name = %seg.name, error = %e, "no wav found for segment"),
+        }
+    }
+
+    Ok((wav_by_name, seed_used))
+}
+
 async fn tail_log(log_path: &str) -> String {
     tokio::fs::read_to_string(log_path)
         .await
@@ -947,6 +1366,7 @@ async fn main() -> Result<()> {
         gpu_info: Arc::new(gpu_info),
         tracker,
         jobs: Arc::new(RwLock::new(HashMap::new())),
+        batches: Arc::new(RwLock::new(HashMap::new())),
         store,
         job_semaphore: Arc::new(Semaphore::new(max_concurrent_jobs)),
         heartbeat_secs,
@@ -955,6 +1375,8 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/jobs", post(create_job_handler))
+        .route("/batches", post(create_batch_handler))
+        .route("/batches/:batch_id", get(get_batch_handler))
         .route("/bench", post(create_bench_handler))
         .route("/jobs/:job_id", get(get_job_handler))
         .route("/jobs/:job_id/wav", get(get_job_wav_handler))
@@ -984,6 +1406,7 @@ mod tests {
             gpu_info: Arc::new("test-gpu".into()),
             tracker: ActivityTracker::default(),
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            batches: Arc::new(RwLock::new(HashMap::new())),
             store: jobstore::mem_store(),
             job_semaphore: Arc::new(Semaphore::new(8)),
             heartbeat_secs: 60,
@@ -1113,5 +1536,100 @@ mod tests {
         assert_eq!(fetched.as_deref(), Some(&wav[..]));
         // no alignment was persisted → transcript object is absent
         assert!(reader.store.get_object("j1", "transcript.json").await.unwrap().is_none());
+    }
+
+    // ---- batch status aggregation ----
+
+    fn done_job() -> JobState {
+        JobState::Done {
+            name: None, seed: 71463, wall_secs: 1.0, audio_secs: Some(1.0), rtf: Some(1.0),
+            wav_bytes: Arc::new(vec![]), align: None,
+        }
+    }
+
+    fn running_job() -> JobState {
+        JobState::Running { name: None }
+    }
+
+    fn pending_job() -> JobState {
+        JobState::Pending { name: None }
+    }
+
+    fn error_job() -> JobState {
+        JobState::Error { name: None, error: "boom".into() }
+    }
+
+    #[test]
+    fn batch_all_pending_reports_pending_not_running() {
+        // Regression test: the original aggregation OR'd Pending into the
+        // same bucket as Running, making "pending" unreachable — any
+        // all-Pending batch (nothing started yet) incorrectly reported
+        // "running". Caught while writing this test, fixed in
+        // aggregate_batch_status.
+        let job_ids = vec!["a".into(), "b".into()];
+        let current = vec![Some(pending_job()), Some(pending_job())];
+        let (status, errored) = aggregate_batch_status(&job_ids, &current);
+        assert_eq!(status, "pending");
+        assert!(errored.is_empty());
+    }
+
+    #[test]
+    fn batch_mix_of_pending_and_running_reports_running() {
+        let job_ids = vec!["a".into(), "b".into()];
+        let current = vec![Some(pending_job()), Some(running_job())];
+        let (status, _) = aggregate_batch_status(&job_ids, &current);
+        assert_eq!(status, "running");
+    }
+
+    #[test]
+    fn batch_mix_of_pending_and_done_reports_running() {
+        // One segment finished, the rest haven't started — not "pending"
+        // (something has happened) and not "done" (not everything has).
+        let job_ids = vec!["a".into(), "b".into()];
+        let current = vec![Some(pending_job()), Some(done_job())];
+        let (status, _) = aggregate_batch_status(&job_ids, &current);
+        assert_eq!(status, "running");
+    }
+
+    #[test]
+    fn batch_all_done_reports_done() {
+        let job_ids = vec!["a".into(), "b".into()];
+        let current = vec![Some(done_job()), Some(done_job())];
+        let (status, errored) = aggregate_batch_status(&job_ids, &current);
+        assert_eq!(status, "done");
+        assert!(errored.is_empty());
+    }
+
+    #[test]
+    fn batch_any_error_reports_error_with_job_ids() {
+        let job_ids = vec!["a".into(), "b".into(), "c".into()];
+        let current = vec![Some(done_job()), Some(error_job()), Some(running_job())];
+        let (status, errored) = aggregate_batch_status(&job_ids, &current);
+        assert_eq!(status, "error");
+        assert_eq!(errored, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn batch_missing_job_state_treated_like_pending() {
+        // None (job_id not found at all, distinct from Pending) shouldn't
+        // itself flip status away from "pending" if nothing else has
+        // started — same bucket as Pending for aggregation purposes.
+        let job_ids = vec!["a".into(), "b".into()];
+        let current = vec![Some(pending_job()), None];
+        let (status, _) = aggregate_batch_status(&job_ids, &current);
+        assert_eq!(status, "pending");
+    }
+
+    #[test]
+    fn batch_request_applies_shared_defaults() {
+        let req: BatchRequest = serde_json::from_str(
+            r#"{"segments": [{"text": "hi", "name": "seg01"}]}"#
+        ).unwrap();
+        assert_eq!(req.seed, 71463);
+        assert_eq!(req.speaker, "Sarah");
+        assert_eq!(req.cfg_scale, 1.3);
+        assert_eq!(req.temp, None);
+        assert_eq!(req.speed, None);
+        assert_eq!(req.segments.len(), 1);
     }
 }
