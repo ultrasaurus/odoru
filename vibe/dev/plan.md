@@ -64,17 +64,22 @@ Steps
      (detection of word-skipping/truncations)
 8. [*] Don't store reference voices in Dockerfile
    - [x] --voice option
-   - [ ] test with Sarah
-   - [ ] test with Andy
-9. [*] eval Google Cloud Run
-   - [*] Cloud Run project setup, Dockerfile.cloudrun
+   - [x] test with Sarah
+   - [x] test with Andy
+9. [x] eval Google Cloud Run
+   - [x] Cloud Run project setup, Dockerfile.cloudrun
 10. Improve tooling to improve workflow
    - [x] log GPU type and VRAM of selected pod at run time (currently only
      filtered by >=24GB, not recorded); useful for correlating artifact
      patterns with hardware 
    - [x] segmentation (integrated in Rust CLI) - max word limit enforced at 200
    - [x] recently vibe-service failed -- long segment timout (polling fixes)
-   - [ ] rerun - test augment, validate skipping
+   - [x] JobState for resilience
+   - [x] rerun - test augment segments to validate skipping
+   - [x] Move to Blackwell GPU - Dockerfile.cloudrun-blackwell
+11. Validation
+   - [ ] Full doc run of Hypertext87 => test CLI import with audio
+   - [ ] implement playback of partial synth => test with unfinished Augment 
 11. Consider additional improvements
    - background noise removal
    - use forced-alignment to find original headers and add silence

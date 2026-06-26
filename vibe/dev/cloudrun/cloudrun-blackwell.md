@@ -299,3 +299,149 @@ persistent model process is a prerequisite for it (you can't batch
 across independent subprocesses). Worth scoping separately, and only if
 the throughput numbers at N=4–8 don't already meet the cost target on
 their own.
+
+## Real batched generate() benchmark (batch_bench.py)
+
+Methodology and design rationale for this benchmark live in
+`../parallel.md` ("Batch size testing" section) — this section is the
+measured results only.
+
+**Clean repeat (v8 image, 2026-06-26): 3 consecutive full sweeps on the
+same warm instance, normalized `bench_segments` text (the unnormalized-
+text bug below is fixed).** This resolves both caveats from the first
+run: text is now production-equivalent, and each N was measured 3x
+instead of once.
+
+| N | Throughput (1) | Throughput (2) | Throughput (3) | Avg throughput | Spread | Peak VRAM* |
+|---|---|---|---|---|---|---|
+| 1  | 2.348x | 2.762x | 2.765x | 2.625x | ** | 5290 MiB |
+| 2  | 3.817x | 3.821x | 3.836x | 3.825x | <1% | 5417 MiB |
+| 4  | 7.649x | 7.662x | 7.757x | 7.689x | ~1.4% | 5667 MiB |
+| 8  | 11.078x | 11.089x | 11.176x | 11.114x | ~0.9% | 6167 MiB |
+| 16 | 22.711x | 22.474x | 22.593x | 22.593x | ~1.1% | 7172 MiB |
+| 32 | 35.360x | 35.384x | 35.576x | 35.440x | ~0.6% | 9182 MiB |
+
+`x` = throughput = audio-seconds produced ÷ wall-clock seconds (higher
+is better) — the inverse of RTF, not RTF itself. `2.625x` means 2.625
+seconds of synthesized audio per second of wall-clock time.
+
+\* Identical across all 3 repeats at every N (deterministic given
+fixed input/seed).
+
+\*\* N=1's spread is within noise — there's no batching at N=1, so this
+is just one segment's individual generation speed varying run to run,
+not a measurement of batching consistency the way N≥2 is.
+
+N=2 through N=32 are tight across all 3 repeats (under ~1.5% spread) —
+the throughput curve is real, not measurement noise. N=1 varies more
+(2.35x–2.77x) because there's no batching at N=1 to average over; one
+segment's individual generation speed dominates. Throughput keeps
+climbing smoothly through N=32 with no flattening, confirming the
+qualitative read from the first run: real batching avoids the GPU
+compute contention that flattened the N=2/4/8 *process-concurrency*
+curve elsewhere in this doc (~3.0x ceiling by N=8). VRAM also stayed
+consistent with the first run's table below (5.3 GiB at N=1 → ~9.2 GiB
+at N=32) — nowhere near the 96 GiB ceiling even at N=32.
+
+**First run (v4 image, 2026-06-25, `request_id=2c677d7b-2582-4ee0-a164-c4314f4395c8`), superseded by the clean repeat above — used unnormalized text, see caveat below:**
+
+| N | Wall | Peak VRAM | Throughput |
+|---|---|---|---|
+| 1 | 30.1s | 5290 MiB | 2.30x |
+| 2 | 36.9s | 5417 MiB | 4.23x |
+| 4 | 20.9s | 5667 MiB | 8.24x |
+| 8 | 43.3s | 6167 MiB | 9.73x |
+| 16 | 38.1s | 7173 MiB | 22.48x |
+
+Both open questions from `../parallel.md` were answered, at least
+directionally:
+
+- **VRAM is not the constraint, by a wide margin.** ~125 MiB/item from
+  N=1 to N=16 (5.3 GiB → 7.2 GiB total), nothing like the ~6.3 GiB/job
+  from the N=2/4/8 *independent-process* test above. Confirms the
+  hypothesis: that number was almost entirely duplicated model weights,
+  not per-item activation/KV-cache cost. Massive VRAM headroom remains
+  on the 96 GiB card even at N=16 — batch size is nowhere near a
+  VRAM-bound ceiling yet.
+- **Throughput keeps climbing, no flattening yet** — 2.3x → 22.5x, and
+  N=16 is the best point measured, not a plateau. This is a
+  fundamentally different shape than the N=2/4/8 process-concurrency
+  curve above, which flattened hard by N=8 (~3.0x) from GPU compute
+  contention. Real batching is avoiding that contention entirely, as
+  expected — one fused forward pass instead of N independent kernels
+  time-slicing the same SMs.
+- **Caveat — this was one run, each N tested once, and wall times were
+  non-monotonic** (N=8's 43.3s is higher than N=4's 20.9s despite 2x
+  the work), consistent with cold-start/scheduling noise rather than a
+  real per-N effect — same kind of contamination the N=2/4/8 tests
+  flagged.
+- **Checked: this wasn't a "got easy segments at high N" confound.**
+  `batch_bench.py`'s `run_batch()` records per-item `words` and
+  `audio_duration_secs`; the per-item breakdown showed seconds-of-
+  audio-per-word stable across every N — roughly 0.30–0.48 s/word with
+  no drift as N increases (e.g. N=4: 0.33–0.39, N=16: 0.28–0.48). So
+  the content landing in each batch wasn't systematically easier or
+  harder at higher N.
+- **Sharper version of that caveat, discovered after the fact: this run
+  used unnormalized text.** `batch_bench.py`'s `load_texts()` read raw
+  `.txt` directly — it never called `util::normalizer::normalize`, the
+  step the CLI's `synthesize` command applies before sending text to
+  the server. Unnormalized text (acronyms, em-dashes, number/ID
+  formatting) can cause the model to truncate or repeat, and that kind
+  of artifact often runs *faster*, not slower — so this throughput
+  curve may be partly an artifact of bad input, not just measurement
+  noise. Fixed in `docker/bench_segments/*.txt` (now normalized,
+  matching production text exactly) — see the repeat run below.
+- Results: full log + wavs at
+  `gs://vibe-jobs-a4127f08/bench/2c677d7b-2582-4ee0-a164-c4314f4395c8/`;
+  `batch_bench_runs.jsonl` copied to `vibe/bench_runs.jsonl` (tracked,
+  for history).
+
+## Subprocess-start warmup cost (batch_inference.py)
+
+Methodology lives in `../parallel.md` ("Measuring subprocess-start
+warmup cost" section) — this section is the measured results only.
+
+**Measured on v7 (3 consecutive single-segment `/batches` calls, same
+Cloud Run instance, fetched via `GET /log/:request_id`):**
+
+| call | imports_done | processor_loaded | model_loaded | generation_start |
+|------|--------------|-------------------|--------------|-------------------|
+| 1 (cold instance) | 46.08s | 46.53s | 54.97s | 62.24s |
+| 2 (same instance) | 5.06s  | 5.39s  | 6.71s  | 7.19s  |
+| 3 (same instance) | 4.20s  | 4.47s  | 5.64s  | 6.10s  |
+
+**Conclusion: the ~55-60s warmup cost is paid once per Cloud Run
+instance (cold start), not once per subprocess.**
+
+- Call 1 was the very first subprocess this instance ever ran.
+- `imports_done` alone took 46s on that call — likely cold reads of
+  torch/CUDA/model-weight files through Cloud Run's lazy-loaded
+  container filesystem.
+- Calls 2 and 3 were fresh subprocesses on that same warm instance.
+- Both landed in the same ~4-7s band for every checkpoint.
+- That's a ~9x drop, and it held across two independent samples — not
+  a fluke.
+
+What this confirms:
+
+- Backs up the "may not need persistence" lean from `../parallel.md`'s
+  open questions.
+- But for a different reason than originally argued: OS/container-level
+  caching amortizes the cost across subprocesses within an instance,
+  not fast checkpoint-load time per se.
+
+What this means for the design:
+
+- Subprocess-per-batch-call ships as-is.
+- The big ~55s cost is the cold-start tax, paid once per scale-up
+  event (with `min-instances=0`), not once per request — a persistent
+  server's main win here is moot.
+- But persistence would also eliminate the recurring ~5-7s/call
+  import+model-load overhead that calls 2 and 3 still paid every
+  time, even on a warm instance — that part isn't free, just small.
+- So: the recurring per-call cost is small enough to defer, not
+  absent. Whether 5-7s/call (or some multiple of that under real
+  batch sizes) is worth the engineering cost of a persistent server
+  (process supervision, health-check redesign) is a real judgment
+  call, not a closed question.

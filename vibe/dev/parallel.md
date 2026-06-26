@@ -178,80 +178,17 @@ into both `Dockerfile` and `Dockerfile.cloudrun-blackwell` alongside
 seg41-71, 31 total — enough for the default 1,2,4,8,16 sweep to use each
 segment once, no repeats) baked in.
 
-**Results (first real run, Blackwell, v4 image, 2026-06-25,
-`request_id=2c677d7b-2582-4ee0-a164-c4314f4395c8`):**
-
-| N | Wall | Peak VRAM | Throughput |
-|---|---|---|---|
-| 1 | 30.1s | 5290 MiB | 2.30x |
-| 2 | 36.9s | 5417 MiB | 4.23x |
-| 4 | 20.9s | 5667 MiB | 8.24x |
-| 8 | 43.3s | 6167 MiB | 9.73x |
-| 16 | 38.1s | 7173 MiB | 22.48x |
-
-Both open questions from this section are answered, at least directionally:
-
-- **VRAM is not the constraint, by a wide margin.** ~125 MiB/item from
-  N=1 to N=16 (5.3 GiB → 7.2 GiB total), nothing like the ~6.3 GiB/job
-  from the N=2/4/8 *independent-process* test. Confirms the hypothesis
-  above: that number was almost entirely duplicated model weights, not
-  per-item activation/KV-cache cost. Massive VRAM headroom remains on
-  the 96 GiB card even at N=16 — batch size is nowhere near a
-  VRAM-bound ceiling yet.
-- **Throughput keeps climbing, no flattening yet** — 2.3x → 22.5x, and
-  N=16 is the best point measured, not a plateau. This is a
-  fundamentally different shape than the N=2/4/8 process-concurrency
-  curve in `cloudrun/cloudrun-blackwell.md`, which flattened hard by N=8 (~3.0x) from GPU
-  compute contention. Real batching is avoiding that contention
-  entirely, as expected — one fused forward pass instead of N
-  independent kernels time-slicing the same SMs.
-- **Caveat — this is one run, each N tested once, and wall times are
-  non-monotonic** (N=8's 43.3s is higher than N=4's 20.9s despite 2x
-  the work), consistent with cold-start/scheduling noise rather than a
-  real per-N effect — same kind of contamination `cloudrun/cloudrun-blackwell.md` flagged
-  for the process-concurrency tests.
-- **Checked: this isn't a "got easy segments at high N" confound.**
-  `batch_bench.py`'s `run_batch()` already records per-item `words` and
-  `audio_duration_secs`; pulling the per-item breakdown (not just the
-  aggregate table above) and computing seconds-of-audio-per-word per
-  item shows it's stable across every N — roughly 0.30–0.48 s/word with
-  no drift as N increases (e.g. N=4: 0.33–0.39, N=16: 0.28–0.48). So
-  the content landing in each batch isn't systematically easier or
-  harder at higher N — the audio-duration numbers feeding the
-  throughput calculation are sound.
-- **Not checked, and still the real gap: per-item *wall-clock* time.**
-  The aggregate throughput metric (`total_audio_secs / wall_secs`) is
-  mathematically identical whether computed in aggregate or "per item"
-  (dividing both sides by N cancels out) — so there's no separate
-  per-item throughput number to extract beyond what's in the table
-  above; the content-confound check above is the meaningful per-item
-  analysis available from this data. What's still unverified is
-  whether `wall_secs` itself is a reliable measurement at each N — the
-  non-monotonic pattern (N=8 slower than N=4) means it might not be.
-  **Don't treat the throughput curve above as validated yet.** The
-  qualitative conclusion (real batching avoids the time-slicing
-  contention seen in N=2/4/8) is a sound mechanism-level argument
-  independent of this data and very likely still correct, but the
-  specific numbers need a repeat run before locking in a production
-  batch size off this curve.
-- **Sharper version of that caveat, discovered after the fact: this run
-  used unnormalized text.** `batch_bench.py`'s `load_texts()` reads raw
-  `.txt` directly — it never calls `util::normalizer::normalize`, the
-  step the CLI's `synthesize` command applies before sending text to
-  the server. Unnormalized text (acronyms, em-dashes, number/ID
-  formatting `normalize-future.md` tracks) can cause the model to
-  truncate or repeat (`quirks.md`'s seg07/seg20 history) — and that
-  kind of artifact often runs *faster*, not slower. So the throughput
-  curve may be partly an artifact of bad input, not just measurement
-  noise — a different and somewhat worse problem than "wall-clock isn't
-  reliable yet." `seg41`–`seg71` need to be re-run with normalized text
-  regardless (see below), which doubles as a from-scratch repeat of
-  this measurement with clean input.
-- Results: full log + wavs at
-  `gs://vibe-jobs-a4127f08/bench/2c677d7b-2582-4ee0-a164-c4314f4395c8/`;
-  `batch_bench_runs.jsonl` copied to `vibe/bench_runs.jsonl` (tracked,
-  for history — matches the existing `vibe/runs.jsonl` convention for
-  per-segment job logs) rather than left only in GCS.
+**Results moved to `cloudrun/cloudrun-blackwell.md`** ("Real batched
+generate() benchmark" section) — that's where all Blackwell-specific
+measured numbers live now, not in this design doc. Short version: both
+open questions from this section were answered directionally (VRAM not
+the constraint, throughput kept climbing through N=32 with no
+flattening, unlike the N=2/4/8 process-concurrency curve). The first
+run's two caveats (unnormalized text, only one sample per N) are now
+resolved — a clean repeat (normalized text, 3 full sweeps on a warm
+instance, <1.5% spread at every N from 2-32) confirms the curve is
+real, not noise. The provisional N=16 → 22.48x number is no longer
+provisional; see the clean table in `cloudrun/cloudrun-blackwell.md`.
 
 **Why Cloud Run is the priority target, despite no shell access.** Vibe
 is on a 90-day Cloud Run eval, and the open question this whole doc is
@@ -863,46 +800,10 @@ persistence" question above, actually measured)
   tests), next step is build/push/deploy + the actual 3-call
   measurement.
 
-**Measured on v7 (3 consecutive single-segment `/batches` calls, same
-Cloud Run instance, fetched via `GET /log/:request_id`):**
-
-| call | imports_done | processor_loaded | model_loaded | generation_start |
-|------|--------------|-------------------|--------------|-------------------|
-| 1 (cold instance) | 46.08s | 46.53s | 54.97s | 62.24s |
-| 2 (same instance) | 5.06s  | 5.39s  | 6.71s  | 7.19s  |
-| 3 (same instance) | 4.20s  | 4.47s  | 5.64s  | 6.10s  |
-
-**Conclusion: the ~55-60s warmup cost is paid once per Cloud Run
-instance (cold start), not once per subprocess.**
-
-- Call 1 was the very first subprocess this instance ever ran.
-- `imports_done` alone took 46s on that call — likely cold reads of
-  torch/CUDA/model-weight files through Cloud Run's lazy-loaded
-  container filesystem.
-- Calls 2 and 3 were fresh subprocesses on that same warm instance.
-- Both landed in the same ~4-7s band for every checkpoint.
-- That's a ~9x drop, and it held across two independent samples — not
-  a fluke.
-
-What this confirms:
-
-- Backs up the existing "may not need persistence" lean from the
-  open-question above.
-- But for a different reason than originally argued: OS/container-level
-  caching amortizes the cost across subprocesses within an instance,
-  not fast checkpoint-load time per se.
-
-What this means for the design:
-
-- Subprocess-per-batch-call ships as-is.
-- The big ~55s cost is the cold-start tax, paid once per scale-up
-  event (with `min-instances=0`), not once per request — a persistent
-  server's main win here is moot.
-- But persistence would also eliminate the recurring ~5-7s/call
-  import+model-load overhead that calls 2 and 3 still paid every
-  time, even on a warm instance — that part isn't free, just small.
-- So: the recurring per-call cost is small enough to defer, not
-  absent. Whether 5-7s/call (or some multiple of that under real
-  batch sizes) is worth the engineering cost of a persistent server
-  (process supervision, health-check redesign) is a real judgment
-  call, not a closed question.
+**Results moved to `cloudrun/cloudrun-blackwell.md`** ("Subprocess-start
+warmup cost" section). Short version: the ~55-60s warmup cost is paid
+once per Cloud Run instance (cold start), not once per subprocess —
+backs up the "may not need persistence" lean, but for a different
+reason than originally argued (OS/container-level caching, not fast
+checkpoint-load). A small recurring ~5-7s/call cost remains even on a
+warm instance, so persistence is a real judgment call, not closed.
