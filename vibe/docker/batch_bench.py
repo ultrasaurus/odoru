@@ -15,8 +15,12 @@ inference_from_file.py expects, so `from vibevoice...` imports resolve):
         --batch_sizes 1,2,4,8,16 \
         --output_dir /tmp/batch_bench
 
-Defaults to demo/bench_segments/ (augment_seg41-71.txt, 31 raw — not yet
-normalized — segments baked into the image; see Dockerfile.cloudrun-blackwell).
+Defaults to demo/bench_segments/ (augment_seg41-71.txt, 31 normalized
+segments baked into the image; see Dockerfile.cloudrun-blackwell). These
+were unnormalized text in earlier runs — fixed in dev/parallel.md Task 6 —
+so results from before that fix may show atypically fast generation
+(truncation/repetition artifacts) and shouldn't be compared to results
+from this fix onward.
 Segments are consumed sequentially across the batch-size sweep (not
 restarted at index 0 each time), so the default 1,2,4,8,16 sweep (31 items
 total) uses each of the 31 segments exactly once. Pass --texts_dir to point
