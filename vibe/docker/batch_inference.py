@@ -21,6 +21,15 @@ benchmarking tool (see batch_bench.py for that).
 Prints "Seed used: <seed>" to stdout once, matching the existing
 stdout-scraping pattern run_inference_inner uses today.
 """
+import time
+
+# Captured before the heavy imports below (numpy/torch/vibevoice/transformers)
+# so [timing] lines can attribute import + CUDA-init cost separately from
+# model-load and generation cost — see dev/parallel.md Task 4 (measuring
+# whether subprocess-start warmup is paid once per instance or once per
+# subprocess).
+_T0 = time.time()
+
 import argparse
 import json
 import os
@@ -133,6 +142,7 @@ def main():
     temp = request.get("temp")
     speed = request.get("speed") or 1.0
 
+    print(f"[timing] imports_done: {time.time() - _T0:.2f}s")
     print(f"Using device: {args.device}")
     if seed is not None:
         print(f"Setting seed: {seed}")
@@ -145,6 +155,7 @@ def main():
 
     print(f"Loading processor & model from {args.model_path}")
     processor = VibeVoiceProcessor.from_pretrained(args.model_path)
+    print(f"[timing] processor_loaded: {time.time() - _T0:.2f}s")
 
     load_dtype = torch.bfloat16 if args.device == "cuda" else torch.float32
     attn_impl_primary = "flash_attention_2" if args.device == "cuda" else "sdpa"
@@ -165,6 +176,7 @@ def main():
         )
     model.eval()
     model.set_ddpm_inference_steps(num_steps=10)
+    print(f"[timing] model_loaded: {time.time() - _T0:.2f}s")
 
     full_scripts = [build_full_script(seg["text"]) for seg in segments]
     names = [seg["name"] for seg in segments]
@@ -195,7 +207,7 @@ def main():
         generation_config = {'do_sample': False}
         print(f"Starting generation with cfg_scale: {cfg_scale}")
 
-    import time
+    print(f"[timing] generation_start: {time.time() - _T0:.2f}s")
     start_time = time.time()
     outputs = model.generate(
         **inputs,
@@ -208,6 +220,7 @@ def main():
     )
     generation_time = time.time() - start_time
     print(f"Generation time: {generation_time:.2f} seconds")
+    print(f"[timing] generation_done: {time.time() - _T0:.2f}s")
 
     os.makedirs(args.output_dir, exist_ok=True)
     sample_rate = 24000

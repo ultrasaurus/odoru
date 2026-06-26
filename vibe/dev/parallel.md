@@ -834,3 +834,75 @@ trail stays visible.
   above as accepted-not-blocking) still applies unchanged to the batch
   API — no new mitigation planned, just flagging it's inherited here
   too, not re-litigated.
+
+### Measuring subprocess-start warmup cost (the "may not need
+persistence" question above, actually measured)
+
+- Added `[timing]` print checkpoints to `batch_inference.py`:
+  `imports_done`, `processor_loaded`, `model_loaded`,
+  `generation_start`, `generation_done`, each as elapsed seconds since
+  a `_T0` captured before the heavy imports (numpy/torch/vibevoice/
+  transformers) — so subprocess-exec + import + CUDA-init cost is
+  separated from model-load cost and from generation cost.
+- These land in the per-batch `/tmp/<request_id>.log` (existing
+  pattern, same as the single-job path), fetchable via the existing
+  `GET /log/:request_id`. Added `request_id` to the existing `"batch
+  running"` log line (`main.rs`, `run_batch_job`) so the id is visible
+  immediately in Cloud Run logs without waiting for the first
+  heartbeat tick.
+- Plan: submit 3 small consecutive `/batches` calls (1 segment each)
+  against the same already-warm Cloud Run instance, fetch each one's
+  log via `request_id`, and diff `imports_done`/`model_loaded` across
+  calls. If they're roughly flat across all 3 (no big drop after call
+  1), that's evidence CUDA/cuDNN/flash-attn warmup is paid fresh every
+  subprocess — an argument for a persistent model server. If call 1 is
+  much slower than 2/3, OS-level caching (page cache, CUDA module
+  cache) already amortizes most of it even across separate processes,
+  supporting the existing "may not need persistence" lean.
+- Not yet run — `cargo build`/`cargo test` for `vibe-service` pass (19
+  tests), next step is build/push/deploy + the actual 3-call
+  measurement.
+
+**Measured on v7 (3 consecutive single-segment `/batches` calls, same
+Cloud Run instance, fetched via `GET /log/:request_id`):**
+
+| call | imports_done | processor_loaded | model_loaded | generation_start |
+|------|--------------|-------------------|--------------|-------------------|
+| 1 (cold instance) | 46.08s | 46.53s | 54.97s | 62.24s |
+| 2 (same instance) | 5.06s  | 5.39s  | 6.71s  | 7.19s  |
+| 3 (same instance) | 4.20s  | 4.47s  | 5.64s  | 6.10s  |
+
+**Conclusion: the ~55-60s warmup cost is paid once per Cloud Run
+instance (cold start), not once per subprocess.**
+
+- Call 1 was the very first subprocess this instance ever ran.
+- `imports_done` alone took 46s on that call — likely cold reads of
+  torch/CUDA/model-weight files through Cloud Run's lazy-loaded
+  container filesystem.
+- Calls 2 and 3 were fresh subprocesses on that same warm instance.
+- Both landed in the same ~4-7s band for every checkpoint.
+- That's a ~9x drop, and it held across two independent samples — not
+  a fluke.
+
+What this confirms:
+
+- Backs up the existing "may not need persistence" lean from the
+  open-question above.
+- But for a different reason than originally argued: OS/container-level
+  caching amortizes the cost across subprocesses within an instance,
+  not fast checkpoint-load time per se.
+
+What this means for the design:
+
+- Subprocess-per-batch-call ships as-is.
+- The big ~55s cost is the cold-start tax, paid once per scale-up
+  event (with `min-instances=0`), not once per request — a persistent
+  server's main win here is moot.
+- But persistence would also eliminate the recurring ~5-7s/call
+  import+model-load overhead that calls 2 and 3 still paid every
+  time, even on a warm instance — that part isn't free, just small.
+- So: the recurring per-call cost is small enough to defer, not
+  absent. Whether 5-7s/call (or some multiple of that under real
+  batch sizes) is worth the engineering cost of a persistent server
+  (process supervision, health-check redesign) is a real judgment
+  call, not a closed question.

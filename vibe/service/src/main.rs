@@ -999,8 +999,6 @@ async fn run_batch_job(state: AppState, job_ids: Vec<String>, req: BatchRequest)
         }).await;
     }
 
-    info!(segments = req.segments.len(), seed = req.seed, cfg = req.cfg_scale, "batch running");
-
     // Increment once per segment (not once per batch call) — matches the
     // per-segment semantics run_job already uses for ActivityTracker.
     state.tracker.touch();
@@ -1021,6 +1019,10 @@ async fn run_batch_job(state: AppState, job_ids: Vec<String>, req: BatchRequest)
     let request_id = Uuid::new_v4().to_string();
     let out_dir = format!("/tmp/{request_id}_out");
     let log_path = format!("/tmp/{request_id}.log");
+    info!(
+        request_id = %request_id, segments = req.segments.len(), seed = req.seed, cfg = req.cfg_scale,
+        "batch running"
+    );
 
     let start = std::time::Instant::now();
 
