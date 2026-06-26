@@ -173,17 +173,29 @@ a retry loop.
 
 A hard concat (no gap) pops at segment boundaries — VibeVoice doesn't fade
 to silence at the end of a segment, so the cut is audible. Use
-`dev/stitch.sh`, which fades each segment in/out (150ms default) and
+`listen-test/stitch.sh`, which fades each segment in/out (150ms default) and
 inserts a silence gap (800ms default) between segments:
 
 ```bash
-dev/stitch.sh $BASEDIR $BASENAME            # defaults: 0.15s fade, 0.8s gap
-dev/stitch.sh $BASEDIR $BASENAME 0.2 1.0    # custom fade/gap
+listen-test/stitch.sh $BASEDIR $BASENAME            # defaults: 0.15s fade, 0.8s gap
+listen-test/stitch.sh $BASEDIR $BASENAME 0.2 1.0    # custom fade/gap
 ```
 
 Writes `${BASEDIR}/${BASENAME}_stitched.wav`. Re-run any time after
 regenerating individual segments — it always rebuilds from whatever
 `${BASENAME}_segNN_generated.wav` files currently exist.
+
+Before listening, generate a review guide — every segment's source text in
+order, each preceded by `--- NN`, with an `[ALIGN]` line right after the
+number for any segment that wasn't clean (reads each `_report.json`):
+
+```bash
+listen-test/review-guide.py $BASEDIR $BASENAME
+```
+
+Writes `${BASEDIR}/${BASENAME}_with_align.txt`. Use it alongside the
+stitched wav so you know going in which segments to listen to more
+carefully, and can match what you hear back to the exact source text.
 
 For a quick one-off without fades (e.g. to compare against the faded
 version), the plain hard-concat approach still works:

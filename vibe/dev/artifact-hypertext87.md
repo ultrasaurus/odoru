@@ -23,7 +23,7 @@ segment wavs).
 
 | Issue | Fix |
 |-------|-----|
-| Hard concat (`ffmpeg -f concat`, no gap) pops at every segment boundary — VibeVoice doesn't fade to silence at the end of a segment, so each cut is audible | Added `dev/stitch.sh`: fades each segment in/out (150ms default) and inserts an 800ms silence gap between segments before concatenating. See `dev/listen-test.md` § 4. The seg01 "s" clip (above) persists even with the fade — the fade smooths the *cut*, not a missing phoneme. |
+| Hard concat (`ffmpeg -f concat`, no gap) pops at every segment boundary — VibeVoice doesn't fade to silence at the end of a segment, so each cut is audible | Added `listen-test/stitch.sh`: fades each segment in/out (150ms default) and inserts an 800ms silence gap between segments before concatenating. See `dev/listen-test.md` § 4. The seg01 "s" clip (above) persists even with the fade — the fade smooths the *cut*, not a missing phoneme. |
 
 ---
 
