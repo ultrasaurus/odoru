@@ -108,6 +108,14 @@ I'm a Johnny-come-lately	I am A Johnny Come Lately
 MCST	M C S T
 Lib	libb
 I reread a lot of it just a few days	I ree red a lot of it just a few days
+3" x 5"	three by five inch
+8 1/2" x 11"	eight and a half by eleven inch
+l/O	I O
+Ph.D.	P H D
+goto,	Go To,
+goto-ness	Go To Ness
+Waterman St.	Waterman Street
+Dept.	Department
 
 # Augment
 OBJECTIVE OF THE STUDY	Objective of the Study

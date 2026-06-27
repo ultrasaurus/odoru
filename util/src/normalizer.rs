@@ -669,10 +669,12 @@ fn expand_comma_numbers_chunk(chunk: &Spanned) -> Vec<Spanned> {
             // raw digits — which TTS tends to garble, and which forced
             // alignment can't time-align at all (its vocabulary has no
             // digit characters, so bare numbers get silently dropped).
-            // Also excluded: a digit run touching a letter on either side
-            // ("4b", "14B", "v2") — that's an alphanumeric ID, not a bare
-            // number; split_alphanumeric (in process_token) handles spacing
-            // those out later in the pipeline. (Leading-zero exclusion is
+            // Also excluded here: a digit run touching a letter on either
+            // side ("4b", "14B", "v2", "512K") — not skipped entirely, just
+            // deferred: split_alphanumeric (in process_token) splits these
+            // later in the pipeline and spells out each digit run itself,
+            // so the number still gets spelled, just after the letter is
+            // separated off rather than here. (Leading-zero exclusion is
             // handled inside `spell_bare_digit_group` itself.)
             let touches_letter = (start > 0 && chars[start - 1].is_alphabetic())
                 || (j < chars.len() && chars[j].is_alphabetic());
@@ -814,10 +816,16 @@ fn apply_one_override_chunk(chunk: &Spanned, from: &str, to: &str) -> Vec<Spanne
         }
     }
 
+    // Require a word boundary before the match when `from` starts with an
+    // alphanumeric char, so e.g. "p." doesn't fire inside "Scholarship."
+    // (the "p" + sentence-final "." just happens to spell the key).
+    let needs_boundary = from_chars.first().is_some_and(|c| c.is_alphanumeric());
+
     while i < chars.len() {
         let matches = from_len > 0 && i + from_len <= chars.len()
             && chars[i..i + from_len].iter().zip(from_chars.iter())
-                .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()));
+                .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()))
+            && (!needs_boundary || i == 0 || !chars[i - 1].is_alphanumeric());
         if matches {
             flush(&mut out, &chars, base, run_start, i);
             out.push(Spanned { text: to.to_owned(), src: (base + i)..(base + i + from_len) });
@@ -906,19 +914,43 @@ fn process_token(token: &str, overrides: &HashMap<String, String>) -> String {
     token.to_owned()
 }
 
+/// Splits an alphanumeric token into digit/letter runs, spelling out each
+/// digit run as words (e.g. "512K" -> "five twelve K", "4c2" -> "four c
+/// two") instead of leaving raw digits — raw digits are hard for TTS to
+/// pronounce reliably and forced alignment has no digit characters in its
+/// vocabulary, so they'd otherwise go untimed. `spell_bare_digit_group`
+/// handles the common 1-4 digit cases the same way bare numbers elsewhere
+/// in the pipeline are spelled; runs it doesn't cover (longer runs, or a
+/// leading zero with len > 1, e.g. an ID like "007") fall back to spelling
+/// each digit individually.
 fn split_alphanumeric(token: &str) -> String {
-    let mut out = String::new();
+    let mut groups: Vec<String> = Vec::new();
+    let mut current = String::new();
     let mut prev_kind: Option<bool> = None;
 
     for ch in token.chars() {
         let is_digit = ch.is_ascii_digit();
         if let Some(prev) = prev_kind {
-            if prev != is_digit { out.push(' '); }
+            if prev != is_digit {
+                groups.push(std::mem::take(&mut current));
+            }
         }
-        out.push(ch);
+        current.push(ch);
         prev_kind = Some(is_digit);
     }
-    out
+    if !current.is_empty() { groups.push(current); }
+
+    groups.into_iter()
+        .map(|g| {
+            if g.chars().all(|c| c.is_ascii_digit()) {
+                spell_bare_digit_group(&g)
+                    .unwrap_or_else(|| g.chars().map(digit_word).collect::<Vec<_>>().join(" "))
+            } else {
+                g
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Spell out a number in words, e.g. 1999 -> "one thousand nine hundred
@@ -1611,10 +1643,17 @@ mod tests {
 
     #[test]
     fn alphanumeric_split() {
-        assert_eq!(split_alphanumeric("1a"),    "1 a");
-        assert_eq!(split_alphanumeric("4c2"),   "4 c 2");
-        assert_eq!(split_alphanumeric("4C2"),   "4 C 2");
-        assert_eq!(split_alphanumeric("12ab34"), "12 ab 34");
+        // Digit runs are spelled out, not left raw — raw digits are hard
+        // for TTS and untimeable by forced alignment (see split_alphanumeric).
+        assert_eq!(split_alphanumeric("1a"),    "one a");
+        assert_eq!(split_alphanumeric("4c2"),   "four c two");
+        assert_eq!(split_alphanumeric("4C2"),   "four C two");
+        assert_eq!(split_alphanumeric("12ab34"), "twelve ab thirty four");
+        // Memory-size shorthand: the motivating case.
+        assert_eq!(split_alphanumeric("512K"),  "five twelve K");
+        assert_eq!(split_alphanumeric("128K"),  "one twenty eight K");
+        // Longer/leading-zero digit runs fall back to digit-by-digit.
+        assert_eq!(split_alphanumeric("007b"),  "zero zero seven b");
     }
 
     #[test]
@@ -1665,7 +1704,7 @@ mod tests {
     fn em_dash_becomes_comma() {
         assert_eq!(
             normalize("Statement 4b -- or, to conceptualize"),
-            "Statement 4 b, or, to conceptualize"
+            "Statement four b, or, to conceptualize"
         );
     }
 

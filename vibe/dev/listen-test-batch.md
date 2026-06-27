@@ -18,6 +18,11 @@ synth target during the 90-day eval. The server-side batching code is
 host-agnostic by design, but RunPod hasn't been tried yet; if you do,
 note what happened here or in `dev/parallel.md`.
 
+## 0. Note configuration per voice
+
+Make sure you know what voice is desired for the specific document
+and look up configuration in [voices.md](voices.md)
+
 ## 1. Set up environment variables
 
 ```bash
