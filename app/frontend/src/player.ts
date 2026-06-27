@@ -166,16 +166,20 @@ export class Player {
     }
 
     const gen = this.generation
-    let receivedCount = 0
+    let receivedAny = false
     Ws.sendSynth(text, voice ?? '', documentId, {
       onSegment: (msg) => {
         // Activate pre-rendered pending span immediately as segment arrives,
         // before the decode chain — so cached audio lights up spans fast.
-        const arrivedIndex = receivedCount++
-        const pending = this.pendingSpans[arrivedIndex]
+        // Indexed by the segment's own real sentence index, not arrival
+        // order — sentences can be missing mid-stream (an imported voice's
+        // gap, or even today's existing live-synthesis skip of a blank/
+        // symbol-only sentence in engine.rs), so "the Nth one to arrive"
+        // and "sentence N" are not the same thing once any gap exists.
+        const pending = this.pendingSpans[msg.index]
         if (pending) {
           pending.classList.remove('pending')
-          pending.addEventListener('click', () => this.seekTo(arrivedIndex))
+          pending.addEventListener('click', () => this.seekTo(msg.index))
         }
 
         this.decodeChain = this.decodeChain.then(async () => {
@@ -188,24 +192,28 @@ export class Player {
           // before cancel fired.)
           if (this.generation !== gen) return
           const duration = samples.length / 24000
+          // Safe even with earlier gaps still unresolved: segments are only
+          // ever assigned at a strictly increasing index (the server emits
+          // indices in order), so segments.length - 1 is always the last
+          // *real* entry, never a gap — gaps only ever leave holes at lower
+          // indices, never at the tail.
           const prev = this.segments[this.segments.length - 1]
           const startTime = prev ? prev.endTime : 0
           const endTime = startTime + duration
 
           this.queue.enqueue(samples)
-          const newIndex = this.segments.length
-          this.segments.push({ transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end })
+          this.segments[msg.index] = { transcript: msg.transcript, startTime, endTime, samples, paragraphEnd: msg.paragraph_end }
 
           if (pending) {
             // Span already brightened; just register it for highlight tracking.
-            this.segmentEls.push(pending)
+            this.segmentEls[msg.index] = pending
           } else {
-            this.renderSegment(msg.transcript, newIndex)
+            this.renderSegment(msg.transcript, msg.index)
           }
 
-          if (newIndex === 0) this.onReadyCb?.()
+          if (!receivedAny) { receivedAny = true; this.onReadyCb?.() }
 
-          if (this.pendingSeekIndex >= 0 && newIndex >= this.pendingSeekIndex) {
+          if (this.pendingSeekIndex >= 0 && msg.index === this.pendingSeekIndex) {
             this._doSeek(this.pendingSeekIndex, this.pendingSeekWasPlaying)
             this.pendingSeekIndex = -1
             this.pendingSeekWasPlaying = false
@@ -215,6 +223,18 @@ export class Player {
       },
       onDone: () => {
         this.done = true
+        this.fillRemainingGaps()
+        if (this.pendingSeekIndex >= 0) {
+          // Never resolved during live arrival — either a confirmed gap
+          // (now backfilled with a zero-duration placeholder by
+          // fillRemainingGaps, so this seeks to the next real audio after
+          // it) or some other reason the exact-match check above never
+          // fired. Resolve now rather than leaving the seek parked forever.
+          this._doSeek(this.pendingSeekIndex, this.pendingSeekWasPlaying)
+          this.pendingSeekIndex = -1
+          this.pendingSeekWasPlaying = false
+          this.onSeekReadyCb?.()
+        }
         this.onSynthDoneCb?.()
       },
       onError: (msg) => {
@@ -237,11 +257,13 @@ export class Player {
 
   seekTo(index: number, autoPlay?: boolean): void {
     const wasPlaying = autoPlay ?? this.queue.state === 'running'
-    if (index < this.segments.length) {
+    if (this.segments[index]) {
       this._doSeek(index, wasPlaying)
       this.pendingSeekIndex = -1
     } else {
-      // Segment not yet received — park and wait.
+      // Not yet received — park and wait. If this index turns out to be a
+      // confirmed gap, onDone's fillRemainingGaps()/resolution step will
+      // pick this up rather than leaving it parked forever.
       this.pendingSeekIndex = index
       this.pendingSeekWasPlaying = wasPlaying
       this.onWaitingCb?.()
@@ -260,10 +282,17 @@ export class Player {
       this.segmentEls[this.activeIndex]?.classList.remove('active')
     }
     this.activeIndex = -1
-    this.seekOffset = this.segments[index].startTime + trimStartSecs
+    const target = this.segments[index]
+    if (!target) return  // shouldn't happen — callers already check
+    this.seekOffset = target.startTime + trimStartSecs
     this.queue.reset()
     for (let i = index; i < this.segments.length; i++) {
-      let samples = this.segments[i].samples
+      const seg = this.segments[i]
+      // A hole (gap not yet backfilled, mid-stream) or a backfilled
+      // zero-duration gap placeholder — nothing to enqueue, continue to
+      // whatever comes after it.
+      if (!seg || seg.samples.length === 0) continue
+      let samples = seg.samples
       if (i === index && trimStartSecs > 0) {
         const skipSamples = Math.round(trimStartSecs * 24000)
         samples = samples.subarray(Math.min(skipSamples, samples.length))
@@ -335,8 +364,9 @@ export class Player {
    * then regardless.
    */
   listenTo(segIndex: number, endOffsetSecs: number, startOffsetSecs = 0, endSegIndex = segIndex): void {
-    if (!this.hasAudio || segIndex >= this.segments.length || endSegIndex >= this.segments.length) return
-    this.stopAt = this.segments[endSegIndex].startTime + endOffsetSecs
+    const endSeg = this.segments[endSegIndex]
+    if (!this.hasAudio || !this.segments[segIndex] || !endSeg) return
+    this.stopAt = endSeg.startTime + endOffsetSecs
     this._doSeek(segIndex, true, startOffsetSecs)
     const ctxStopTime = this.queue.firstStartTime + (this.stopAt - this.seekOffset)
     this.queue.scheduleStopAt(ctxStopTime)
@@ -353,11 +383,14 @@ export class Player {
   downloadWav(filename: string): void {
     if (!this.hasAudio) return
 
-    // Concatenate all segment samples
-    const totalSamples = this.segments.reduce((n, s) => n + s.samples.length, 0)
+    // Concatenate all segment samples. `seg` can be a hole if this is
+    // somehow called before synthesis finishes (gaps aren't backfilled
+    // with zero-length placeholders until onDone) — skip rather than crash.
+    const totalSamples = this.segments.reduce((n, s) => n + (s?.samples.length ?? 0), 0)
     const pcm = new Float32Array(totalSamples)
     let offset = 0
     for (const seg of this.segments) {
+      if (!seg) continue
       pcm.set(seg.samples, offset)
       offset += seg.samples.length
     }
@@ -408,7 +441,7 @@ export class Player {
       // Activate the pre-rendered gray span in place.
       pending.classList.remove('pending')
       pending.addEventListener('click', clickHandler)
-      this.segmentEls.push(pending)
+      this.segmentEls[index] = pending
       return
     }
 
@@ -430,7 +463,41 @@ export class Player {
     } else {
       this.container.appendChild(document.createTextNode(' '))
     }
-    this.segmentEls.push(span)
+    this.segmentEls[index] = span
+  }
+
+  /**
+   * Called once on `done` (no more arrivals expected this session). Any
+   * index up to the known total sentence count that's still a hole is a
+   * confirmed gap — no cached audio for an imported voice, or (pre-existing,
+   * unrelated to import) a blank/symbol-only sentence engine.rs skips
+   * entirely. Backfill each with a zero-duration placeholder so every
+   * downstream consumer (`_doSeek`, `highlightCurrent`, `downloadWav`, …)
+   * can keep treating `segments` as dense rather than needing gap-awareness
+   * of its own. `_doSeek` skips zero-length samples, so seeking to a gap
+   * just continues to whatever real audio comes after it.
+   *
+   * `pendingSpans.length` is the total — known up front from the rendered
+   * markdown, independent of audio arrival. If it's empty (the fresh,
+   * unrendered-text synthesis path, which never reaches imported voices in
+   * practice), there's no a-priori total to backfill against; leave as is.
+   */
+  private fillRemainingGaps(): void {
+    const expectedTotal = this.pendingSpans.length
+    if (expectedTotal === 0) return
+    for (let i = 0; i < expectedTotal; i++) {
+      if (this.segments[i]) continue
+      const prev = this.segments[i - 1]
+      const t = prev ? prev.endTime : 0
+      this.segments[i] = {
+        transcript: { text: this.pendingSpans[i]?.textContent ?? '', start: t, end: t, words: [] },
+        startTime: t,
+        endTime: t,
+        samples: new Float32Array(0),
+        paragraphEnd: false,
+      }
+      if (!this.segmentEls[i]) this.segmentEls[i] = this.pendingSpans[i]
+    }
   }
 
   private startTracking(): void {
@@ -475,6 +542,9 @@ export class Player {
     let found = -1
     for (let i = 0; i < this.segments.length; i++) {
       const s = this.segments[i]
+      // A hole at a lower index whose gap hasn't been backfilled yet
+      // (mid-stream, before onDone) — never matches, keep scanning.
+      if (!s) continue
       if (pos >= s.startTime && pos < s.endTime) {
         found = i
         break

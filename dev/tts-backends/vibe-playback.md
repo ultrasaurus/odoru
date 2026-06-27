@@ -1,139 +1,115 @@
-# Design: player support for out-of-order segment arrival
+# Design: player support for sentences with no audio (imported-voice gaps)
 
-Companion to `vibe/dev/odoru-import-prep.md` and `dev/tts-backends/vibe-import.md`, which
-design how vibe-synthesized audio gets imported into Odoru's cache. This
-doc covers what `app/frontend/src/player.ts` needs to change to actually
-*play* imported audio once it exists, given that import can leave
-permanent (or long-lived) gaps in the middle of a document.
+Companion to `vibe/dev/odoru-import-prep.md` and `dev/tts-backends/vibe-import.md`,
+which design how vibe-synthesized audio gets imported into Odoru's cache.
+This doc covers what `app/frontend/src/player.ts` (and a small server-side
+piece in `app/src/main.rs`) needed for imported audio to actually *play*,
+given that import can leave gaps in the middle of a document.
 
-Status: design discussion, not yet implemented. Not blocking `dl import`
-shipping — the cache-population side and the playback side are separable.
+Status: implemented.
 
 ## Motivation
 
 `dl import` is "skip-and-report": a sentence whose transcript doesn't
 parse, or that finds no word match, is skipped rather than aborting the
 whole import. A partially-imported document ends up with some sentences
-cached and others not — and unlike live synthesis, where every sentence
-eventually arrives (or the whole stream errors out), an imported gap can
-stay missing for a long time: at first while debugging the importer,
-later because someone needs to manually re-run `dl import --segment <n>`
-to backfill it. The intent is that the gap **will** eventually fill in —
-just possibly minutes (or longer) later, not seconds.
+cached and others not.
 
-The player's current design can't represent that. It assumes segments
-arrive strictly in index order and uses that to assign each one a global,
-cumulative position in the document's timeline.
-
-## Current model (for reference)
-
-- `Player.segments` is a plain array, built via `push()` as each WS
-  message arrives.
-- Each entry's `startTime`/`endTime` are cumulative: `startTime = prev
-  ? prev.endTime : 0`. This only works because arrival order and array
-  order are guaranteed to match.
-- `seekTo(index)`: if `index < segments.length`, seek immediately. If not
-  yet arrived, park (`pendingSeekIndex`) and fire `onWaitingCb`; resolves
-  when a later WS message brings `segments.length` up past `index`.
-- DOM segment spans (`renderSegment`) are activated — `pending` class
-  removed, click handler attached — the moment that sentence's own audio
-  arrives, independent of anything else. This part already generalizes
-  fine to the new model; see below.
-
-This breaks if a sentence is permanently (or long-term) missing while
-later sentences keep arriving: `push()` would put a later sentence's audio
-at the missing one's array slot, shifting every subsequent index down by
-one and corrupting `highlightSegment`, `seekTo`, and the annotation
+The player's original design couldn't represent that. It assumed segments
+arrive strictly in array order and used `push()` to build `Player.segments`,
+assigning each one a cumulative timeline position purely by arrival order.
+A gap shifted every subsequent sentence's array position down by one,
+corrupting `highlightSegment`, `seekTo`, and the annotation
 `segmentIndexForEl` lookups for the rest of the document.
 
-## New model
+**Not specific to imported audio, in hindsight:** `engine.rs`'s live
+synthesis loop already skips a blank or symbol-only "sentence" (e.g. a
+stray markdown artifact) without emitting anything for that index — so this
+bug was reachable before any import work existed, just rare enough not to
+have been noticed. Imported voices made gaps common enough to surface it.
 
-- **`segments` becomes index-addressable**, not append-only. Fill in
-  `segments[i]` by its real sentence index as audio for sentence *i*
-  arrives, regardless of receive order. A not-yet-arrived index is simply
-  absent (`undefined`), not a placeholder.
-- **Track a "contiguous-known-through" pointer** separately from how much
-  data has arrived. `startTime`/`endTime` for index *i* depend on every
-  index before it being known (cumulative duration) — so only the
-  unbroken run from 0 has a defined absolute position. A sentence that
-  arrived out of order, past a gap, sits in the array with known *duration*
-  but no absolute position yet.
-- **No silence placeholder needed.** The earlier idea (synthesize actual
-  silence for a missing sentence to keep `push()` simple) is unnecessary —
-  index-addressing solves the same problem more directly, and the
-  "pause" behavior below gives the desired UX without it.
+## What shipped
 
-## Playback semantics: natural progression vs. explicit seek
+**Backend (`app/src/main.rs`):** imported voices don't get a new
+`tts::backend::Voice` variant — there's no live model to synthesize with,
+so there'd be nothing for it to do on a cache miss. Instead `is_imported_voice`
+keys off the `voice_id` prefix (`backend != "f5" && backend != "kokoro"`)
+and routes to `handle_synth_replay`, a replay-only path that never touches
+a `TtsBackend`: it walks the document's sentences, looks up each one's
+audio in `audio_cache` under the per-document-and-index-scoped key (see
+`vibe-import.md`), and streams whatever it finds. A sentence with no cache
+entry just isn't sent — no explicit "gap" message (an earlier version of
+this added one, `SegmentGapMsg`/`type: "gap"`; removed once the client
+became index-aware, since `done` plus a still-missing index says the same
+thing without a second protocol path to keep in sync).
 
-These are deliberately different:
+**Client (`app/frontend/src/player.ts`):**
 
-- **Natural forward playback reaching a gap pauses.** The `AudioQueue`
-  only ever gets fed the contiguous-known-through prefix. When playback
-  reaches the end of what's enqueued and the document isn't fully
-  resolved, that's exactly today's "ran out of synthesized audio, wait"
-  state (`onWaitingCb`) — just triggered by hitting a gap during ordinary
-  playback, not only by an explicit `seekTo` past the end of what's
-  arrived so far. No new pause mechanism, just a new trigger for the
-  existing one.
-- **An explicit seek past a gap, to an already-arrived later sentence,
-  should work immediately** — the user chose to skip it, which is
-  different from playback running into a wall on its own. This needs
-  `_doSeek` to stop requiring a global absolute position: treat the
-  contiguous run starting at the seek target as its own local timeline
-  (its own zero point), using that sentence's own known duration, rather
-  than insisting on knowing every preceding sentence's duration first.
-- **When a gap eventually closes**, splice the two runs together —
-  recompute the back-run's absolute positions now that the previously-
-  missing duration is known, so scrubbing back across the seam lines up
-  correctly. Until that happens, total `duration` and the scrubber need to
-  show an estimate (or "unknown") for anything past an unresolved gap.
+- `Player.segments` and `segmentEls` are filled in by the segment's real
+  sentence index (`msg.index` from the WS frame), not by arrival order —
+  `this.segments[msg.index] = ...` instead of `push()`. `pendingSpans[i]`
+  (built up front from the rendered markdown, independent of audio) is the
+  source of truth for which DOM span a given index belongs to.
+- Arrivals are still strictly increasing in index (the server sends sentence
+  0, then 1, then 2, etc., just silently skipping ones with no audio) —
+  never genuinely out of order. That meant the full "local timeline
+  splicing for out-of-order arrival" design once sketched here wasn't
+  needed. `startTime`/`endTime` are still cumulative, chained off
+  `segments[segments.length - 1]`, which remains safe because the highest
+  assigned array index is always the most recent *real* arrival — gaps only
+  ever leave holes at lower indices, never at the tail.
+- A hole at a lower index is a real possibility for the lifetime of one
+  synthesis session (between the gap being skipped and `done` arriving) —
+  `highlightCurrent`'s scan, `_doSeek`'s enqueue loop, `downloadWav`, and
+  `listenTo`'s bounds check all guard against an unset entry now.
+- **On `done`**, `fillRemainingGaps()` backfills every still-missing index
+  up to `pendingSpans.length` (the known total sentence count) with a
+  zero-duration placeholder (`samples: new Float32Array(0)`, `startTime ===
+  endTime`). After this, `segments` is dense again — no consumer needs
+  gap-awareness of its own beyond the guards above. `_doSeek` skips
+  zero-length samples, so seeking onto a gap just continues to whatever
+  real audio follows it.
+- **`seekTo`'s "park and wait" no longer hangs forever.** It used to only
+  resolve via an exact-arrival match; if the awaited index turned out to be
+  a permanent gap, nothing would ever satisfy it. Now `onDone` checks
+  `pendingSeekIndex` after backfilling gaps and resolves it unconditionally
+  — either to real audio that arrived after the gap, or (if the index
+  itself was the gap) to its zero-duration placeholder, which `_doSeek`
+  skips past to whatever's next. Either way the seek completes instead of
+  leaving the UI in "waiting" indefinitely.
+- `onReadyCb` (fires once "enough to start" has arrived) switched from "the
+  first segment received happens to be index 0" to "the first segment
+  received, whatever its index" — the former silently never fired at all
+  if sentence 0 itself was a gap.
 
-## DOM segment activation already generalizes
+## DOM segment activation needed no changes
 
-`renderSegment`'s per-sentence "pending → ready" activation is already
-keyed off "this sentence's own audio arrived," not off play-order or
-contiguity. A sentence past a gap becomes clickable/highlighted the
-instant its own audio shows up, identical to today's behavior — this part
-needs no change beyond making sure the index passed in is the sentence's
-real position, not an arrival-order counter.
+`renderSegment`'s per-sentence "pending → ready" activation was already
+keyed off "this sentence's own audio arrived," not arrival order or
+contiguity — once the *caller* started passing the real index instead of
+an arrival counter, this part worked correctly unmodified.
 
-## Other implications
+## Known follow-ups (not implemented)
 
-- **`done` changes meaning.** Today `done: true` means "the WS stream
-  ended, nothing more is coming." With long-lived gaps, `done` for *this
-  session* doesn't mean a gap won't resolve later via a separate backfill
-  (e.g. someone re-running `dl import --segment <n>`). Need a way to
-  distinguish "this stream is finished" from "this document is fully
-  resolved" — likely a separate signal/event for "a previously-missing
-  segment just became available," independent of the original stream's
-  `done`.
-- **Existing latent bug, more likely to bite here:** `seekTo`'s
-  "park and wait" path has no timeout and is never cleared on `done`. For
-  live synthesis this is harmless (gaps are always seconds, not minutes).
-  With import-driven gaps potentially lasting minutes or longer, a user
-  who seeks/listens into a still-pending sentence and walks away could be
-  stuck in "waiting" indefinitely. Should clear `pendingSeekIndex` (and
-  surface something to the UI) when a session-level `done`/no-further-
-  arrivals signal fires while a seek is still parked on a sentence
-  confirmed not coming in this pass.
-- **Backend gap (see `dev/tts-backends/vibe-import.md`'s "Known gap, deliberately
-  deferred"):** none of this matters until playback can find imported
-  audio at all. There's no `Voice::Imported` variant in `tts/src/backend.rs`
-  yet — this is a new `Voice`/backend, not just a cache-key fix, and that
-  backend has no real synthesis fallback for a true cache miss (vibe
-  synthesis isn't real-time). This doc assumes that gap is closed
-  separately; the out-of-order arrival problem exists either way once it
-  is.
-
-## Open items
-
-- Exact mechanism for "a previously-missing segment just became
-  available" — a new WS message type? A poll? Depends on how/where the
-  backfill (`dl import --segment <n>`) actually runs relative to a live
-  Odoru server process.
-- How `duration`/scrubber UI should represent an unresolved gap's unknown
-  contribution to total length — flat estimate per sentence? Hide the
-  scrubber past the first gap? Not designed yet.
-- Whether `_doSeek`'s "local timeline" treatment should also apply to
-  *backward* seeks into an already-played run before a gap, or only
-  forward past one — likely symmetric, not yet thought through.
+- **No separate "permanently missing" visual state — and that's correct,
+  not a gap to fill in.** A gap today just means "the manual
+  `dl import --segment <n>` step hasn't been run yet," and that step is
+  expected to become automatic eventually — there's no actual permanence to
+  represent. Leaving the span in its ordinary gray `pending` look (nothing
+  ever removes that class for a backfilled gap) already says the accurate
+  thing: not available *yet*. Revisit only if a real "this will never have
+  audio" case shows up later.
+- **Backfilling a gap *after* a session has already gone through `done`.**
+  This implementation resolves everything at `done` time, within one
+  synthesis/replay session. It does not handle "someone ran
+  `dl import --segment <n>` to fix a gap while a client already has the
+  document open, with `done` already fired minutes or hours ago." That
+  would need a live update path (new WS message, or a poll) distinct from
+  the normal segment stream — not designed, since it wasn't needed for the
+  case actually being fixed (a fresh load of an already-imported document
+  with permanent gaps, not a live backfill against an open session).
+- **`duration`/scrubber accuracy is no longer a concern this doc needs to
+  track** — since gaps resolve within the same session (zero-duration
+  placeholders, not unknowns), `get duration()` is exact by the time `done`
+  fires. The "show an estimate for an unresolved gap" problem from the
+  earlier draft of this doc doesn't apply under the model that shipped.

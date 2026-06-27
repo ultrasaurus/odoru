@@ -275,21 +275,6 @@ struct SynthErrorMsg<'a> {
     error: String,
 }
 
-/// Sent in place of a segment when an imported voice has no cache entry for
-/// a sentence (e.g. a `dl import vibe` segment that failed QA and was
-/// skipped). Carries the real sentence index so the client can place the
-/// gap correctly rather than just dropping it silently. The player doesn't
-/// yet do anything special with this beyond skipping the sentence — see
-/// `dev/tts-backends/vibe-playback.md` for the fuller index-addressable
-/// design this is a placeholder for.
-#[derive(Serialize)]
-struct SegmentGapMsg<'a> {
-    #[serde(rename = "type")]
-    msg_type: &'static str,
-    stream_id: &'a str,
-    index: usize,
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1734,11 +1719,12 @@ async fn handle_synth_replay(
                 rendered.push(cached_seg);
             }
             None => {
+                // No explicit "gap" frame needed — the client infers a gap
+                // from the sentence index simply never arriving by the time
+                // `done` fires (it already tracks the expected total from
+                // the rendered markdown). See `dev/tts-backends/vibe-playback.md`.
                 any_gap = true;
                 warn!("[imported voice replay] no cache entry for sentence {index} of {voice_id}");
-                try_send!(json_frame!(SegmentGapMsg {
-                    msg_type: "gap", stream_id: &stream_id, index,
-                }));
             }
         }
     }
