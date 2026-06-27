@@ -1022,32 +1022,40 @@ export function mount(onReader: () => void): () => void {
 
   // ── Voice picker ───────────────────────────────────────────────────────────
 
+  // Imported voices (e.g. "andy:<doc-id>", written by `dl import vibe`) are
+  // per-document, not part of any backend's global voice list — the server
+  // has no `VoiceInfo` for them (no name/description). Derive a display
+  // name from the id itself: the part before the first ':' is the
+  // human-given name from the vibe sidecar (see cli/src/import.rs's
+  // `doc_voice_id`). Falls back to the registered VoiceInfo's name when
+  // the id *is* in the global list (the common F5/Kokoro case).
+  function voiceDisplayName(id: string): string {
+    const known = voices.find(v => v.id === id)
+    if (known) return known.name
+    return id.split(':', 1)[0] || id
+  }
+
   function renderVoices() {
-    if (voices.length === 0) {
+    const docVoices = fetchedDocument?.current?.voices ?? {}
+    const importedVoiceIds = Object.keys(docVoices).filter(id => !voices.some(v => v.id === id))
+
+    if (voices.length === 0 && importedVoiceIds.length === 0) {
       voiceList.innerHTML = '<div class="voice-loading">No voices available.</div>'
       return
     }
     voiceList.innerHTML = ''
-    const docVoices = fetchedDocument?.current?.voices ?? {}
-    let lastBackend = ''
-    for (const v of voices) {
-      if (v.backend !== lastBackend) {
-        const hdr = document.createElement('div')
-        hdr.className = 'voice-group-header'
-        hdr.textContent = v.backend.toUpperCase()
-        voiceList.appendChild(hdr)
-        lastBackend = v.backend
-      }
+
+    function appendVoiceRow(id: string, name: string) {
       const row = document.createElement('button')
-      row.className = 'voice-row' + (v.id === selectedVoice ? ' selected' : '')
-      row.addEventListener('click', () => selectVoice(v.id, true))
+      row.className = 'voice-row' + (id === selectedVoice ? ' selected' : '')
+      row.addEventListener('click', () => selectVoice(id, true))
 
       const nameEl = document.createElement('span')
       nameEl.className = 'voice-row-name'
-      nameEl.textContent = v.name
+      nameEl.textContent = name
       row.appendChild(nameEl)
 
-      const status = docVoices[v.id]?.status
+      const status = docVoices[id]?.status
       if (status) {
         const statusEl = document.createElement('span')
         statusEl.className = `voice-row-status ${status}`
@@ -1062,14 +1070,36 @@ export function mount(onReader: () => void): () => void {
 
       voiceList.appendChild(row)
     }
+
+    let lastBackend = ''
+    for (const v of voices) {
+      if (v.backend !== lastBackend) {
+        const hdr = document.createElement('div')
+        hdr.className = 'voice-group-header'
+        hdr.textContent = v.backend.toUpperCase()
+        voiceList.appendChild(hdr)
+        lastBackend = v.backend
+      }
+      appendVoiceRow(v.id, v.name)
+    }
+
+    for (const id of importedVoiceIds) {
+      const name = voiceDisplayName(id)
+      const hdr = document.createElement('div')
+      hdr.className = 'voice-group-header'
+      hdr.textContent = name.toUpperCase()
+      voiceList.appendChild(hdr)
+      appendVoiceRow(id, name)
+    }
   }
 
   function selectVoice(id: string, restartPlayer = false) {
     selectedVoice = id
     const v = voices.find(v => v.id === id)
     voiceDescription.textContent = v?.description ?? ''
-    voiceLabel.textContent = v ? `Voice: ${v.name}` : ''
-    headerVoiceLabel.textContent = v ? `Voice: ${v.name}` : ''
+    const label = `Voice: ${voiceDisplayName(id)}`
+    voiceLabel.textContent = label
+    headerVoiceLabel.textContent = label
     renderVoices()
 
     if (restartPlayer && fetchedDocument?.current?.plain_text && currentDocId) {
