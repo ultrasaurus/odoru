@@ -73,20 +73,70 @@ fn sha256_hex(text: &str) -> String {
     format!("{:x}", h.finalize())
 }
 
-/// Build the sentence list for one segment from its constituent
-/// paragraph-unit strings (as returned by `segmenter::segment_with_paragraphs`
-/// for a single segment).
+/// Assign sentences split from the *original, unmodified* document text to
+/// each segment, instead of re-splitting each segment's own paragraph-unit
+/// strings.
 ///
-/// Runs `splitter::split` per paragraph-unit, not on the whole segment —
-/// `splitter::split`'s paragraph detection needs a blank line, which doesn't
-/// survive joining paragraph-units with a single `\n`. Splitting each unit
-/// individually makes `splitter::split` correctly treat it as one paragraph,
-/// marking only its own last sentence `paragraph_end: true`.
-fn sentences_for_segment(paragraphs: &[String]) -> Vec<SidecarSentence> {
-    paragraphs
+/// `merge_fragments` (see `util::segmenter`) glues a heading like "Abstract"
+/// onto the following paragraph with a single space, so segments can be
+/// chunked without orphan heading-only segments. But that merged string is
+/// also what segment-local splitting used to run `splitter::split` on — and
+/// once a heading loses its blank-line boundary, the splitter has nothing to
+/// stop on after it, collapsing the heading into the next sentence. That
+/// shifts every later sentence's index by one relative to what
+/// `tts::splitter::split` computes from the real document text at replay
+/// time (see `dev/tts-backends/vibe-playback.md`), which uses a per-sentence
+/// index to key its audio cache lookups — any drift here means cached audio
+/// silently stops being found partway through a document.
+///
+/// Splitting `source_text` directly (once, before chunking into segments)
+/// can't have this problem, since it's the same input replay uses. The only
+/// remaining work is figuring out which of those sentences belong to which
+/// segment: a segment's full text (all its paragraph-units joined) is,
+/// modulo whitespace, exactly the concatenation of some contiguous run of
+/// canonical sentences — so each segment claims canonical sentences off a
+/// shared cursor until the running join's length catches up with its own
+/// text's length. Comparing on normalized whitespace (not exact bytes)
+/// is what makes this robust to `merge_fragments` joining with a single
+/// space where the source had a newline/blank line.
+fn normalize_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn assign_canonical_sentences(
+    canonical: &[util::splitter::Sentence],
+    segments: &[Vec<String>],
+) -> Vec<Vec<SidecarSentence>> {
+    let mut cursor = 0usize;
+    segments
         .iter()
-        .flat_map(|p| util::splitter::split(p))
-        .map(|s| SidecarSentence { text: s.text, paragraph_end: s.paragraph_end })
+        .map(|paragraphs| {
+            if canonical.is_empty() || cursor >= canonical.len() {
+                return Vec::new();
+            }
+            let target = normalize_ws(&paragraphs.join(" "));
+            let mut end = cursor;
+            let mut joined = normalize_ws(&canonical[end].text);
+            while joined.len() < target.len() && end + 1 < canonical.len() {
+                end += 1;
+                joined.push(' ');
+                joined.push_str(&normalize_ws(&canonical[end].text));
+            }
+            if joined != target {
+                warn!(
+                    "segment text didn't match canonical sentences {cursor}..={end} exactly — \
+                     sentence indices for this and later segments may be misaligned with the \
+                     original document. segment={target:?} canonical={joined:?}"
+                );
+            }
+
+            let slice = &canonical[cursor..=end];
+            cursor = end + 1;
+            slice
+                .iter()
+                .map(|s| SidecarSentence { text: s.text.clone(), paragraph_end: s.paragraph_end })
+                .collect()
+        })
         .collect()
 }
 
@@ -94,6 +144,8 @@ fn sentences_for_segment(paragraphs: &[String]) -> Vec<SidecarSentence> {
 /// per-segment paragraph groups (`segmenter::segment_with_paragraphs`'s
 /// output). `name` is the document stem (e.g. "authorship").
 fn build_sidecar(name: &str, source_text: &str, segments: &[Vec<String>]) -> Sidecar {
+    let canonical = util::splitter::split(source_text);
+    let mut sentences_by_segment = assign_canonical_sentences(&canonical, segments);
     Sidecar {
         schema_version: SCHEMA_VERSION.to_string(),
         source_document: format!("{name}.txt"),
@@ -102,11 +154,11 @@ fn build_sidecar(name: &str, source_text: &str, segments: &[Vec<String>]) -> Sid
         segments: segments
             .iter()
             .enumerate()
-            .map(|(i, paragraphs)| {
+            .map(|(i, _)| {
                 let seg_name = format!("{name}_seg{:02}", i + 1);
                 SidecarSegment {
                     index: (i + 1) as u32,
-                    sentences: sentences_for_segment(paragraphs),
+                    sentences: std::mem::take(&mut sentences_by_segment[i]),
                     files: SidecarFiles {
                         original: Some(format!("{seg_name}.txt")),
                         ..Default::default()
@@ -320,16 +372,17 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>, voice_id: Option<&
         .as_ref()
         .and_then(|s| s.voice_id.clone())
         .or_else(|| voice_id.map(str::to_string));
-    let source_sha256 = match existing.as_ref().map(|s| s.source_sha256.clone()) {
-        Some(sha) => sha,
-        None => {
-            let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
-            let input_path = format!("{src_dir}/{name}.txt");
-            let text = std::fs::read_to_string(&input_path)
-                .with_context(|| format!("reading {input_path} to compute source_sha256"))?;
-            sha256_hex(&text)
-        }
-    };
+
+    // Needed for canonical sentence splitting below regardless of whether
+    // source_sha256 can be reused from an existing sidecar.
+    let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
+    let input_path = format!("{src_dir}/{name}.txt");
+    let source_text = std::fs::read_to_string(&input_path)
+        .with_context(|| format!("reading {input_path}"))?;
+    let source_sha256 = existing
+        .as_ref()
+        .map(|s| s.source_sha256.clone())
+        .unwrap_or_else(|| sha256_hex(&source_text));
 
     let prefix = format!("{name}_seg");
     let mut indices: Vec<u32> = std::fs::read_dir(&seg_dir)
@@ -349,7 +402,7 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>, voice_id: Option<&
         anyhow::bail!("no {prefix}NN.txt files found in {seg_dir}");
     }
 
-    let segments: Vec<SidecarSegment> = indices
+    let indexed: Vec<(u32, Vec<String>, SidecarFiles)> = indices
         .into_iter()
         .map(|index| {
             let seg_name = format!("{name}_seg{index:02}");
@@ -375,9 +428,23 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>, voice_id: Option<&
                     report: probe("_report.json"),
                 }
             });
-            Ok(SidecarSegment { index, sentences: sentences_for_segment(&paragraphs), files })
+            Ok((index, paragraphs, files))
         })
         .collect::<Result<_>>()?;
+
+    let canonical = util::splitter::split(&source_text);
+    let all_paragraphs: Vec<Vec<String>> = indexed.iter().map(|(_, p, _)| p.clone()).collect();
+    let mut sentences_by_segment = assign_canonical_sentences(&canonical, &all_paragraphs);
+
+    let segments: Vec<SidecarSegment> = indexed
+        .into_iter()
+        .enumerate()
+        .map(|(i, (index, _, files))| SidecarSegment {
+            index,
+            sentences: std::mem::take(&mut sentences_by_segment[i]),
+            files,
+        })
+        .collect();
 
     let sidecar = Sidecar {
         schema_version: SCHEMA_VERSION.to_string(),
@@ -480,19 +547,52 @@ mod tests {
     }
 
     #[test]
-    fn sentences_for_segment_marks_paragraph_end_per_unit() {
-        let paragraphs = vec![
-            "First sentence. Second sentence.".to_string(),
-            "Third sentence.".to_string(),
+    fn assign_canonical_sentences_splits_across_segments() {
+        let canonical = util::splitter::split(
+            "First sentence. Second sentence.\n\nThird sentence."
+        );
+        let segments = vec![
+            vec!["First sentence. Second sentence.".to_string()],
+            vec!["Third sentence.".to_string()],
         ];
-        let sentences = sentences_for_segment(&paragraphs);
-        let flags: Vec<bool> = sentences.iter().map(|s| s.paragraph_end).collect();
-        // Each paragraph-unit's own last sentence is paragraph_end, not just
-        // the segment's overall last sentence.
-        assert_eq!(flags, vec![false, true, true]);
-        assert_eq!(sentences[0].text, "First sentence.");
-        assert_eq!(sentences[1].text, "Second sentence.");
-        assert_eq!(sentences[2].text, "Third sentence.");
+        let by_segment = assign_canonical_sentences(&canonical, &segments);
+        let texts: Vec<Vec<&str>> = by_segment
+            .iter()
+            .map(|sents| sents.iter().map(|s| s.text.as_str()).collect())
+            .collect();
+        assert_eq!(texts, vec![vec!["First sentence.", "Second sentence."], vec!["Third sentence."]]);
+        // Paragraph-end flags come from the canonical (original-document)
+        // split, so they reflect real paragraph boundaries, not segment
+        // boundaries.
+        assert_eq!(by_segment[0][0].paragraph_end, false);
+        assert_eq!(by_segment[0][1].paragraph_end, true);
+        assert_eq!(by_segment[1][0].paragraph_end, true);
+    }
+
+    /// Regression test for the bug this function exists to fix: a heading
+    /// merged into the following paragraph by `merge_fragments` must still
+    /// end up as its own sentence in the sidecar, matching what
+    /// `tts::splitter::split` computes from the original document text at
+    /// replay time — not collapsed into the next sentence just because
+    /// `merge_fragments` joined them with a space for chunking purposes.
+    #[test]
+    fn build_sidecar_keeps_heading_as_its_own_sentence() {
+        let source = "Heading\n\nFirst real sentence. Second real sentence.";
+        let segments = util::segmenter::segment_with_paragraphs(source);
+        // Confirm the premise: the heading does get merged for chunking.
+        assert_eq!(segments[0].len(), 1);
+        assert!(segments[0][0].starts_with("Heading First real sentence."));
+
+        let sidecar = build_sidecar("doc", source, &segments);
+        let all_texts: Vec<&str> =
+            sidecar.segments.iter().flat_map(|s| &s.sentences).map(|s| s.text.as_str()).collect();
+        assert_eq!(all_texts, vec!["Heading", "First real sentence.", "Second real sentence."]);
+
+        // And this must match what replay's splitter computes directly from
+        // the same source text, sentence-for-sentence.
+        let canonical = util::splitter::split(source);
+        let canonical_texts: Vec<&str> = canonical.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(all_texts, canonical_texts);
     }
 
     #[test]
