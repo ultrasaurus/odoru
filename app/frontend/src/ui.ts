@@ -90,6 +90,10 @@ export function wireControls(
 
   player.onSynthDone(() => {
     downloadBtn.disabled = false
+    // duration is exact as soon as synthesis/replay finishes (gaps already
+    // backfilled), but timeTotal otherwise only updates from the playback
+    // tick loop, which doesn't run until the user presses play.
+    timeTotal.textContent = fmt(player.duration)
   })
 
   player.onTimeUpdate(t => {

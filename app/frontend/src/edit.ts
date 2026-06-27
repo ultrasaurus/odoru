@@ -1417,8 +1417,8 @@ export function mount(onReader: () => void): () => void {
 
       currentDocId = data.id
       showDocId(currentDocId)
-      const publishedVoice = Object.entries(data.voices).find(([, v]) => v.published)?.[0]
-      if (publishedVoice) selectVoice(publishedVoice)
+      const voice = pickVoice(data.voices)
+      if (voice) selectVoice(voice)
       else renderVoices()
       textInput.value = data.content
       docTitleInput.value = data.title ?? ''
@@ -1433,7 +1433,6 @@ export function mount(onReader: () => void): () => void {
       editOutlineSection.style.display = headings.length ? '' : 'none'
       applyAnnotations(articleContent, currentDocId!)
 
-      const voice = pickVoice(data.voices)
       const voiceEntry = voice ? data.voices[voice] : undefined
       const audioReady = !!voiceEntry && voiceEntry.status !== 'error'
       if (!audioReady) {
