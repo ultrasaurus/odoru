@@ -106,6 +106,10 @@ enum Command {
         /// vibe/data). Use the same --basedir you used for `segment`.
         #[arg(long)]
         basedir: Option<String>,
+        /// Voice ID to record if there's no existing sidecar to read one
+        /// from. Ignored if a sidecar with a voice_id already exists.
+        #[arg(long)]
+        voice_id: Option<String>,
     },
     /// Upload a reference voice wav to a running pod's vibe-service,
     /// without baking it into the (public) Docker image. Persists only
@@ -388,8 +392,8 @@ async fn main() -> Result<()> {
         Command::Summary { name, basedir } => {
             segment::summary(&name, basedir.as_deref())?;
         }
-        Command::SegmentsFromFiles { name, basedir } => {
-            segment::segments_from_files(&name, basedir.as_deref())?;
+        Command::SegmentsFromFiles { name, basedir, voice_id } => {
+            segment::segments_from_files(&name, basedir.as_deref(), voice_id.as_deref())?;
         }
         Command::Synthesize {
             input,

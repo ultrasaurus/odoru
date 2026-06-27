@@ -230,6 +230,7 @@ pub fn record_synthesis(basedir: &str, name: &str, voice_id: &str) {
 /// Lets you resume a run without re-reading every log line.
 pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
     let seg_dir = resolve_basedir(basedir);
+    println!("\nlooking for segments in {seg_dir}\n");
     let sidecar_path = format!("{seg_dir}/{name}.segments.json");
     let sidecar_json = std::fs::read_to_string(&sidecar_path)
         .with_context(|| format!("reading {sidecar_path}"))?;
@@ -281,7 +282,15 @@ pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
 /// output; segments you changed will look "done" with a stale audio/report
 /// pairing until you re-run `synthesize` for them (use `summary` to see
 /// what's missing first, but staleness from edits isn't tracked).
-pub fn segments_from_files(name: &str, basedir: Option<&str>) -> Result<()> {
+///
+/// If there's no existing sidecar (e.g. it was deleted), each segment's
+/// files are instead recovered by checking disk for the standard
+/// `synthesize`/`record_synthesis` output names
+/// (`{seg_name}_normalized.txt`, `_generated.wav`, `_transcript.json`,
+/// `_report.json`), `source_sha256` is computed from `odoru/data/<name>.txt`
+/// (same source location and hash `segment`'s `run` uses), and `voice_id`
+/// falls back to the `voice_id` argument.
+pub fn segments_from_files(name: &str, basedir: Option<&str>, voice_id: Option<&str>) -> Result<()> {
     let seg_dir = resolve_basedir(basedir);
 
     let existing: Option<Sidecar> = std::fs::read_to_string(format!("{seg_dir}/{name}.segments.json"))
@@ -307,8 +316,20 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>) -> Result<()> {
                 .collect()
         })
         .unwrap_or_default();
-    let voice_id = existing.as_ref().and_then(|s| s.voice_id.clone());
-    let source_sha256 = existing.as_ref().map(|s| s.source_sha256.clone()).unwrap_or_default();
+    let voice_id = existing
+        .as_ref()
+        .and_then(|s| s.voice_id.clone())
+        .or_else(|| voice_id.map(str::to_string));
+    let source_sha256 = match existing.as_ref().map(|s| s.source_sha256.clone()) {
+        Some(sha) => sha,
+        None => {
+            let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
+            let input_path = format!("{src_dir}/{name}.txt");
+            let text = std::fs::read_to_string(&input_path)
+                .with_context(|| format!("reading {input_path} to compute source_sha256"))?;
+            sha256_hex(&text)
+        }
+    };
 
     let prefix = format!("{name}_seg");
     let mut indices: Vec<u32> = std::fs::read_dir(&seg_dir)
@@ -341,9 +362,18 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>) -> Result<()> {
                 .map(|s| s.to_string())
                 .filter(|s| !s.trim().is_empty())
                 .collect();
-            let files = existing_files.get(&index).cloned().unwrap_or_else(|| SidecarFiles {
-                original: Some(format!("{seg_name}.txt")),
-                ..Default::default()
+            let files = existing_files.get(&index).cloned().unwrap_or_else(|| {
+                let probe = |suffix: &str| {
+                    let path = format!("{seg_dir}/{seg_name}{suffix}");
+                    std::path::Path::new(&path).is_file().then(|| format!("{seg_name}{suffix}"))
+                };
+                SidecarFiles {
+                    original: Some(format!("{seg_name}.txt")),
+                    normalized: probe("_normalized.txt"),
+                    audio: probe("_generated.wav"),
+                    transcript: probe("_transcript.json"),
+                    report: probe("_report.json"),
+                }
             });
             Ok(SidecarSegment { index, sentences: sentences_for_segment(&paragraphs), files })
         })
