@@ -433,12 +433,16 @@ Top priority:
   *after* via the live WS path bypassed it; fixed by having `AudioQueue`
   remember the active stop time and apply it to every node as it's
   created, not just the ones enqueued so far.
+- [ ] copy annotations to new document
+  - [x] New "Copy Annotations" button next to Edit/New, opens the new doc immediately on click
+    - [x] Group annotations by color (insertion order within each group, not document position)
+    - [x] Generate markdown: one ## <Color> heading per non-empty group, annotation text as bullets
+    - [x] POST to the existing /documents create endpoint (reused as-is, including its content-hash dedup)
 - [ ] **Margin listen button** — alongside the existing right-click delete;
   Stage 2 shipped click-to-listen on the annotation mark itself instead.
 
 Not yet prioritized:
 
-- copy / paste annotations in new document
 - **Last-used color** — remember the last picked annotation color and
   pre-select it in the popover; Enter confirms without clicking. Hook point
   is `initAnnotationPicker` in `annotations.ts`.

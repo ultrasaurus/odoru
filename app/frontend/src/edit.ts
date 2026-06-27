@@ -8,7 +8,7 @@ import {
   wireControls, controlsHtml, grabControlEls,
 } from './ui'
 import { pollJob } from './jobs'
-import { applyAnnotations, initAnnotationPicker, listenAnnotation } from './annotations'
+import { applyAnnotations, initAnnotationPicker, listenAnnotation, copyAnnotationsToNewDoc } from './annotations'
 
 export function mount(onReader: () => void): () => void {
   const app = document.getElementById('app')!
@@ -61,6 +61,7 @@ export function mount(onReader: () => void): () => void {
               <button id="tab-text" class="input-tab">Text</button>
               <div class="input-tabs-spacer"></div>
               <button id="edit-toggle-btn" class="edit-toggle-btn" style="display:none">Edit</button>
+              <button id="copy-annotations-btn" class="edit-toggle-btn" style="display:none">Copy Annotations</button>
               <button id="reset-btn" class="reset-btn" style="display:none">New</button>
             </div>
 
@@ -667,6 +668,7 @@ export function mount(onReader: () => void): () => void {
   const synthBtn       = document.getElementById('synth-btn')        as HTMLButtonElement
   const newBtn         = document.getElementById('reset-btn')        as HTMLButtonElement
   const editToggleBtn  = document.getElementById('edit-toggle-btn')  as HTMLButtonElement
+  const copyAnnotationsBtn = document.getElementById('copy-annotations-btn') as HTMLButtonElement
   const articleContent = document.getElementById('article-content')!
   const articleArea    = document.getElementById('article-area')!
   const editArea       = document.getElementById('edit-area')!
@@ -815,6 +817,22 @@ export function mount(onReader: () => void): () => void {
 
   editToggleBtn.addEventListener('click', () => setEditMode(!isEditMode))
 
+  copyAnnotationsBtn.addEventListener('click', async () => {
+    if (!currentDocId) return
+    copyAnnotationsBtn.disabled = true
+    try {
+      const newId = await copyAnnotationsToNewDoc(currentDocId, docTitleInput.value.trim() || undefined)
+      if (!newId) {
+        showErrorBar('No annotations to copy.')
+        return
+      }
+      await loadAndListen({ id: newId, status: 'ready', authors: [], publish: false, voices: {} })
+      pollQueue()
+    } finally {
+      copyAnnotationsBtn.disabled = false
+    }
+  })
+
   // ── Auto-save ──────────────────────────────────────────────────────────────
 
   async function stripMarkdown(raw: string): Promise<string> {
@@ -948,6 +966,7 @@ export function mount(onReader: () => void): () => void {
         synthBtn.style.display = ''
         newBtn.style.display = 'none'
         editToggleBtn.style.display = 'none'
+        copyAnnotationsBtn.style.display = 'none'
       }
     } else {
       // Switching back to URL tab — restore article view
@@ -1195,6 +1214,7 @@ export function mount(onReader: () => void): () => void {
     synthBtn.style.display = 'none'
     newBtn.style.display = ''
     editToggleBtn.style.display = ''
+    copyAnnotationsBtn.style.display = ''
     synthBtn.disabled = false
   }
 
@@ -1273,6 +1293,7 @@ export function mount(onReader: () => void): () => void {
     playerControls.style.display = 'none'
     newBtn.style.display = 'none'
     editToggleBtn.style.display = 'none'
+    copyAnnotationsBtn.style.display = 'none'
     editOutlineSection.style.display = 'none'
     editArea.style.display = 'none'
     articleArea.style.display = ''
@@ -1335,6 +1356,7 @@ export function mount(onReader: () => void): () => void {
     playerControls.style.display = 'none'
     newBtn.style.display = 'none'
     editToggleBtn.style.display = 'none'
+    copyAnnotationsBtn.style.display = 'none'
     editOutlineSection.style.display = 'none'
     articleContent.innerHTML = '<div class="loading">Loading…</div>'
 

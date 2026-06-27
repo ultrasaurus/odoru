@@ -17,6 +17,9 @@ export const ANNOTATION_COLORS: Record<AnnotationColor, string> = {
 }
 
 const COLOR_ORDER: AnnotationColor[] = ['yellow', 'coral', 'mint', 'blue', 'lavender']
+const COLOR_LABELS: Record<AnnotationColor, string> = {
+  yellow: 'Yellow', coral: 'Coral', mint: 'Mint', blue: 'Blue', lavender: 'Lavender',
+}
 
 function generateId(): string {
   const hex = crypto.randomUUID().replace(/-/g, '')
@@ -195,6 +198,50 @@ export async function applyAnnotations(container: HTMLElement, docId: string): P
   const annotations = await fetchAnnotations(docId)
   for (const ann of annotations) {
     applyAnnotationToDOM(container, ann)
+  }
+}
+
+// Group this document's annotations by color (yellow/coral/mint/blue/
+// lavender, in that fixed order — insertion order within each group, not
+// reading order) and create a new document listing them as a heading per
+// color with the annotation text as bullets underneath. Returns the new
+// document's id, or null if there's nothing to copy or the create request
+// fails.
+export async function copyAnnotationsToNewDoc(docId: string, sourceTitle?: string): Promise<string | null> {
+  const annotations = await fetchAnnotations(docId)
+  if (annotations.length === 0) return null
+
+  const byColor = new Map<AnnotationColor, Annotation[]>()
+  for (const ann of annotations) {
+    const list = byColor.get(ann.color) ?? []
+    list.push(ann)
+    byColor.set(ann.color, list)
+  }
+
+  const sections: string[] = []
+  for (const color of COLOR_ORDER) {
+    const list = byColor.get(color)
+    if (!list || list.length === 0) continue
+    const bullets = list.map(a => `- ${a.text}`).join('\n')
+    sections.push(`## ${COLOR_LABELS[color]}\n\n${bullets}`)
+  }
+  if (sections.length === 0) return null
+
+  const content = sections.join('\n\n')
+  const plainText = content.replace(/^##\s+/gm, '').replace(/^-\s+/gm, '')
+  const title = sourceTitle ? `Annotations: ${sourceTitle}` : 'Annotations'
+
+  try {
+    const res = await fetch('/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, plain_text: plainText, title }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.id ?? null
+  } catch {
+    return null
   }
 }
 
