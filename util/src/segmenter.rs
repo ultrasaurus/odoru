@@ -36,26 +36,23 @@ pub fn segment_with_paragraphs(text: &str) -> Vec<Vec<String>> {
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: parse blank-line-separated paragraphs
+// Step 1: split into per-line paragraph fragments
 // ---------------------------------------------------------------------------
 
+/// Each non-blank line becomes its own fragment; blank lines are just
+/// separators (allowed but not required). Hard-wrapped paragraphs that span
+/// multiple physical lines with no blank line between them come out as
+/// multiple fragments here — `merge_fragments` (step 2) glues those back
+/// together by checking for sentence-ending punctuation, so this step
+/// doesn't need to guess whether consecutive lines belong to the same
+/// paragraph. This also makes one-paragraph-per-line input (e.g. Odoru's
+/// `plain_text`, which has no blank-line separators) segment correctly.
 fn parse_paragraphs(text: &str) -> Vec<String> {
-    let mut paragraphs = Vec::new();
-    let mut current: Vec<&str> = Vec::new();
-    for line in text.lines() {
-        if line.trim().is_empty() {
-            if !current.is_empty() {
-                paragraphs.push(current.join(" "));
-                current.clear();
-            }
-        } else {
-            current.push(line.trim());
-        }
-    }
-    if !current.is_empty() {
-        paragraphs.push(current.join(" "));
-    }
-    paragraphs
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -153,10 +150,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_multiline_paragraph() {
+    fn parse_one_paragraph_per_line_no_blank_separators() {
+        // Odoru's `plain_text` has one paragraph per line with no blank-line
+        // separators — each line must come out as its own fragment.
+        let text = "First paragraph.\nSecond paragraph.\nThird paragraph.";
+        let p = parse_paragraphs(text);
+        assert_eq!(p, vec!["First paragraph.", "Second paragraph.", "Third paragraph."]);
+    }
+
+    #[test]
+    fn parse_multiline_paragraph_fragments_then_merge() {
+        // Hard-wrapped paragraph (no blank line between physical lines)
+        // comes out as separate fragments from parse_paragraphs...
         let text = "Line one\nline two\nline three.\n\nNext.";
         let p = parse_paragraphs(text);
-        assert_eq!(p[0], "Line one line two line three.");
+        assert_eq!(p, vec!["Line one", "line two", "line three.", "Next."]);
+        // ...and merge_fragments glues the non-sentence-ending ones back
+        // together, same as before.
+        let merged = merge_fragments(p);
+        assert_eq!(merged, vec!["Line one line two line three.", "Next."]);
     }
 
     #[test]
