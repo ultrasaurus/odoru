@@ -477,7 +477,10 @@ export function mount(onReader: () => void): () => void {
         for (const [vid, ve] of voiceEntries) {
           const opt = document.createElement('option')
           opt.value = vid
-          const name = voices.find(v => v.id === vid)?.name ?? vid
+          // Imported voices (e.g. "Andy:<doc-id>") aren't in the global
+          // voice list, so there's no display name for them — fall back to
+          // just the backend prefix rather than showing the raw doc-id.
+          const name = voices.find(v => v.id === vid)?.name ?? vid.split(':')[0]
           const icon = statusIcon[ve.status]
           opt.textContent = icon ? `${name} ${icon}` : name
           opt.selected = !!ve.published

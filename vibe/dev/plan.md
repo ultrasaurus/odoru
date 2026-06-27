@@ -80,8 +80,9 @@ Steps
 11. Validation
    - [X] Full doc run of Hypertext87
      - [ ] listen test
-     - [ ] test CLI import with audio
-   - [ ] implement playback of partial synth => test with unfinished Augment 
+     - [X] test CLI import with audio
+   - [X] implement playback of partial synth
+     - [ ] test with unfinished Augment 
 12. Improve Workflow part 2
    - [ ] CUDA alignment (now the real bottleneck at batch scale —
      see `dev/cloudrun/cloudrun-blackwell.md` N=49 alignment finding)

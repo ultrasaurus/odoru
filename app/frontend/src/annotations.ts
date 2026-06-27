@@ -323,11 +323,13 @@ function findAnnotationWordRange(annText: string, words: WordEntry[]): { start: 
   return { start, end }
 }
 
-async function fetchWords(voice: string, sentence: string): Promise<WordEntry[]> {
+async function fetchWords(voice: string, sentence: string, sentenceIndex: number): Promise<WordEntry[]> {
   const res = await fetch(`/voices/${encodeURIComponent(voice)}/words`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sentence }),
+    // sentence_index is only required for imported voices (e.g. "Andy:<doc-id>")
+    // — live backends (f5/kokoro) key purely on voice + text and ignore it.
+    body: JSON.stringify({ sentence, sentence_index: sentenceIndex }),
   })
   if (!res.ok) {
     throw new Error(`words fetch failed: ${res.status} ${await res.text()}`)
@@ -374,7 +376,7 @@ export async function listenAnnotation(
     let endOffset: number
 
     if (firstSeg === lastSeg) {
-      const words = await fetchWords(voice, firstSeg.textContent ?? '')
+      const words = await fetchWords(voice, firstSeg.textContent ?? '', firstSegIndex)
       if (gen !== listenGen) return  // superseded by a later click
       const range = findAnnotationWordRange(annText, words)
       if (!range) {
@@ -392,8 +394,8 @@ export async function listenAnnotation(
       // segment's words for its own fragment text rather than the full
       // (multi-sentence) `annText`.
       const [firstWords, lastWords] = await Promise.all([
-        fetchWords(voice, firstSeg.textContent ?? ''),
-        fetchWords(voice, lastSeg.textContent ?? ''),
+        fetchWords(voice, firstSeg.textContent ?? '', firstSegIndex),
+        fetchWords(voice, lastSeg.textContent ?? '', lastSegIndex),
       ])
       if (gen !== listenGen) return  // superseded by a later click
 

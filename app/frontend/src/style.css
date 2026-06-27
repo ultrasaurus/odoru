@@ -1675,7 +1675,7 @@ html, body {
   opacity: 0.7;
 }
 :is(.transcript-container, .article-content) .silent::after {
-  content: " 🔇";
+  content: " 🤫";
   font-size: 0.7em;
   opacity: 0.6;
   font-style: normal;

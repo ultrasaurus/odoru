@@ -1,4 +1,5 @@
 mod audio;
+mod import;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -65,6 +66,16 @@ enum ImportCommand {
     /// Fetch a URL into Odoru's document store, printing the resulting
     /// document id (see dev/cli-import.md)
     Fetch(ImportFetchArgs),
+    /// Import vibe-synthesized segment output into Odoru's document/audio
+    /// store (see dev/tts-backends/vibe-import.md)
+    Vibe(ImportVibeArgs),
+}
+
+#[derive(Parser)]
+struct ImportVibeArgs {
+    /// Directory containing the vibe run's <name>.segments.json sidecar
+    /// and per-segment output files
+    basedir: std::path::PathBuf,
 }
 
 #[derive(Parser)]
@@ -434,6 +445,9 @@ fn run_edit(args: EditArgs) -> anyhow::Result<()> {
 async fn run_import(args: ImportArgs) -> anyhow::Result<()> {
     match args.command {
         ImportCommand::Fetch(fetch_args) => run_import_fetch(fetch_args).await,
+        ImportCommand::Vibe(vibe_args) => {
+            tokio::task::spawn_blocking(move || import::run_vibe(&vibe_args.basedir)).await?
+        }
     }
 }
 

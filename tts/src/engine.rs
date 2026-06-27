@@ -270,7 +270,12 @@ fn make_segment(
     AudioSegment { index, audio: mp3_bytes, duration, transcript, paragraph_end: sentence.paragraph_end }
 }
 
-fn advance_offset(
+/// Advance a cumulative timeline offset past one sentence's audio plus the
+/// inter-sentence/paragraph pause that follows it (no pause after the last
+/// sentence). `pub` so a replay-only synthesis path (e.g. for imported,
+/// non-live-synthesizable voices) can reproduce identical transcript timing
+/// without duplicating these silence constants.
+pub fn advance_offset(
     offset: f64,
     duration: f64,
     index: usize,

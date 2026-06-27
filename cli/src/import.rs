@@ -224,10 +224,13 @@ fn import_segment(
     let mut duration_sum = 0.0f64;
     let mut skipped = Vec::new();
 
+    // First pass: find each sentence's raw time range (from its own aligned
+    // words only — no extension yet) and a parallel skip reason where one
+    // couldn't be found, so the second pass can tell "no neighbor" apart
+    // from "skipped neighbor" without recomputing anything.
+    let mut raw_ranges: Vec<Option<(f64, f64)>> = Vec::with_capacity(seg.sentences.len());
+    let mut sent_char_ranges: Vec<Option<(usize, usize)>> = Vec::with_capacity(seg.sentences.len());
     for (i, sentence) in seg.sentences.iter().enumerate() {
-        let sentence_index = *next_sentence_index;
-        *next_sentence_index += 1;
-
         let sent_range = match find_sentence_range(&orig_chars, &sentence.text, search_from) {
             Some(r) => r,
             None => {
@@ -235,21 +238,38 @@ fn import_segment(
                     "segment {} sentence {i}: text not found in segment original",
                     seg.index
                 ));
+                raw_ranges.push(None);
+                sent_char_ranges.push(None);
                 continue;
             }
         };
         search_from = sent_range.1;
+        sent_char_ranges.push(Some(sent_range));
 
-        let (start, end) = match sentence_time_range(&word_ranges, &words, sent_range) {
-            Some(t) => t,
+        match sentence_time_range(&word_ranges, &words, sent_range) {
+            Some(t) => raw_ranges.push(Some(t)),
             None => {
                 skipped.push(format!(
                     "segment {} sentence {i}: no aligned words found",
                     seg.index
                 ));
-                continue;
+                raw_ranges.push(None);
             }
+        }
+    }
+
+    let ranges = split_gaps(&raw_ranges);
+
+    for (i, sentence) in seg.sentences.iter().enumerate() {
+        let sentence_index = *next_sentence_index;
+        *next_sentence_index += 1;
+
+        let Some((start, end)) = ranges[i] else {
+            continue; // already recorded in `skipped` during the first pass
         };
+        // sent_char_ranges[i] is always Some when ranges[i] is — both are
+        // only ever set together in the first pass.
+        let sent_range = sent_char_ranges[i].expect("char range missing for a sentence with a time range");
 
         let start_idx = ((start * sample_rate as f64).round().max(0.0)) as usize;
         let end_idx = ((end * sample_rate as f64).round() as usize).min(samples.len());
@@ -261,9 +281,32 @@ fn import_segment(
             continue;
         }
 
-        let slice = &samples[start_idx..end_idx];
-        let sentence_duration = end - start;
-        let mp3 = tts::audio_cache::encode_mp3(slice, sample_rate);
+        // Cutting a sentence out of the middle of a segment's audio leaves a
+        // hard edge at each boundary — almost always silent in theory, but
+        // forced-alignment boundaries aren't pixel-perfect, so there's often
+        // a few ms of the neighboring word/breath right at the cut, which
+        // reads as an audible pop. Same fix vibe/listen-test/stitch.sh
+        // applies to whole segments via ffmpeg's `afade`, just done here on
+        // the in-memory sentence slice instead of shelling out per sentence.
+        let mut slice = samples[start_idx..end_idx].to_vec();
+        apply_fade(&mut slice, FADE_SECS, sample_rate);
+
+        // The player chains sentence clips with zero gap (gapless
+        // AudioQueue) — any pause between sentences has to be real silent
+        // samples baked into the audio itself, not server-side scheduling
+        // metadata (which only affects transcript timestamps used for
+        // highlighting, never what's actually heard). Only paragraph
+        // breaks get a deliberate pause; ordinary sentence boundaries rely
+        // on whatever natural gap `split_gaps` already preserved.
+        let mut paragraph_pause_secs = 0.0;
+        if sentence.paragraph_end {
+            let pause_samples = (PARAGRAPH_PAUSE_SECS * sample_rate as f64).round() as usize;
+            slice.extend(std::iter::repeat(0.0f32).take(pause_samples));
+            paragraph_pause_secs = PARAGRAPH_PAUSE_SECS;
+        }
+
+        let sentence_duration = (end - start) + paragraph_pause_secs;
+        let mp3 = tts::audio_cache::encode_mp3(&slice, sample_rate);
         let key = tts::audio_cache::cache_key(
             &sentence.text,
             &format!("{doc_voice_id}:{sentence_index}"),
@@ -393,6 +436,84 @@ fn sentence_time_range(
     }
 }
 
+/// Each sentence's raw range stops right at its own first/last aligned
+/// word, discarding whatever natural pause separated it from its neighbor
+/// in the original audio. Split that gap in half between adjacent
+/// sentences rather than handing all of it to neither — mirrors the
+/// pre-roll/safety-margin halving `annotations.ts`'s
+/// `findAnnotationWordRange` already does between neighboring words.
+///
+/// Only extends across an immediate neighbor that itself has a valid
+/// range — a skipped sentence (`None`) in between leaves both its
+/// neighbors' edges untouched, and a negative or zero gap (overlapping
+/// ranges) is left as-is rather than being "fixed" into something smaller.
+fn split_gaps(raw_ranges: &[Option<(f64, f64)>]) -> Vec<Option<(f64, f64)>> {
+    let mut ranges = raw_ranges.to_vec();
+    for i in 0..raw_ranges.len().saturating_sub(1) {
+        if let (Some((_, cur_end)), Some((next_start, _))) = (raw_ranges[i], raw_ranges[i + 1]) {
+            let gap = next_start - cur_end;
+            if gap > 0.0 {
+                let mid = cur_end + gap / 2.0;
+                // Only touch the end of `ranges[i]` and the start of
+                // `ranges[i + 1]` — each sentence's start is set exactly
+                // once (by the iteration where it's the "next" neighbor)
+                // and its end is set exactly once (by the iteration where
+                // it's "cur"), so a left-to-right pass can't clobber an
+                // extension a sentence already received from its other
+                // neighbor.
+                if let Some((s, _)) = ranges[i] {
+                    ranges[i] = Some((s, mid));
+                }
+                if let Some((_, e)) = ranges[i + 1] {
+                    ranges[i + 1] = Some((mid, e));
+                }
+            }
+        }
+    }
+    ranges
+}
+
+// ---------------------------------------------------------------------------
+// Fade in/out
+// ---------------------------------------------------------------------------
+
+/// Matches `vibe/listen-test/stitch.sh`'s default `afade` duration.
+const FADE_SECS: f64 = 0.15;
+
+/// Deliberate pause appended after a sentence that ends a paragraph,
+/// baked into the stored audio (see the gapless-playback note where this
+/// is used) — not the same kind of gap `split_gaps` recovers between
+/// ordinary sentences, which only restores a *natural* pause that was
+/// already in the recording.
+const PARAGRAPH_PAUSE_SECS: f64 = 0.8;
+
+/// Linear fade-in/fade-out at the start/end of `samples`, in place. Cutting
+/// a sentence out of a larger segment leaves a hard edge at each boundary —
+/// alignment timestamps aren't sample-accurate, so there's often a sliver of
+/// a neighboring word or breath sound right at the cut, which reads as an
+/// audible pop without this.
+fn apply_fade(samples: &mut [f32], fade_secs: f64, sample_rate: u32) {
+    let len = samples.len();
+    if len < 2 {
+        return;
+    }
+    // Cap at half the clip so fade-in and fade-out can't overlap on a very
+    // short sentence.
+    let fade_len = ((fade_secs * sample_rate as f64).round() as usize).min(len / 2);
+    if fade_len == 0 {
+        return;
+    }
+
+    for i in 0..fade_len {
+        let gain = i as f32 / fade_len as f32;
+        samples[i] *= gain;
+    }
+    for i in 0..fade_len {
+        let gain = i as f32 / fade_len as f32;
+        samples[len - 1 - i] *= gain;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Wav decoding
 // ---------------------------------------------------------------------------
@@ -434,6 +555,52 @@ fn decode_wav_mono_f32(path: &Path) -> anyhow::Result<(Vec<f32>, u32)> {
 mod tests {
     use super::*;
     use tts::transcript::Word;
+
+    // ── apply_fade ────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_fade_ramps_start_and_end_to_zero() {
+        let mut samples = vec![1.0f32; 100];
+        apply_fade(&mut samples, 0.1, 1000); // fade_len = 100 samples, but capped to 50
+        assert_eq!(samples[0], 0.0);
+        assert_eq!(samples[samples.len() - 1], 0.0);
+    }
+
+    #[test]
+    fn apply_fade_leaves_middle_untouched() {
+        let mut samples = vec![1.0f32; 1000];
+        apply_fade(&mut samples, 0.01, 1000); // fade_len = 10 samples
+        assert_eq!(samples[500], 1.0);
+    }
+
+    #[test]
+    fn apply_fade_is_monotonic_ramp() {
+        let mut samples = vec![1.0f32; 1000];
+        apply_fade(&mut samples, 0.01, 1000); // fade_len = 10 samples
+        for i in 0..9 {
+            assert!(samples[i] < samples[i + 1], "fade-in should be increasing");
+        }
+        let len = samples.len();
+        for i in 0..9 {
+            assert!(samples[len - 1 - i] < samples[len - 2 - i], "fade-out should be increasing toward the middle");
+        }
+    }
+
+    #[test]
+    fn apply_fade_handles_clip_shorter_than_fade_window() {
+        let mut samples = vec![1.0f32; 4];
+        // fade_secs * sample_rate would exceed len/2 — should clamp, not panic.
+        apply_fade(&mut samples, 1.0, 1000);
+        assert_eq!(samples.len(), 4);
+    }
+
+    #[test]
+    fn apply_fade_on_empty_or_tiny_slice_does_not_panic() {
+        let mut empty: Vec<f32> = vec![];
+        apply_fade(&mut empty, 0.1, 1000);
+        let mut one = vec![1.0f32];
+        apply_fade(&mut one, 0.1, 1000);
+    }
 
     fn word(text: &str, start: f64, end: f64) -> Word {
         Word {
@@ -543,6 +710,60 @@ mod tests {
         let w = Word { word: "x".into(), start: None, end: None, score: None, speaker: None };
         let ranges = vec![(0, 1)];
         assert!(sentence_time_range(&ranges, &[w], (0, 1)).is_none());
+    }
+
+    // ── split_gaps ────────────────────────────────────────────────────────
+
+    #[test]
+    fn split_gaps_meets_in_the_middle() {
+        let raw = vec![Some((0.0, 1.0)), Some((1.4, 2.0))];
+        let split = split_gaps(&raw);
+        assert_eq!(split[0], Some((0.0, 1.2)));
+        assert_eq!(split[1], Some((1.2, 2.0)));
+    }
+
+    #[test]
+    fn split_gaps_leaves_touching_ranges_unchanged() {
+        let raw = vec![Some((0.0, 1.0)), Some((1.0, 2.0))];
+        let split = split_gaps(&raw);
+        assert_eq!(split, raw);
+    }
+
+    #[test]
+    fn split_gaps_leaves_overlapping_ranges_unchanged() {
+        // Negative gap (overlap) — not "fixed", left as-is.
+        let raw = vec![Some((0.0, 1.5)), Some((1.0, 2.0))];
+        let split = split_gaps(&raw);
+        assert_eq!(split, raw);
+    }
+
+    #[test]
+    fn split_gaps_skips_extension_across_a_none_neighbor() {
+        let raw = vec![Some((0.0, 1.0)), None, Some((2.0, 3.0))];
+        let split = split_gaps(&raw);
+        assert_eq!(split, raw);
+    }
+
+    #[test]
+    fn split_gaps_handles_all_none() {
+        let raw: Vec<Option<(f64, f64)>> = vec![None, None];
+        assert_eq!(split_gaps(&raw), raw);
+    }
+
+    #[test]
+    fn split_gaps_single_element_unchanged() {
+        let raw = vec![Some((0.0, 1.0))];
+        assert_eq!(split_gaps(&raw), raw);
+    }
+
+    #[test]
+    fn split_gaps_three_in_a_row_each_meet_neighbors_halfway() {
+        let raw = vec![Some((0.0, 1.0)), Some((1.2, 1.8)), Some((2.0, 3.0))];
+        let split = split_gaps(&raw);
+        // gap before middle: (1.0,1.2) -> mid 1.1; gap after middle: (1.8,2.0) -> mid 1.9
+        assert_eq!(split[0], Some((0.0, 1.1)));
+        assert_eq!(split[1], Some((1.1, 1.9)));
+        assert_eq!(split[2], Some((1.9, 3.0)));
     }
 
     // ── find_sidecar ──────────────────────────────────────────────────────

@@ -45,7 +45,7 @@ mod engine;
 mod mock;
 
 pub use error::TtsError;
-pub use engine::{TtsEngine, TtsEngineBuilder, AudioStream, TtsBackend};
+pub use engine::{TtsEngine, TtsEngineBuilder, AudioStream, TtsBackend, advance_offset};
 
 // Backends
 pub mod kokoro;

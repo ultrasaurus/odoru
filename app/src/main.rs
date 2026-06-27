@@ -176,6 +176,18 @@ fn parse_voice_id(id: &str) -> Option<(&str, &str)> {
     id.split_once(':')
 }
 
+/// True for a voice id whose backend isn't one of the live-synthesizable
+/// backends (f5/kokoro) — i.e. one written by `dl import vibe` (or a future
+/// importer), where the audio was rendered offline and only ever needs to
+/// be replayed from `audio_cache`, never synthesized. See
+/// `dev/tts-backends/vibe-import.md`'s "Playback" section.
+fn is_imported_voice(voice_id: &str) -> bool {
+    match parse_voice_id(voice_id) {
+        Some((backend, _)) => backend != "f5" && backend != "kokoro",
+        None => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Protocol types
 // ---------------------------------------------------------------------------
@@ -263,6 +275,21 @@ struct SynthErrorMsg<'a> {
     error: String,
 }
 
+/// Sent in place of a segment when an imported voice has no cache entry for
+/// a sentence (e.g. a `dl import vibe` segment that failed QA and was
+/// skipped). Carries the real sentence index so the client can place the
+/// gap correctly rather than just dropping it silently. The player doesn't
+/// yet do anything special with this beyond skipping the sentence — see
+/// `dev/tts-backends/vibe-playback.md` for the fuller index-addressable
+/// design this is a placeholder for.
+#[derive(Serialize)]
+struct SegmentGapMsg<'a> {
+    #[serde(rename = "type")]
+    msg_type: &'static str,
+    stream_id: &'a str,
+    index: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -299,6 +326,11 @@ async fn get_voices(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 #[derive(Deserialize)]
 struct WordsRequest {
     sentence: String,
+    /// Required for imported voices (see `is_imported_voice`) — the
+    /// document-wide sentence index, needed to reconstruct the same
+    /// per-sentence cache key the importer wrote under. Live backends
+    /// (f5/kokoro) don't need this; their key is voice + text only.
+    sentence_index: Option<usize>,
 }
 
 async fn get_words(
@@ -306,6 +338,21 @@ async fn get_words(
     State(state): State<Arc<AppState>>,
     Json(body): Json<WordsRequest>,
 ) -> impl IntoResponse {
+    if is_imported_voice(&voice_id) {
+        let Some(index) = body.sentence_index else {
+            return (StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "sentence_index is required for this voice" }))).into_response();
+        };
+        let key = tts::audio_cache::cache_key(&body.sentence, &format!("{voice_id}:{index}"));
+        return match tokio::task::spawn_blocking(move || tts::alignment::ensure_words(&key)).await {
+            Ok(Ok(words)) => Json(serde_json::json!({ "words": words })).into_response(),
+            Ok(Err(e)) => (StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("{e}") }))).into_response(),
+        };
+    }
+
     let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
         Ok(pair) => pair,
         Err(e) => return (StatusCode::BAD_REQUEST,
@@ -1454,8 +1501,8 @@ async fn handle_synth(
     }
 
     // ── Resolve voice ─────────────────────────────────────────────────────
-    let voice_id = match req.voice {
-        Some(v) => v,
+    let voice_id = match &req.voice {
+        Some(v) => v.clone(),
         None => match state.default_voice() {
             Some(v) => v.to_string(),
             None => {
@@ -1467,6 +1514,10 @@ async fn handle_synth(
             }
         }
     };
+
+    if is_imported_voice(&voice_id) {
+        return handle_synth_replay(seg_tx, cancelled, state, req, stream_id, voice_id).await;
+    }
 
     let (engine, voice_name) = match state.engine_for_voice(&voice_id) {
         Ok(pair) => pair,
@@ -1576,6 +1627,124 @@ async fn handle_synth(
                 error!("Failed to mark voice ready for {doc_id}/{voice_id}: {e}");
             }
         }
+    }
+
+    try_send!(json_frame!(DoneMsg { msg_type: "done", stream_id: &stream_id }));
+}
+
+/// Replay-only counterpart to `handle_synth` for imported voices (see
+/// `is_imported_voice`). Never calls a `TtsBackend` — there's no live model
+/// for these; the audio was rendered offline by `dl import vibe` and only
+/// ever needs to be looked up. A cache miss is reported as a gap, not
+/// treated as a reason to synthesize.
+async fn handle_synth_replay(
+    seg_tx: mpsc::Sender<Message>,
+    cancelled: Arc<AtomicBool>,
+    state: Arc<AppState>,
+    req: SynthRequest,
+    stream_id: String,
+    voice_id: String,
+) {
+    macro_rules! try_send {
+        ($msg:expr) => {
+            if cancelled.load(Ordering::Relaxed) { return; }
+            if seg_tx.send($msg).await.is_err() { return; }
+        }
+    }
+    macro_rules! json_frame {
+        ($val:expr) => {
+            Message::Text(serde_json::to_string(&$val).unwrap().into())
+        }
+    }
+
+    let key = cache_key(&req.text, &voice_id);
+
+    // ── Cache hit (whole in-memory session cache, same as live synth) ──────
+    if let Some(segments) = state.cache.get(&key) {
+        debug!("Cache hit for key {}", &key[..8]);
+        for seg in segments.iter() {
+            try_send!(json_frame!(SegmentHeaderMsg {
+                msg_type: "segment", stream_id: &stream_id,
+                index: seg.index,
+                transcript: TranscriptJson {
+                    start: seg.transcript_start,
+                    end: seg.transcript_end,
+                    text: &seg.transcript_text,
+                },
+                cached: true,
+                paragraph_end: seg.paragraph_end,
+            }));
+            try_send!(Message::Binary(seg.audio_bytes.clone()));
+        }
+        try_send!(json_frame!(DoneMsg { msg_type: "done", stream_id: &stream_id }));
+        return;
+    }
+
+    // ── Per-sentence disk-cache replay ──────────────────────────────────────
+    let sentences = tts::splitter::split(&req.text);
+    let sentence_count = sentences.len();
+    let mut time_offset = 0.0_f64;
+    // No scheduling gap here, unlike live synthesis (engine.rs's
+    // run_synthesis_loop uses 0.1/0.5) — the player's AudioQueue chains
+    // segments with zero gap regardless of these transcript timestamps, so
+    // a nonzero value here would just make transcript_start/end drift from
+    // the real audio position without changing what's audible. Any actual
+    // pause between sentences is baked into the cached audio itself by the
+    // importer (`dl import vibe`'s gap-splitting and paragraph pause).
+    let sentence_silence_secs = 0.0;
+    let paragraph_silence_secs = 0.0;
+    let mut rendered: Vec<CachedSegment> = Vec::new();
+    let mut any_gap = false;
+
+    for (index, sentence) in sentences.into_iter().enumerate() {
+        if sentence.text.trim().is_empty() {
+            continue;
+        }
+
+        let lookup_key = tts::audio_cache::cache_key(&sentence.text, &format!("{voice_id}:{index}"));
+        let hit = tokio::task::spawn_blocking(move || tts::audio_cache::lookup(&lookup_key))
+            .await.expect("spawn_blocking panicked");
+
+        match hit {
+            Some((mp3_bytes, duration)) => {
+                let cached_seg = CachedSegment {
+                    index,
+                    transcript_start: time_offset,
+                    transcript_end: time_offset + duration,
+                    transcript_text: sentence.text.clone(),
+                    paragraph_end: sentence.paragraph_end,
+                    audio_bytes: mp3_bytes,
+                };
+                try_send!(json_frame!(SegmentHeaderMsg {
+                    msg_type: "segment", stream_id: &stream_id,
+                    index: cached_seg.index,
+                    transcript: TranscriptJson {
+                        start: cached_seg.transcript_start,
+                        end: cached_seg.transcript_end,
+                        text: &cached_seg.transcript_text,
+                    },
+                    cached: false,
+                    paragraph_end: cached_seg.paragraph_end,
+                }));
+                try_send!(Message::Binary(cached_seg.audio_bytes.clone()));
+                time_offset = tts::advance_offset(
+                    time_offset, duration, index, sentence_count,
+                    sentence.paragraph_end, sentence_silence_secs, paragraph_silence_secs,
+                );
+                rendered.push(cached_seg);
+            }
+            None => {
+                any_gap = true;
+                warn!("[imported voice replay] no cache entry for sentence {index} of {voice_id}");
+                try_send!(json_frame!(SegmentGapMsg {
+                    msg_type: "gap", stream_id: &stream_id, index,
+                }));
+            }
+        }
+    }
+
+    if !any_gap {
+        state.cache.insert(key, rendered);
     }
 
     try_send!(json_frame!(DoneMsg { msg_type: "done", stream_id: &stream_id }));

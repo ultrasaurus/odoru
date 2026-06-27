@@ -438,6 +438,7 @@ Top priority:
 
 Not yet prioritized:
 
+- copy / paste annotations in new document
 - **Last-used color** — remember the last picked annotation color and
   pre-select it in the popover; Enter confirms without clicking. Hook point
   is `initAnnotationPicker` in `annotations.ts`.
