@@ -104,10 +104,10 @@ JONES!	Jones exclamation point
 OF4!	O F four exclamation point
 
 # Hypertext '87 keynote
-I'm a Johnny-come-lately	I am A Johnny Come Lately
+I'm a Johnny-come-lately	I'm a Johnny Come Lately
 MCST	M C S T
 Lib	libb
-I reread a lot of it just a few days	I ree red a lot of it just a few days
+I reread a lot of it	I reerredd a lot of it
 3" x 5"	three by five inch
 8 1/2" x 11"	eight and a half by eleven inch
 l/O	I O
@@ -118,6 +118,9 @@ Waterman St.	Waterman Street
 Dept.	Department
 CD ROMs	C D Roms
 U.S.	U S
+"But wait, there's more . . . ".	But wait, there's more!
+bon mot	Bohn Moh
+$3.50	three dollars and fifty cents
 
 # Augment
 OBJECTIVE OF THE STUDY	Objective of the Study
