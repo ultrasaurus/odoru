@@ -732,8 +732,14 @@ fn inline_assets(html_path: &std::path::Path, dist_dir: &std::path::Path) -> any
                         if asset_path.exists() {
                             let js = std::fs::read_to_string(&asset_path)
                                 .with_context(|| format!("failed to read {}", asset_path.display()))?;
-                            let js = resolve_js_imports(&js, &dist_dir.join("assets"))
-                                .with_context(|| format!("failed to resolve imports in {}", asset_path.display()))?;
+                            if js.contains("import{") || js.contains("import {") {
+                                anyhow::bail!(
+                                    "{} still contains an ES import after the build — \
+                                     reader-export.html must be built as a single self-contained \
+                                     bundle (see vite.reader-export.config.ts, codeSplitting: false)",
+                                    asset_path.display()
+                                );
+                            }
                             out.push_str("<script type=\"module\">\n");
                             out.push_str(&js);
                             out.push_str("\n</script>");
@@ -758,110 +764,6 @@ fn inline_assets(html_path: &std::path::Path, dist_dir: &std::path::Path) -> any
     }
 
     Ok(out)
-}
-
-/// Resolve `import{...}from"./FILENAME.js"` statements in a Vite-built ES module
-/// by inlining the referenced chunk files.  Handles named imports only (the
-/// pattern Vite produces for library chunks like `marked`).
-///
-/// Algorithm per import:
-///  1. Parse the import bindings: `{exportedName as localName, ...}`
-///  2. Load the chunk from `assets_dir/FILENAME`
-///  3. Parse the chunk's `export{internalName as exportedName, ...}` tail
-///  4. Rewrite: replace `export{...}` with `var localName = internalName;` lines
-///  5. Replace the import statement in the entry with the rewritten chunk
-fn resolve_js_imports(js: &str, assets_dir: &std::path::Path) -> anyhow::Result<String> {
-    let mut result = js.to_string();
-
-    // Match: import{...}from"./FILENAME" or import{...}from'./FILENAME'
-    // We scan for `import{` and work from there.
-    loop {
-        // Find the next bare `import{` (not inside a string — good enough for
-        // Vite minified output which puts these at the very start of the file).
-        let Some(imp_start) = result.find("import{") else { break };
-
-        // Find the closing `}from"./..."`  or `}from'./...'`
-        let after_brace = imp_start + "import{".len();
-        let Some(brace_end) = result[after_brace..].find('}') else { break };
-        let bindings_str = result[after_brace..after_brace + brace_end].to_string();
-
-        let tail = &result[after_brace + brace_end + 1..]; // after the `}`
-        // Expect `from"./FILE"` or `from'./FILE'`
-        if !tail.starts_with("from\"./") && !tail.starts_with("from'./") {
-            break; // not a local import — stop (avoids infinite loop)
-        }
-        let quote = if tail.starts_with("from\"") { '"' } else { '\'' };
-        let path_start = "from".len() + 1; // skip `from"`
-        let Some(path_end) = tail[path_start..].find(quote) else { break };
-        let rel_path = &tail[path_start..path_start + path_end]; // e.g. `./marked.esm-xxx.js`
-        let imp_end = after_brace + brace_end + 1 + path_start + path_end + 1; // past closing quote
-
-        // Skip trailing semicolon if present
-        let imp_end = if result.get(imp_end..imp_end + 1) == Some(";") { imp_end + 1 } else { imp_end };
-
-        // Load the chunk
-        let chunk_path = assets_dir.join(rel_path.trim_start_matches("./"));
-        if !chunk_path.exists() {
-            break; // can't resolve — leave as-is and stop
-        }
-        let chunk_src = std::fs::read_to_string(&chunk_path)
-            .with_context(|| format!("failed to read chunk {}", chunk_path.display()))?;
-
-        // Parse import bindings: `a as b,c as d` → HashMap<exported, local>
-        let mut import_map: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-        for binding in bindings_str.split(',') {
-            let binding = binding.trim();
-            if let Some((exp, loc)) = binding.split_once(" as ") {
-                import_map.insert(exp.trim(), loc.trim());
-            } else {
-                import_map.insert(binding, binding);
-            }
-        }
-
-        // Parse chunk export tail: `export{$ as t,...};`
-        // Find last `export{` in the chunk.
-        let inlined = if let Some(exp_start) = chunk_src.rfind("export{") {
-            let exp_body_start = exp_start + "export{".len();
-            let exp_end = chunk_src[exp_body_start..].find('}').map(|i| exp_body_start + i);
-            if let Some(exp_end) = exp_end {
-                let export_bindings_str = &chunk_src[exp_body_start..exp_end];
-                let mut export_map: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-                for binding in export_bindings_str.split(',') {
-                    let binding = binding.trim();
-                    if let Some((internal, exported)) = binding.split_once(" as ") {
-                        export_map.insert(exported.trim(), internal.trim());
-                    } else {
-                        export_map.insert(binding, binding);
-                    }
-                }
-
-                // Wrap the chunk body in an IIFE returning an object of exports.
-                // This scopes the chunk's single-letter minified variables so they
-                // don't collide with the entry script's own variable names.
-                let chunk_body = &chunk_src[..exp_start];
-                let mut return_fields = String::new();
-                for (exported_name, internal_name) in &export_map {
-                    if !return_fields.is_empty() { return_fields.push(','); }
-                    return_fields.push_str(&format!("{exported_name}:{internal_name}"));
-                }
-                // Destructure: var localName = _c.exportedName;
-                let mut destructure = String::new();
-                for (exported_name, local_name) in &import_map {
-                    destructure.push_str(&format!("var {local_name}=_c.{exported_name};"));
-                }
-                format!("var _c=(function(){{{chunk_body};return{{{return_fields}}}}})();{destructure}")
-            } else {
-                chunk_src.clone()
-            }
-        } else {
-            chunk_src.clone()
-        };
-
-        // Replace the import statement with the inlined chunk
-        result = format!("{}{}{}", &result[..imp_start], inlined, &result[imp_end..]);
-    }
-
-    Ok(result)
 }
 
 /// Extract the value of a named attribute from an HTML tag string.
