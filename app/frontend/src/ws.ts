@@ -49,14 +49,36 @@ type StatusHandler = (msg: DocumentStatusMsg) => void
 
 let ws: WebSocket | null = null
 let connecting = false
-let currentSynth: SynthHandlers | null = null
-// stream_id assigned by the server for the current synthesis; null between
-// sendSynth() and the synth_started acknowledgement. All incoming segment,
-// done, and error frames are dropped unless their stream_id matches this value,
-// preventing frames from a superseded server-side stream from reaching the
-// player. Frames that already entered the player's decodeChain before cancel
-// fired are handled by the generation counter in player.ts.
-let currentStreamId: string | null = null
+
+// The currently-acknowledged stream — the one whose segment/done/error
+// frames should actually reach a handler. All incoming frames are dropped
+// unless their stream_id matches this. Frames that already entered the
+// player's decodeChain before cancel fired are handled separately by the
+// generation counter in player.ts.
+let active: { streamId: string; handlers: SynthHandlers } | null = null
+
+// Requests sent but not yet synth_started-acknowledged, in the order they
+// were sent. The server processes one WS message at a time and sends
+// synth_started synchronously before spawning the actual generation task
+// (see ws_handler in main.rs), so acks are guaranteed to arrive in the same
+// order requests were sent — first-in-first-out matching is safe.
+//
+// `superseded` is set on every still-pending entry whenever a *newer*
+// sendSynth()/cancelSynth() call happens. When a superseded entry's ack
+// finally arrives, it's just dropped — never made `active`, and crucially
+// no cancel is sent for it: the server already auto-cancels the previous
+// task itself the instant it receives the newer `synth` message (see
+// `active_cancel.take()` in main.rs's ws_handler). Sending our own redundant
+// cancel here would be unsafe, since the server's cancel handler cancels
+// "whatever is currently active" without checking stream_id — a stale
+// cancel arriving after the server has already moved on to an even newer
+// stream could wrongly cancel that one instead.
+interface PendingSynthRequest {
+  handlers: SynthHandlers
+  superseded: boolean
+}
+let pendingRequests: PendingSynthRequest[] = []
+
 const statusHandlers = new Map<string, StatusHandler>()
 // Messages to send once connected (e.g. synth queued before open)
 const sendQueue: string[] = []
@@ -91,10 +113,10 @@ function connect(): void {
       if (pendingSegmentHeader) {
         const header = pendingSegmentHeader
         pendingSegmentHeader = null
-        if (header.stream_id === currentStreamId) {
-          currentSynth?.onSegment({ ...header, audioData: ev.data })
+        if (active && header.stream_id === active.streamId) {
+          active.handlers.onSegment({ ...header, audioData: ev.data })
         } else {
-          console.log(`[ws] drop binary for stale stream ${header.stream_id?.slice(0, 8)} (current=${currentStreamId?.slice(0, 8)})`)
+          console.log(`[ws] drop binary for stale stream ${header.stream_id?.slice(0, 8)} (active=${active?.streamId.slice(0, 8)})`)
         }
       }
       return
@@ -110,14 +132,20 @@ function connect(): void {
     }
 
     switch (type) {
-      case 'synth_started':
-        currentStreamId = (msg as SynthStartedMsg).stream_id
+      case 'synth_started': {
+        const streamId = (msg as SynthStartedMsg).stream_id
+        const req = pendingRequests.shift()
+        if (!req || req.superseded) {
+          console.log(`[ws] discarding ack for superseded stream ${streamId.slice(0, 8)}`)
+          break
+        }
+        active = { streamId, handlers: req.handlers }
         break
+      }
       case 'segment':
-        if (msg.stream_id !== currentStreamId) {
-          console.log(`[ws] drop segment idx=${msg.index} stream=${msg.stream_id?.slice(0, 8)} (current=${currentStreamId?.slice(0, 8)})`)
+        if (!active || msg.stream_id !== active.streamId) {
+          console.log(`[ws] drop segment idx=${msg.index} stream=${msg.stream_id?.slice(0, 8)} (active=${active?.streamId.slice(0, 8)})`)
           // Still need to consume the pending binary frame that follows.
-          // Store with a dummy handler so the binary arm can clear it cleanly.
           pendingSegmentHeader = msg as Omit<SegmentMsg, 'audioData'>
           break
         }
@@ -125,22 +153,20 @@ function connect(): void {
         pendingSegmentHeader = msg as Omit<SegmentMsg, 'audioData'>
         break
       case 'done':
-        if (msg.stream_id !== currentStreamId) {
+        if (!active || msg.stream_id !== active.streamId) {
           console.log(`[ws] drop done for stale stream ${msg.stream_id?.slice(0, 8)}`)
           break
         }
-        currentSynth?.onDone()
-        currentSynth = null
-        currentStreamId = null
+        active.handlers.onDone()
+        active = null
         break
       case 'error':
-        if (msg.stream_id !== undefined && msg.stream_id !== currentStreamId) {
+        if (msg.stream_id !== undefined && (!active || msg.stream_id !== active.streamId)) {
           console.log(`[ws] drop error for stale stream ${msg.stream_id?.slice(0, 8)}`)
           break
         }
-        currentSynth?.onError(msg.error ?? 'Unknown error')
-        currentSynth = null
-        currentStreamId = null
+        active?.handlers.onError(msg.error ?? 'Unknown error')
+        active = null
         break
       case 'document_status':
         statusHandlers.get(msg.id)?.(msg as DocumentStatusMsg)
@@ -154,10 +180,13 @@ function connect(): void {
     connecting = false
     ws = null
     pendingSegmentHeader = null
-    currentStreamId = null
-    if (currentSynth) {
-      currentSynth.onError('Connection lost — server may have restarted')
-      currentSynth = null
+    // Any not-yet-acked requests will never get their ack on this (now
+    // closed) connection — drop them rather than leaving them to
+    // mis-match against a future connection's stream_ids.
+    pendingRequests = []
+    if (active) {
+      active.handlers.onError('Connection lost — server may have restarted')
+      active = null
     }
     // Reconnect after a short delay
     setTimeout(connect, 2000)
@@ -185,12 +214,18 @@ export function sendSynth(
   documentId: string | undefined,
   handlers: SynthHandlers,
 ): void {
-  // Cancel previous stream on the server so it stops sending.
-  if (currentStreamId) {
-    send({ type: 'cancel', stream_id: currentStreamId })
+  // Cancel the currently-active stream, if we know its id. Safe to send now
+  // (before the new `synth` message below) since it unambiguously targets
+  // whatever the server currently has active.
+  if (active) {
+    send({ type: 'cancel', stream_id: active.streamId })
+    active = null
   }
-  currentSynth = handlers
-  currentStreamId = null  // will be set when synth_started arrives
+  // Anything still awaiting its ack is now superseded too — when that ack
+  // arrives it'll just be dropped (see the synth_started case above), no
+  // cancel needed since the server auto-cancels it for us.
+  for (const p of pendingRequests) p.superseded = true
+  pendingRequests.push({ handlers, superseded: false })
   pendingSegmentHeader = null
   const msg: Record<string, string> = { type: 'synth', text, voice }
   if (documentId) msg.document_id = documentId
@@ -199,11 +234,11 @@ export function sendSynth(
 
 /** Cancel the current synthesis stream. */
 export function cancelSynth(): void {
-  if (currentStreamId) {
-    send({ type: 'cancel', stream_id: currentStreamId })
+  if (active) {
+    send({ type: 'cancel', stream_id: active.streamId })
+    active = null
   }
-  currentSynth = null
-  currentStreamId = null
+  for (const p of pendingRequests) p.superseded = true
   pendingSegmentHeader = null
 }
 
