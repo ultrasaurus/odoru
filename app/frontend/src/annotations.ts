@@ -321,9 +321,9 @@ export async function deleteAnnotation(
 
 let listenGen = 0
 
-interface WordEntry { word: string; start?: number; end?: number }
+export interface WordEntry { word: string; start?: number; end?: number }
 
-function findAnnotationWordRange(annText: string, words: WordEntry[]): { start: number; end: number } | null {
+export function findAnnotationWordRange(annText: string, words: WordEntry[]): { start: number; end: number } | null {
   const needle = annText.toLowerCase().trim()
   const joined = words.map(w => w.word).join(' ')
   const idx = joined.toLowerCase().indexOf(needle)
@@ -366,6 +366,61 @@ function findAnnotationWordRange(annText: string, words: WordEntry[]): { start: 
   const start = Math.max(0, prevEnd !== undefined
     ? Math.min(firstStart, prevEnd + SAFETY_MARGIN)
     : firstStart - SAFETY_MARGIN)
+
+  return { start, end }
+}
+
+// The last whitespace-delimited token in `s`, or null if `s` has none.
+function lastToken(s: string): string | null {
+  const parts = s.trim().split(/\s+/).filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : null
+}
+
+// The first whitespace-delimited token in `s`, or null if `s` has none.
+function firstToken(s: string): string | null {
+  const parts = s.trim().split(/\s+/).filter(Boolean)
+  return parts.length > 0 ? parts[0] : null
+}
+
+/**
+ * Fallback for when the annotated text itself can't be found in `words`
+ * (e.g. forced alignment mis-transcribed a short abbreviation like "Ph.D."
+ * into something else entirely — the literal text is just never going to
+ * be there to find). Instead of needing `annText` itself to match, this
+ * locates the ordinary words immediately *surrounding* it in `sentenceText`
+ * — far less likely to also be mis-transcribed — and plays the span between
+ * where the "before" word ends and the "after" word starts. That span
+ * necessarily covers whatever audio alignment got wrong, regardless of how.
+ */
+export function findAnnotationWordRangeByContext(
+  sentenceText: string,
+  annText: string,
+  words: WordEntry[],
+): { start: number; end: number } | null {
+  const idx = sentenceText.toLowerCase().indexOf(annText.toLowerCase().trim())
+  if (idx === -1) return null
+
+  const before = lastToken(sentenceText.slice(0, idx))
+  const after = firstToken(sentenceText.slice(idx + annText.length))
+
+  // Last occurrence at-or-before the annotation, first occurrence
+  // after it — closest neighbor on each side wins if a word repeats.
+  const beforeIndex = before
+    ? words.map(w => w.word.toLowerCase()).lastIndexOf(before.toLowerCase())
+    : -1
+  const afterSearchFrom = beforeIndex + 1
+  const afterIndex = after
+    ? words.findIndex((w, i) => i >= afterSearchFrom && w.word.toLowerCase() === after.toLowerCase())
+    : -1
+
+  const beforeEnd = beforeIndex !== -1 ? words[beforeIndex].end : undefined
+  const afterStart = afterIndex !== -1 ? words[afterIndex].start : undefined
+  if (beforeEnd === undefined && afterStart === undefined) return null
+
+  const FLAT_BUFFER = 0.15  // no neighbor on this side (annotation at a sentence edge).
+  const start = beforeEnd ?? Math.max(0, (afterStart ?? 0) - FLAT_BUFFER)
+  const end = afterStart ?? beforeEnd! + FLAT_BUFFER
+  if (end <= start) return null
 
   return { start, end }
 }
@@ -426,6 +481,7 @@ export async function listenAnnotation(
       const words = await fetchWords(voice, firstSeg.textContent ?? '', firstSegIndex)
       if (gen !== listenGen) return  // superseded by a later click
       const range = findAnnotationWordRange(annText, words)
+        ?? findAnnotationWordRangeByContext(firstSeg.textContent ?? '', annText, words)
       if (!range) {
         console.error('listenAnnotation: could not match annotation text in words', { annText, words })
         for (const m of marks) m.classList.add('annotation-error')
@@ -447,7 +503,9 @@ export async function listenAnnotation(
       if (gen !== listenGen) return  // superseded by a later click
 
       const startRange = findAnnotationWordRange(firstMark.textContent ?? '', firstWords)
+        ?? findAnnotationWordRangeByContext(firstSeg.textContent ?? '', firstMark.textContent ?? '', firstWords)
       const endRange = findAnnotationWordRange(lastMark.textContent ?? '', lastWords)
+        ?? findAnnotationWordRangeByContext(lastSeg.textContent ?? '', lastMark.textContent ?? '', lastWords)
       if (!startRange || !endRange) {
         console.error('listenAnnotation: could not match cross-sentence annotation text in words', {
           annText, firstText: firstMark.textContent, lastText: lastMark.textContent, firstWords, lastWords,
