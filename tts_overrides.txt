@@ -21,6 +21,8 @@ tymnet	Time net
 tymshare	timeshare
 wysiwyg	wizzy wig
 yaml	yamel
+Vol.	Volume
+No.	Number
 
 # Expand month abbreviations
 Jan.	January
