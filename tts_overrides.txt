@@ -116,6 +116,8 @@ goto,	Go To,
 goto-ness	Go To Ness
 Waterman St.	Waterman Street
 Dept.	Department
+CD ROMs	C D Roms
+U.S.	U S
 
 # Augment
 OBJECTIVE OF THE STUDY	Objective of the Study

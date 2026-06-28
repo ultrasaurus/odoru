@@ -91,6 +91,27 @@ After units test past, verify by listening with authorship.txt sections
   "cursor selected") — sounded off in F5 without this, fine in Vibe.
 - "NULL" -> "null" — intended.
 
+## No currency handling
+
+There is no normalizer pass for `$` amounts at all — confirmed via
+`cargo run -- normalize`:
+- `"$5 in 1985"` -> `"$five in nineteen eighty five"` — the bare `$`
+  character passes straight through, glued to the spelled-out number.
+- `"$5.50 for the part"` -> `"$five.fifty for the part"` — no
+  dollars/cents wording; the decimal point becomes a literal `.`
+  between two spelled-out numbers, which is also wrong on its own.
+
+`tts_overrides.txt` only has a quoted-punctuation override for an
+*isolated* `"$"` token (-> "dollar sign"), which doesn't fire here
+since the `$` is glued to a digit, not standalone.
+
+Not currently blocking any document (found while investigating an
+unrelated issue in Hypertext87, which has no dollar amounts), but
+worth a real pass eventually. Scope grows fast — would need to take a
+position on: whole dollars vs `.xx` cents, ranges (`"$5-10"`),
+magnitude abbreviations (`"$5M"`, `"$2.5B"`), and other currencies if
+any document ever uses them.
+
 ## require per-document overrides
 
 - Roman Numerals require per-document overrides to work well, maybe even per
