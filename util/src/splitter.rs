@@ -81,13 +81,55 @@ fn split_paragraph(paragraph: &str) -> Vec<String> {
     // Split on single newlines (hard breaks) then Unicode sentence boundaries.
     let raw: Vec<String> = protected
         .lines()
-        .flat_map(|line| line.unicode_sentences())
+        .flat_map(|line| recover_dropped_chars(line, line.unicode_sentences()))
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.replace(PERIOD_PLACEHOLDER, "."))
         .collect();
 
     merge_outline_labels(raw)
+}
+
+/// Recovers characters `unicode_sentences()` silently drops between
+/// consecutive sentence slices — observed with a closing quote immediately
+/// after a spaced ellipsis (e.g. `more . . . ". Next.`): neither returned
+/// slice contains the `".` between them, so those two characters just
+/// vanish if used as-is.
+///
+/// Walks the sentence slices in order using pointer offsets into `line`
+/// (safe since each slice is guaranteed to be a literal substring of it,
+/// produced by the same iterator) and reattaches any gap to the end of the
+/// preceding sentence — or, if the very first sentence already starts past
+/// the beginning of the line, extends that first sentence backward to
+/// absorb it. Either way, no character from the original text is ever
+/// lost, regardless of which specific punctuation pattern triggers a future
+/// instance of this same upstream quirk.
+fn recover_dropped_chars<'a>(
+    line: &'a str,
+    sentences: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'a str> {
+    let base = line.as_ptr() as usize;
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut cursor = 0usize;
+
+    for s in sentences {
+        let start = s.as_ptr() as usize - base;
+        let end = start + s.len();
+        if start > cursor {
+            match ranges.last_mut() {
+                Some(last) => last.1 = start, // absorb the gap into the previous sentence
+                None => {
+                    ranges.push((cursor, end)); // absorb a leading gap into this sentence
+                    cursor = end;
+                    continue;
+                }
+            }
+        }
+        ranges.push((start, end));
+        cursor = end;
+    }
+
+    ranges.into_iter().map(|(a, b)| &line[a..b]).collect()
 }
 
 /// Merge outline-style labels with the sentence that follows them.
@@ -352,6 +394,28 @@ mod tests {
     fn ellipsis_does_not_split_mid_thought() {
         let result = split("Wait... are you sure? Yes.");
         assert_eq!(texts(result), vec!["Wait... are you sure?", "Yes."]);
+    }
+
+    #[test]
+    fn no_characters_lost_around_quote_after_spaced_ellipsis() {
+        // Regression: unicode_sentences() silently drops the closing quote
+        // and period here — neither returned slice contains them — unless
+        // recover_dropped_chars reattaches the gap. The quote+period belong
+        // with the quoted sentence, not the following one.
+        let input = "and then we would say, \"But wait, there's more . . . \". \
+                      And then we would play peek-a-boo.";
+        let result = texts(split(input));
+        assert_eq!(
+            result,
+            vec![
+                "and then we would say, \"But wait, there's more . . . \".",
+                "And then we would play peek-a-boo.",
+            ]
+        );
+        // No characters lost: concatenating the sentences (with a single
+        // space between, matching how they were originally separated)
+        // reconstructs the input exactly.
+        assert_eq!(result.join(" "), input);
     }
 }
 

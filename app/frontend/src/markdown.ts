@@ -159,6 +159,39 @@ function splitBlockTextForRender(text: string): string[] {
   return splitLines(collapseHardBreaksToBr(text))
 }
 
+// Attaches any punctuation-only segment (no letters at all) to the
+// previous sentence instead of discarding it — mirrors splitter.rs keeping
+// such segments rather than dropping them (see
+// footnote_marker_splits_into_no_alpha_sentence /
+// bracket_reference_splits_into_no_alpha_sentence), and specifically fixes
+// a real divergence: Rust's recover_dropped_chars now keeps a closing quote
+// immediately after a spaced ellipsis (e.g. `more . . . ". Next.`) attached
+// to the sentence it ends, whereas this segmenter does return that
+// punctuation as its own segment (it doesn't drop characters the way the
+// Rust crate did) — previously dropping it outright here meant the quote
+// vanished on the client even though the server now keeps it. If there's no
+// previous sentence yet, holds it and attaches to the next one instead, so
+// no text is ever silently lost.
+function mergeNoAlphaSentences(sentences: string[]): string[] {
+  const hasAlpha = (s: string) => /[a-zA-Z]/.test(s)
+  const out: string[] = []
+  let pendingPrefix = ''
+  for (const s of sentences) {
+    if (!hasAlpha(s)) {
+      if (out.length > 0) {
+        out[out.length - 1] = out[out.length - 1].trimEnd() + ' ' + s.trimStart()
+      } else {
+        pendingPrefix = pendingPrefix ? pendingPrefix + ' ' + s.trim() : s.trim()
+      }
+      continue
+    }
+    out.push(pendingPrefix ? pendingPrefix + ' ' + s.trimStart() : s)
+    pendingPrefix = ''
+  }
+  if (pendingPrefix) out.push(pendingPrefix) // entire input was non-alpha
+  return out
+}
+
 function splitLines(text: string): string[] {
   const sentences: string[] = []
   for (const line of text.split('\n')) {
@@ -177,7 +210,7 @@ function splitLines(text: string): string[] {
       })
     }
   }
-  return mergeOutlineLabels(sentences).filter(s => /[a-zA-Z]/.test(s))
+  return mergeNoAlphaSentences(mergeOutlineLabels(sentences))
 }
 
 // ---------------------------------------------------------------------------

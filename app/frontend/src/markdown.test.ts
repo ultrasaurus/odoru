@@ -131,6 +131,27 @@ describe('renderMarkdown — hard breaks', () => {
   })
 })
 
+describe('renderMarkdown — no-alpha segment merging', () => {
+  it('keeps a closing quote after a spaced ellipsis attached to its sentence, not dropped', () => {
+    // Regression: Intl.Segmenter (unlike the Rust unicode_segmentation crate)
+    // correctly returns the closing quote+period as their own segment here
+    // rather than dropping them — but splitLines used to filter out any
+    // no-letter segment entirely, silently losing it. Must now match the
+    // server (splitter.rs's recover_dropped_chars), which keeps the quote
+    // attached to the sentence it closes.
+    const text =
+      'and then we would say, "But wait, there\'s more . . . ". ' +
+      'And then we would play peek-a-boo.'
+    const { pendingSpans } = render(text, text)
+
+    expect(pendingSpans).toHaveLength(2)
+    expect(pendingSpans[0].textContent).toBe(
+      'and then we would say, "But wait, there\'s more . . . ".'
+    )
+    expect(pendingSpans[1].textContent).toBe('And then we would play peek-a-boo.')
+  })
+})
+
 describe('renderMarkdown — plain_text with no blank lines', () => {
   it('still resolves paragraph boundaries when plain_text has single newlines only', () => {
     // Odoru's plain_text: one paragraph per line, zero blank lines at all
