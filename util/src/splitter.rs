@@ -18,6 +18,10 @@ const ABBREVS: &[&str] = &[
     "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     // Corporate
     "Corp", "Inc", "Ltd", "Est",
+    // Citations (e.g. "Vol. 31, No. 7)") — also matches Intl.Segmenter's
+    // behavior client-side, which doesn't treat "No." followed by a digit
+    // as a sentence end either; see dev/client-server.md.
+    "No",
 ];
 
 /// A sentence with its position in the document structure.
@@ -303,6 +307,19 @@ mod tests {
     fn abbreviation_dr_does_not_cause_false_split() {
         let result = split("Dr. Smith made a diagnosis.");
         assert_eq!(texts(result), vec!["Dr. Smith made a diagnosis."]);
+    }
+
+    #[test]
+    fn abbreviation_no_before_digit_does_not_cause_false_split() {
+        // "Vol." isn't in ABBREVS, so it still splits there (matching
+        // Intl.Segmenter, which also breaks after "Vol." here) — only the
+        // "No." + digit case is protected, since that's the one place
+        // Intl.Segmenter doesn't break but unicode_sentences() used to.
+        let result = split("Communications of the ACM (Vol. 31, No. 7).");
+        assert_eq!(texts(result), vec![
+            "Communications of the ACM (Vol.",
+            "31, No. 7).",
+        ]);
     }
 
     #[test]
