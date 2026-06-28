@@ -20,9 +20,9 @@ multi-speaker experiments (e.g. splitting long quoted passages).
 
 ## andy/ref.wav
 
-cfg_scale=1.3, speed=0.95, seed=993444
+cfg_scale=1.3, speed=0.95, seed=993445
 
-consider seed=993445 which also sounds good (switched for artifacts, but could be just random)
+consider seed=993444 which also sounds good (switched for artifacts, but could be just random)
 
 ### testing details
 segments hypertext87_seg01–05, 2026-06-24
