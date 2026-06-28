@@ -142,7 +142,7 @@ export function controlsHtml(): string {
           <div id="seek-status" class="seek-status" style="display:none">Waiting for audio to arrive…</div>
         </div>
         <div class="synth-buttons">
-          <button id="synth-btn" class="synth-btn">Synthesize</button>
+          <button id="synth-btn" class="synth-btn" style="display:none">Synthesize</button>
         </div>
       </div>
       <div id="time-estimate" class="time-estimate"></div>

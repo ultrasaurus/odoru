@@ -77,6 +77,10 @@ export function mount(onEdit: () => void): () => void {
   const autoscrollCb        = document.getElementById('autoscroll-cb') as HTMLInputElement
   const { playBtn, downloadBtn, progressFill, timeCurrent, timeTotal } = grabControlEls()
   const seekStatus = document.getElementById('seek-status') as HTMLDivElement
+  // Unlike edit.ts (which reveals this only once synth starts), the reader
+  // page has no separate "synthesize now" action — its own playBtn starts
+  // disabled, so it's safe to always show the player shell.
+  document.getElementById('player-controls')!.style.display = ''
 
   const player = new Player(transcriptContainer)
   const core = new ReaderCore(transcriptContainer, outlineList)
