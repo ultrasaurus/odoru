@@ -1298,6 +1298,10 @@ export function mount(onReader: () => void): () => void {
     editCore.renderOutline(currentHeadings, i => player.seekTo(i))
     synthStart = Date.now()
     player.synthesize(doc.plain_text!, selectedVoice ?? undefined, currentPendingSpans, doc.id)
+    // synthesize() just called reset(), which clears any known duration —
+    // set it after, not before.
+    const voiceEntry = selectedVoice ? doc.voices[selectedVoice] : undefined
+    player.setKnownDuration(voiceEntry?.duration ?? null)
   }
 
   function resetEdit() {

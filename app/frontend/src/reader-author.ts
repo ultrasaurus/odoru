@@ -277,6 +277,9 @@ export function mount(onEdit: () => void): () => void {
         // returns and we call setPendingSpans — spans are always ready in time.
         if (audioReady) {
           player.synthesize(data.plain_text!, voice!, [], doc.id)
+          // synthesize() just called reset(), which clears any known
+          // duration — set it after, not before.
+          player.setKnownDuration(voiceEntry!.duration ?? null)
         }
 
         // Always render transcript (used for reading even without audio).

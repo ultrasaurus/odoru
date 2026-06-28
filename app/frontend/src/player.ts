@@ -129,6 +129,7 @@ export class Player {
 
   autoScroll = false    // set by caller; scrolls active segment into view when true
   private done = false  // true once the WS sends {done: true}
+  private knownDurationSecs: number | null = null
   // Serialises async segment processing so decodes complete in arrival order.
   private decodeChain: Promise<void> = Promise.resolve()
   // Seconds into the full audio where the current play session started.
@@ -221,7 +222,17 @@ export class Player {
           }
         })
       },
-      onDone: () => {
+      onDone: async () => {
+        // Every segment that actually arrived is only written into
+        // `this.segments` once its turn in the serialized decodeChain comes
+        // up — and 'done' can arrive over the wire before that chain has
+        // caught up to the last segment, especially for a fast cached
+        // replay. Awaiting it here first means fillRemainingGaps only ever
+        // backfills indices that truly never arrived, not ones still
+        // in-flight through decode.
+        const chainAtDone = this.decodeChain
+        await chainAtDone
+        if (this.generation !== gen) return
         this.done = true
         this.fillRemainingGaps()
         if (this.pendingSeekIndex >= 0) {
@@ -329,9 +340,24 @@ export class Player {
 
   // Total duration of all segments — stable, never changes with seeks.
   get duration(): number {
+    // Prefer the caller-supplied total (e.g. voices[voice].duration from the
+    // document, computed once when that voice finished synthesizing) over
+    // the segment-derived value — the latter can read low if `onDone` fires
+    // before the (separately serialized) decodeChain has caught up to every
+    // segment that already arrived, see setKnownDuration.
+    if (this.knownDurationSecs !== null) return this.knownDurationSecs
     const last = this.segments[this.segments.length - 1]
     return last ? last.endTime : 0
   }
+
+  /**
+   * Supplies an authoritative total duration (seconds), bypassing the
+   * segment-derived calculation entirely for `duration`/progress-bar/seek
+   * math. Call this whenever the true total is already known up front
+   * (e.g. from `voices[voice].duration`) rather than relying on it being
+   * derived correctly from in-flight segment arrival.
+   */
+  setKnownDuration(secs: number | null): void { this.knownDurationSecs = secs }
 
   get hasAudio(): boolean { return this.segments.length > 0 }
 
@@ -431,6 +457,7 @@ export class Player {
     this.pendingSeekIndex = -1
     this.pendingSeekWasPlaying = false
     this.stopAt = null
+    this.knownDurationSecs = null
   }
 
   private renderSegment(transcript: Segment, index: number): void {
