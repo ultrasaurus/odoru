@@ -102,10 +102,10 @@ class VoiceMapper:
             if preset_name.lower() in speaker_lower or speaker_lower in preset_name.lower():
                 return path
         
-        # Default to first voice if no match found
-        default_voice = list(self.voice_presets.values())[0]
-        print(f"Warning: No voice preset found for '{speaker_name}', using default voice: {default_voice}")
-        return default_voice
+        raise FileNotFoundError(
+            f"No voice preset found for '{speaker_name}' "
+            f"(available: {sorted(self.voice_presets.keys())})"
+        )
 
 
 def parse_txt_script(txt_content: str) -> Tuple[List[str], List[str]]:

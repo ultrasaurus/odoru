@@ -103,11 +103,10 @@ def resolve_voice_path(speaker: str) -> str:
     for preset_name, path in presets.items():
         if preset_name.lower() in speaker_lower or speaker_lower in preset_name.lower():
             return path
-    if not presets:
-        raise FileNotFoundError(f"No voice files found in {voices_dir}")
-    default_voice = next(iter(presets.values()))
-    print(f"Warning: No voice preset found for '{speaker}', using default voice: {default_voice}")
-    return default_voice
+    raise FileNotFoundError(
+        f"No voice preset found for '{speaker}' in {voices_dir} "
+        f"(available: {sorted(presets.keys())})"
+    )
 
 
 def build_full_script(text: str) -> str:
