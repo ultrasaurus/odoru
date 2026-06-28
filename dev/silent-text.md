@@ -88,8 +88,12 @@ removal. Unit-tested alongside the existing inline-stripping tests.
 
 ### Renderer — `app/frontend/src/markdown.ts`
 
-Shared by the authoring reader, the export SPA, and the edit-mode preview, so
-one change covers all three paths.
+`renderToken` is shared by the authoring reader, the export SPA, and the
+edit-mode preview, so one change covers all three paths. (The two
+`SentenceProvider` implementations it delegates to for non-silent blocks —
+the wasm-backed one in `markdown-live.ts` for the live app, the precomputed
+one in `markdown.ts` for the export — are not shared, but neither needs to
+know about silent handling; see "Shared code boundary" in `dev/export.md`.)
 
 In `renderToken`, detect the marker on `heading` and `paragraph` tokens:
 
@@ -98,8 +102,8 @@ In `renderToken`, detect the marker on `heading` and `paragraph` tokens:
 - Silent **headings** are still pushed to the outline, with
   `sentenceIndex = globalIdx` — which now points at the *next real* sentence,
   the natural scroll target.
-- Do **not** call `weaveSpans`, do **not** push to `pendingSpans`, do **not**
-  advance `globalIdx`.
+- Do **not** call `provider.weave()`, do **not** push to `pendingSpans`, do
+  **not** advance `globalIdx`.
 
 ### Authoring-edit derivation — `app/frontend/src/edit.ts`
 

@@ -36,6 +36,32 @@ pub fn export_audio(text: &str, voice: &Voice) -> Vec<SentenceAudio> {
         .collect()
 }
 
+/// Same as `export_audio`, but for an imported voice (one written by `dl
+/// import vibe` rather than a live f5/kokoro backend) — these have no
+/// `Voice` value to synthesize from, only per-sentence cache entries keyed
+/// by `{voice_id}:{sentence_index}` (see `dev/tts-backends/vibe-import.md`'s
+/// "Playback" section and the matching replay logic in `app/src/main.rs`).
+pub fn export_audio_imported(text: &str, voice_id: &str) -> Vec<SentenceAudio> {
+    splitter::split(text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, sentence)| {
+            let key = audio_cache::cache_key(&sentence.text, &format!("{voice_id}:{index}"));
+            let (mp3, duration) = match audio_cache::lookup(&key) {
+                Some((mp3, duration)) => (Some(mp3), duration),
+                None => (None, 0.0),
+            };
+            SentenceAudio {
+                index,
+                text: sentence.text,
+                mp3,
+                duration,
+                paragraph_end: sentence.paragraph_end,
+            }
+        })
+        .collect()
+}
+
 fn lookup_sentence(text: &str, voice: &Voice) -> (Option<Vec<u8>>, f64) {
     let key = match voice {
         Voice::F5Tts { .. } => {

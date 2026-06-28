@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { renderMarkdown, stripSilent } from './markdown'
+import { stripSilent, renderMarkdownFromEntries, type ExportSentenceEntry } from './markdown'
+import { renderMarkdown } from './markdown-live'
 
 function render(content: string, plainText: string) {
   const container = document.createElement('div')
@@ -165,5 +166,43 @@ describe('renderMarkdown — plain_text with no blank lines', () => {
     expect(pendingSpans[0].textContent).toBe('First paragraph.')
     expect(pendingSpans[1].textContent).toBe('Second paragraph.')
     expect(pendingSpans[2].textContent).toBe('Has two sentences.')
+  })
+})
+
+describe('renderMarkdownFromEntries — SPA export path', () => {
+  function renderFromEntries(content: string, entries: ExportSentenceEntry[], blockLengths: number[]) {
+    const container = document.createElement('div')
+    const result = renderMarkdownFromEntries(content, entries, blockLengths, container)
+    return { container, ...result }
+  }
+
+  it('weaves spans from precomputed entries with no splitting', () => {
+    const content = '# Title\n\nFirst **bold** sentence. Second sentence.'
+    const entries: ExportSentenceEntry[] = [
+      { text: 'Title', markdown_text: 'Title' },
+      { text: 'First bold sentence.', markdown_text: 'First **bold** sentence.' },
+      { text: 'Second sentence.', markdown_text: 'Second sentence.' },
+    ]
+    const { pendingSpans, headings } = renderFromEntries(content, entries, [1, 2])
+
+    expect(pendingSpans).toHaveLength(3)
+    expect(pendingSpans[0].textContent).toBe('Title')
+    expect(pendingSpans[1].innerHTML).toBe('First <strong>bold</strong> sentence.')
+    expect(pendingSpans[2].textContent).toBe('Second sentence.')
+    expect(headings).toHaveLength(1)
+    expect(headings[0].sentenceIndex).toBe(0)
+  })
+
+  it('respects fully-silent headings without consuming an entry', () => {
+    const content = '# [Navigation]<!--silent-->\n\nFirst sentence.'
+    const entries: ExportSentenceEntry[] = [
+      { text: 'First sentence.', markdown_text: 'First sentence.' },
+    ]
+    const { pendingSpans, headings } = renderFromEntries(content, entries, [1])
+
+    expect(pendingSpans).toHaveLength(1)
+    expect(pendingSpans[0].textContent).toBe('First sentence.')
+    expect(headings[0].text).toBe('[Navigation]')
+    expect(headings[0].sentenceIndex).toBe(0)
   })
 })

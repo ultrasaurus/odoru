@@ -515,6 +515,29 @@ async fn run_fetch(args: FetchArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Markdown-aware sentence texts for the SPA export, paired with per-block
+/// sentence counts (see `tts::markdown::split_for_export`). Falls back to a
+/// single block of `expected_count` empty markdown texts (so callers fall
+/// back to plain text per-entry) if the markdown-derived sentence count
+/// doesn't match `expected_count` — e.g. `full.plain_text` came from
+/// trafilatura rather than `full.content` and the two splits diverged.
+struct ExportMarkdownTexts {
+    sentences: Vec<String>,
+    block_lengths: Vec<usize>,
+}
+
+fn export_markdown_texts(content: &str, expected_count: usize) -> ExportMarkdownTexts {
+    let (sentences, block_lengths) = tts::markdown::split_for_export(content);
+    if sentences.len() == expected_count {
+        ExportMarkdownTexts {
+            sentences: sentences.into_iter().map(|s| s.markdown_text).collect(),
+            block_lengths,
+        }
+    } else {
+        ExportMarkdownTexts { sentences: Vec::new(), block_lengths: vec![expected_count] }
+    }
+}
+
 fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
     use util::export::{ExportTranscriptEntry, ManifestEntry};
     use util::slug::export_slug;
@@ -533,6 +556,8 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
 
     let mut manifest: Vec<ManifestEntry> = Vec::new();
     let mut transcripts: std::collections::HashMap<String, Vec<ExportTranscriptEntry>> =
+        std::collections::HashMap::new();
+    let mut sentence_blocks: std::collections::HashMap<String, Vec<usize>> =
         std::collections::HashMap::new();
     let mut doc_contents: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
@@ -557,16 +582,27 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
                 false
             }
             Some(voice_id) => {
-                match resolve_voice(voice_id) {
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: '{}' — could not load voice '{voice_id}': {e} — exporting text only",
-                            meta.title.as_deref().unwrap_or(&slug)
-                        );
-                        false
+                // Imported voices (written by `dl import vibe`) have no
+                // live backend to synthesize from — only per-sentence cache
+                // entries keyed by sentence index — so they skip
+                // `resolve_voice` entirely. See `is_imported_voice`.
+                let audio_entries = if is_imported_voice(voice_id) {
+                    Some(tts::export::export_audio_imported(&full.plain_text, voice_id))
+                } else {
+                    match resolve_voice(voice_id) {
+                        Err(e) => {
+                            eprintln!(
+                                "Warning: '{}' — could not load voice '{voice_id}': {e} — exporting text only",
+                                meta.title.as_deref().unwrap_or(&slug)
+                            );
+                            None
+                        }
+                        Ok(voice) => Some(tts::export::export_audio(&full.plain_text, &voice)),
                     }
-                    Ok(voice) => {
-                        let audio_entries = tts::export::export_audio(&full.plain_text, &voice);
+                };
+                match audio_entries {
+                    None => false,
+                    Some(audio_entries) => {
                         let miss = audio_entries.iter().find(|e| e.mp3.is_none());
                         if let Some(m) = miss {
                             eprintln!(
@@ -587,20 +623,23 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
                                     .with_context(|| format!("failed to write {filename}"))?;
                             }
                             // Populate transcript timing
+                            let markdown_texts = export_markdown_texts(&full.content, audio_entries.len());
                             let mut cursor = 0.0_f64;
-                            let timed: Vec<ExportTranscriptEntry> = audio_entries.iter().map(|e| {
+                            let timed: Vec<ExportTranscriptEntry> = audio_entries.iter().enumerate().map(|(i, e)| {
                                 let start = cursor;
                                 let end = cursor + e.duration;
                                 cursor = end;
                                 ExportTranscriptEntry {
                                     index: e.index,
                                     text: e.text.clone(),
+                                    markdown_text: markdown_texts.sentences.get(i).cloned().unwrap_or_else(|| e.text.clone()),
                                     start,
                                     end,
                                     paragraph_end: e.paragraph_end,
                                 }
                             }).collect();
                             transcripts.insert(slug.clone(), timed);
+                            sentence_blocks.insert(slug.clone(), markdown_texts.block_lengths);
                             true
                         }
                     }
@@ -610,15 +649,20 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
 
         // Fall back to timing-less transcript if audio wasn't produced above
         if !has_audio && !transcripts.contains_key(&slug) {
-            let entries: Vec<ExportTranscriptEntry> = tts::splitter::split(&full.plain_text)
+            let plain_sentences = tts::splitter::split(&full.plain_text);
+            let markdown_texts = export_markdown_texts(&full.content, plain_sentences.len());
+            let entries: Vec<ExportTranscriptEntry> = plain_sentences
                 .into_iter()
                 .enumerate()
                 .map(|(i, s)| ExportTranscriptEntry {
-                    index: i, text: s.text, start: 0.0, end: 0.0,
+                    index: i,
+                    markdown_text: markdown_texts.sentences.get(i).cloned().unwrap_or_else(|| s.text.clone()),
+                    text: s.text, start: 0.0, end: 0.0,
                     paragraph_end: s.paragraph_end,
                 })
                 .collect();
             transcripts.insert(slug.clone(), entries);
+            sentence_blocks.insert(slug.clone(), markdown_texts.block_lengths);
         }
 
         manifest.push(ManifestEntry {
@@ -640,6 +684,7 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
     let odoru_json = serde_json::to_string(&serde_json::json!({
         "manifest": manifest,
         "transcripts": transcripts,
+        "sentence_blocks": sentence_blocks,
         "documents": doc_contents,
     })).context("failed to serialize __ODORU__ payload")?;
 
@@ -781,6 +826,19 @@ fn extract_attr<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
         return Some(&tag[start..end]);
     }
     None
+}
+
+/// True for a voice id whose backend isn't one of the live-synthesizable
+/// backends (f5/kokoro) — i.e. one written by `dl import vibe` (or a future
+/// importer), where the audio was rendered offline and only ever needs to
+/// be replayed from `audio_cache`, never synthesized. Mirrors
+/// `is_imported_voice` in `app/src/main.rs` — see
+/// `dev/tts-backends/vibe-import.md`'s "Playback" section.
+fn is_imported_voice(voice_id: &str) -> bool {
+    match voice_id.split_once(':') {
+        Some((backend, _)) => backend != "f5" && backend != "kokoro",
+        None => false,
+    }
 }
 
 /// Resolve a voice ID string (e.g. `"f5:sarah"`, `"kokoro:af_heart"`) to a

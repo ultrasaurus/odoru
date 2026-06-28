@@ -1,5 +1,5 @@
 import { Player } from './player'
-import { renderMarkdown } from './markdown'
+import { renderMarkdown } from './markdown-live'
 import { Document, type DocumentState } from './document'
 import { ReaderCore, formatByline } from './reader-core'
 import {

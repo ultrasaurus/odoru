@@ -11,6 +11,11 @@ use serde::{Deserialize, Serialize};
 pub struct ExportTranscriptEntry {
     pub index: usize,
     pub text: String,
+    /// Raw markdown for this sentence (inline formatting intact), for the
+    /// SPA export's wasm-free rendering path. Falls back to `text` when the
+    /// markdown-aware split couldn't be aligned sentence-for-sentence with
+    /// the plain-text split.
+    pub markdown_text: String,
     pub start: f64,
     pub end: f64,
     pub paragraph_end: bool,

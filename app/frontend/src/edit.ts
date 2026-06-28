@@ -1,5 +1,6 @@
 import { Player } from './player'
-import { renderMarkdown, stripSilent, type HeadingEntry } from './markdown'
+import { stripSilent, type HeadingEntry } from './markdown'
+import { renderMarkdown } from './markdown-live'
 import { Document, type DocumentState } from './document'
 import { ReaderCore } from './reader-core'
 import {

@@ -1,15 +1,12 @@
 import { marked, type Token } from 'marked'
-import init, { split as wasmSplit } from './wasm/splitter_wasm.js'
-
-// Top-level await: blocks ESM evaluation for every importer of this module
-// until the wasm splitter is ready, so renderMarkdown (and splitLines) can
-// stay synchronous below — reader-author.ts relies on renderMarkdown
-// returning synchronously so onSegment callbacks can't race setPendingSpans.
-await init()
 
 // ---------------------------------------------------------------------------
-// Strip inline markdown markers to get plain text for sentence splitting.
-// Only needs to handle what trafilatura produces: bold, italic, code, links.
+// Shared markdown rendering — no wasm dependency, used by both the live app
+// (via markdown-live.ts's renderMarkdown) and the SPA export
+// (renderMarkdownFromEntries below). Keeping this module wasm-free lets the
+// export's Vite entry point skip bundling the wasm splitter entirely, which
+// matters because the export can be opened via `file://` (no fetch of the
+// .wasm asset works there) — see markdown-live.ts for the wasm-backed path.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -56,7 +53,10 @@ export function stripSilent(markdown: string): string {
   return out.join('\n')
 }
 
-function stripInline(text: string): string {
+// Strip inline markdown markers to get plain text. Only needs to handle what
+// trafilatura produces: bold, italic, code, links. Exported for
+// markdown-live.ts's wasm-backed sentence provider.
+export function stripInline(text: string): string {
   return text
     .replace(/\*\*(.*?)\*\*/gs, '$1')
     .replace(/__(.*?)__/gs, '$1')
@@ -67,55 +67,12 @@ function stripInline(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// splitLines — shared sentence splitting used for both plain-text (server
-// match) and raw markdown (for inline rendering). Calls into the wasm build
-// of splitter.rs (splitter-wasm), the same Rust code the server runs, so
-// sentence and paragraph boundaries are identical by construction rather
-// than by parallel maintenance.
-// ---------------------------------------------------------------------------
-
-// Splits a markdown block's text into sentences, treating intra-block single
-// newlines as soft breaks (collapsed to a space) rather than hard sentence
-// breaks — mirrors the server's CommonMark handling in tts/src/markdown.rs
-// (`Event::SoftBreak | Event::HardBreak => current.push(' ')`). Blocks never
-// contain blank lines internally, so any `\n` here is a soft/hard break, not
-// a paragraph boundary.
-function splitBlockText(text: string): string[] {
-  return splitLines(text.replace(/\n+/g, ' '))
-}
-
-// Same sentence-boundary logic as splitBlockText, but for text that will be
-// rendered (not just counted): a CommonMark hard break (line ending in 2+
-// spaces, or a backslash) keeps its visual line break, converted to a
-// literal <br> so marked.parseInline renders it; a soft break still
-// collapses to a space. Used only for rawSentences in weaveSpans — never
-// for the count itself, so it must always tokenize into the same number of
-// sentences as splitBlockText.
-function collapseHardBreaksToBr(text: string): string {
-  return text
-    .replace(/ {2,}\n/g, ' <br>')
-    .replace(/\\\n/g, '<br>')
-    .replace(/\n/g, ' ')
-}
-
-function splitBlockTextForRender(text: string): string[] {
-  return splitLines(collapseHardBreaksToBr(text))
-}
-
-function splitLines(text: string): string[] {
-  return wasmSplit(text).map(s => s.text)
-}
-
-// ---------------------------------------------------------------------------
-// renderMarkdown
+// renderMarkdownFromEntries — export-only entry point. (Live app's
+// renderMarkdown lives in markdown-live.ts.)
 //
 // Parses `content` (trafilatura markdown) and appends rendered HTML into
 // `container`. Sentence spans are woven into each block element so the
 // Player can activate them in place as audio arrives.
-//
-// `plainText` is the server's plain-text version of the article — used as
-// the source of truth for sentence splitting so client indices match server
-// synthesis indices exactly.
 //
 // Returns `pendingSpans` in synthesis order, and `headings` for the outline.
 // ---------------------------------------------------------------------------
@@ -132,24 +89,39 @@ export interface RenderResult {
   headings: HeadingEntry[]
 }
 
-export function renderMarkdown(
+// The SPA export already knows exact sentence boundaries and per-sentence
+// markdown text, computed once at export time by `tts::markdown::split_for_export`
+// (no wasm needed). `blockLengths` gives the sentence count for each block in
+// the same document-walk order `marked.lexer` produces, so blocks can be
+// matched up positionally without re-splitting anything client-side.
+export interface ExportSentenceEntry {
+  text: string
+  markdown_text: string
+}
+
+export function renderMarkdownFromEntries(
   content: string,
-  plainText: string,
+  entries: ExportSentenceEntry[],
+  blockLengths: number[],
   container: HTMLElement,
 ): RenderResult {
-  // Split plain_text into sentences — ground truth that matches the server.
-  // wasmSplit *is* the server's splitter.rs split(), so paragraph and
-  // sentence boundaries (including outline-label merging and abbreviation
-  // protection) come out identical by construction.
-  const allSentences = wasmSplit(plainText).map(s => s.text)
+  return renderWithProvider(content, entriesSentenceProvider(entries, blockLengths), container)
+}
 
+// Used by markdown-live.ts's renderMarkdown for the live app's wasm-backed
+// path — keeps the marked.lexer block walk in one place.
+export function renderWithProvider(
+  content: string,
+  provider: SentenceProvider,
+  container: HTMLElement,
+): RenderResult {
   const pendingSpans: HTMLElement[] = []
   const headings: HeadingEntry[] = []
   let globalIdx = 0
   const fragment = document.createDocumentFragment()
   const tokens = marked.lexer(content)
   for (const token of tokens) {
-    globalIdx = renderToken(token, fragment, allSentences, globalIdx, pendingSpans, headings)
+    globalIdx = renderToken(token, fragment, provider, globalIdx, pendingSpans, headings)
   }
   container.appendChild(fragment)
   return { pendingSpans, headings }
@@ -163,7 +135,7 @@ export function renderMarkdown(
 function renderToken(
   token: Token,
   container: HTMLElement | DocumentFragment,
-  allSentences: string[],
+  provider: SentenceProvider,
   globalIdx: number,
   pendingSpans: HTMLElement[],
   headings: HeadingEntry[],
@@ -180,7 +152,7 @@ function renderToken(
         el.classList.add('silent')
         el.textContent = silentDisplayText(token.text)
       } else {
-        globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
+        globalIdx = provider.weave(token.text, el, globalIdx, pendingSpans)
       }
       container.appendChild(el)
       headings.push({ depth: token.depth, text: silentOrPlain(token.text), element: el, sentenceIndex })
@@ -193,7 +165,7 @@ function renderToken(
         el.classList.add('silent')
         el.textContent = silentDisplayText(token.text)
       } else {
-        globalIdx = weaveSpans(token.text, el, allSentences, globalIdx, pendingSpans)
+        globalIdx = provider.weave(token.text, el, globalIdx, pendingSpans)
       }
       container.appendChild(el)
       break
@@ -202,7 +174,7 @@ function renderToken(
       const el = document.createElement('blockquote')
       el.className = 'md-blockquote'
       for (const child of (token as any).tokens ?? []) {
-        globalIdx = renderToken(child, el, allSentences, globalIdx, pendingSpans, headings)
+        globalIdx = renderToken(child, el, provider, globalIdx, pendingSpans, headings)
       }
       container.appendChild(el)
       break
@@ -213,7 +185,7 @@ function renderToken(
       for (const item of token.items) {
         const li = document.createElement('li')
         li.className = 'md-list-item'
-        globalIdx = weaveSpans(item.text, li, allSentences, globalIdx, pendingSpans)
+        globalIdx = provider.weave(item.text, li, globalIdx, pendingSpans)
         el.appendChild(li)
       }
       container.appendChild(el)
@@ -239,7 +211,7 @@ function renderToken(
       if (text?.trim()) {
         const el = document.createElement('p')
         el.className = 'md-paragraph'
-        globalIdx = weaveSpans(text, el, allSentences, globalIdx, pendingSpans)
+        globalIdx = provider.weave(text, el, globalIdx, pendingSpans)
         container.appendChild(el)
       }
     }
@@ -250,51 +222,41 @@ function renderToken(
 // ---------------------------------------------------------------------------
 // Sentence span weaving
 //
-// For each block, we split the raw markdown text into sentences to get the
-// renderable (inline-formatted) version of each sentence, and split the
-// stripped plain text to know how many sentences this block contributes.
-// Those counts should match — if they do, we render spans using the raw
-// markdown sentences (so bold/italic display correctly). If they diverge
-// (unexpected edge case), we fall back to plain-text sentences from the
-// global list so synthesis indices stay aligned.
+// renderToken doesn't split text into sentences itself — it delegates to a
+// SentenceProvider, since the live app and the SPA export get their
+// per-sentence text from different places (wasm split at render time vs.
+// a precomputed export payload). Both providers append the same `.segment`
+// spans in the same shape; only how they find sentence text differs.
 // ---------------------------------------------------------------------------
 
-function weaveSpans(
-  rawText: string,
-  container: HTMLElement,
-  allSentences: string[],
-  globalIdx: number,
-  pendingSpans: HTMLElement[],
-): number {
-  // Count sentences via stripped plain text — matches what the server sees.
-  // Intra-block newlines are soft/hard breaks (collapsed to a space), not
-  // sentence boundaries — see splitBlockText.
-  const plainSentences = splitBlockText(stripInline(rawText))
-  const count = plainSentences.length
+export interface SentenceProvider {
+  // Weaves spans for one block's sentences into `container`, returns the
+  // updated globalIdx.
+  weave(rawText: string, container: HTMLElement, globalIdx: number, pendingSpans: HTMLElement[]): number
+}
 
-  // Raw markdown sentences for inline rendering. Should be the same count.
-  // Hard breaks are preserved as <br> (see collapseHardBreaksToBr) so
-  // poem-style line breaks still render; only soft breaks collapse to a
-  // space here.
-  const rawSentences = splitBlockTextForRender(rawText)
-
-  for (let i = 0; i < count; i++) {
-    const span = document.createElement('span')
-    span.className = 'segment pending'
-    if (rawSentences.length === count) {
-      // Counts match — render with inline formatting.
-      span.innerHTML = marked.parseInline(rawSentences[i]) as string
-    } else {
-      // Fallback — use plain text from the global list.
-      span.textContent = allSentences[globalIdx] ?? plainSentences[i]
-    }
-    pendingSpans.push(span)
-    container.appendChild(span)
-    if (i < count - 1) {
-      container.appendChild(document.createTextNode(' '))
-    }
-    globalIdx++
+// SPA export: sentence counts and markdown text were already computed at
+// export time (see `tts::markdown::split_for_export`), so this provider
+// only needs to consume `blockLengths`/`entries` in document order — no
+// splitting, no wasm.
+function entriesSentenceProvider(entries: ExportSentenceEntry[], blockLengths: number[]): SentenceProvider {
+  const lengthsQueue = [...blockLengths]
+  return {
+    weave(_rawText, container, globalIdx, pendingSpans) {
+      const count = lengthsQueue.shift() ?? 0
+      for (let i = 0; i < count; i++) {
+        const entry = entries[globalIdx]
+        const span = document.createElement('span')
+        span.className = 'segment pending'
+        span.innerHTML = marked.parseInline(entry?.markdown_text ?? '') as string
+        pendingSpans.push(span)
+        container.appendChild(span)
+        if (i < count - 1) {
+          container.appendChild(document.createTextNode(' '))
+        }
+        globalIdx++
+      }
+      return globalIdx
+    },
   }
-
-  return globalIdx
 }

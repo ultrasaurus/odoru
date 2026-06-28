@@ -1,5 +1,5 @@
 import './style.css'
-import { renderMarkdown } from './markdown'
+import { renderMarkdownFromEntries } from './markdown'
 import { ReaderCore, formatByline } from './reader-core'
 
 // ---------------------------------------------------------------------------
@@ -19,6 +19,7 @@ interface ManifestEntry {
 interface TranscriptEntry {
   index: number
   text: string
+  markdown_text: string
   start: number
   end: number
   paragraph_end: boolean
@@ -32,6 +33,7 @@ interface DocumentContent {
 interface OdoruExport {
   manifest: ManifestEntry[]
   transcripts: Record<string, TranscriptEntry[]>
+  sentence_blocks: Record<string, number[]>
   documents: Record<string, DocumentContent>
 }
 
@@ -45,7 +47,7 @@ declare global {
 // Data
 // ---------------------------------------------------------------------------
 
-const data: OdoruExport = window.__ODORU__ ?? { manifest: [], transcripts: {}, documents: {} }
+const data: OdoruExport = window.__ODORU__ ?? { manifest: [], transcripts: {}, sentence_blocks: {}, documents: {} }
 
 // ---------------------------------------------------------------------------
 // Player state
@@ -185,9 +187,10 @@ function loadDocument(slug: string) {
   const transcript = data.transcripts[slug] ?? []
 
   let spans: HTMLElement[] = []
-  let headings: ReturnType<typeof renderMarkdown>['headings'] = []
+  let headings: ReturnType<typeof renderMarkdownFromEntries>['headings'] = []
   if (doc?.content) {
-    const result = renderMarkdown(doc.content, doc.plain_text, container)
+    const blockLengths = data.sentence_blocks[slug] ?? []
+    const result = renderMarkdownFromEntries(doc.content, transcript, blockLengths, container)
     spans = result.pendingSpans
     headings = result.headings
   } else if (transcript.length > 0) {
