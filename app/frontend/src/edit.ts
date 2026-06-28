@@ -499,7 +499,10 @@ export function mount(onReader: () => void): () => void {
         cb.addEventListener('change', patch)
         if (voiceEntries.length > 0) select.addEventListener('change', () => {
           patch()
-          if (doc.id === currentDocId) selectVoice(select.value, true)
+          // Update the open editor's voice label/state to match, but don't
+          // restart playback — picking a publish target isn't a request to
+          // play it right now.
+          if (doc.id === currentDocId) selectVoice(select.value)
         })
 
         const editBtn = document.createElement('button')
