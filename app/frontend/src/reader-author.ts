@@ -119,7 +119,9 @@ export function mount(onEdit: () => void): () => void {
     const left = Math.min(anchorRect.left, window.innerWidth - 280)
     popover.style.top  = `${top}px`
     popover.style.left = `${left}px`
-    popoverInput.focus()
+    // No auto-focus here — focusing this input would immediately clear the
+    // page's text selection, breaking plain copy of a single selected word.
+    // The user can click into the input to type a pronunciation fix.
   }
 
   function hidePopover() {
