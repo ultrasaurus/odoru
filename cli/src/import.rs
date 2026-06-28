@@ -344,6 +344,31 @@ fn import_segment(
 // Sentence ↔ word matching
 // ---------------------------------------------------------------------------
 
+/// Lowercases `c` if its lowercase mapping is a single `char`, so callers
+/// can do a cheap `==` instead of allocating a `to_lowercase()` iterator on
+/// every comparison. This is about codepoint *count* after lowercasing, not
+/// UTF-8 byte width — accented chars like `é` are one `char` regardless of
+/// byte length and always return `Some`. Returns `None` only for the rare
+/// chars whose lowercase mapping is itself multiple chars (e.g. Turkish İ →
+/// "i" + combining dot above), which fall back to the slow-but-exact path
+/// in `chars_match_ignore_case`.
+fn lower_single(c: char) -> Option<char> {
+    let mut it = c.to_lowercase();
+    let first = it.next()?;
+    if it.next().is_none() {
+        Some(first)
+    } else {
+        None
+    }
+}
+
+fn chars_match_ignore_case(a: char, a_lower: Option<char>, b: char, b_lower: Option<char>) -> bool {
+    match (a_lower, b_lower) {
+        (Some(al), Some(bl)) => al == bl,
+        _ => a.to_lowercase().eq(b.to_lowercase()),
+    }
+}
+
 /// For each original-text word, find its char range within `original` via
 /// sequential case-insensitive content search (mirrors the technique
 /// `words_with_original_text` already uses internally). Advancing the
@@ -351,6 +376,7 @@ fn import_segment(
 /// occurrence.
 fn locate_words_in_text(words: &[tts::transcript::Word], original: &str) -> Vec<(usize, usize)> {
     let orig_chars: Vec<char> = original.chars().collect();
+    let orig_lower: Vec<Option<char>> = orig_chars.iter().map(|&c| lower_single(c)).collect();
     let mut cursor = 0usize;
     let mut ranges = Vec::with_capacity(words.len());
 
@@ -360,15 +386,14 @@ fn locate_words_in_text(words: &[tts::transcript::Word], original: &str) -> Vec<
             ranges.push((cursor, cursor));
             continue;
         }
+        let target_lower: Vec<Option<char>> = target.iter().map(|&c| lower_single(c)).collect();
 
         let mut found = None;
         let mut i = cursor;
         while i + target.len() <= orig_chars.len() {
-            if orig_chars[i..i + target.len()]
-                .iter()
-                .zip(target.iter())
-                .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()))
-            {
+            if (0..target.len()).all(|k| {
+                chars_match_ignore_case(orig_chars[i + k], orig_lower[i + k], target[k], target_lower[k])
+            }) {
                 found = Some(i);
                 break;
             }
