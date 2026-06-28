@@ -192,6 +192,12 @@ export function mount(onEdit: () => void): () => void {
 
   let currentDoc: DocumentState | null = null
   let pendingScrollRestore: number | null = null
+  // Bumped on every loadDocument call; captured as `seq` at the start of
+  // each call and checked after every async gap. If a newer call has since
+  // started, this one's continuation is stale and bails rather than writing
+  // into jobArea/transcriptContainer out from under the newer load — mirrors
+  // edit.ts's loadSeq guard on its own load path.
+  let loadSeq = 0
   wireControls(player, playBtn, downloadBtn, progressFill, timeCurrent, timeTotal,
     () => (currentDoc?.title ?? currentDoc?.source_url ?? 'document').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.wav')
 
@@ -228,6 +234,7 @@ export function mount(onEdit: () => void): () => void {
 
   // ── Load document ──────────────────────────────────────────────────────────
   function loadDocument(doc: DocumentState) {
+    const seq = ++loadSeq
     currentDoc = doc
     player.stop()
     stopPolling()
@@ -255,6 +262,7 @@ export function mount(onEdit: () => void): () => void {
     Document.load(doc.id)
       .then(d => { d.destroy(); return d.current })
       .then((data: DocumentState) => {
+        if (loadSeq !== seq) return  // superseded by a newer loadDocument call
         if (data.status === 'error') {
           setError(transcriptContainer, `Failed to load: ${data.error ?? 'unknown error'}`)
           return
@@ -309,6 +317,7 @@ export function mount(onEdit: () => void): () => void {
         }
 
         function showSynthButton() {
+          if (loadSeq !== seq) return  // superseded by a newer loadDocument call
           if (!voice) return  // no voice available; user must synthesize from queue view
           const btn = document.createElement('button')
           btn.className = 'job-btn'
@@ -327,6 +336,7 @@ export function mount(onEdit: () => void): () => void {
           fetch('/jobs')
             .then(res => res.ok ? res.json() : [])
             .then((jobs: JobInfo[]) => {
+              if (loadSeq !== seq) return  // superseded by a newer loadDocument call
               const active = jobs.find(j =>
                 j.document_id === doc.id &&
                 (j.status === 'pending' || j.status === 'in_progress')
