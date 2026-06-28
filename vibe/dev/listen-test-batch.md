@@ -73,7 +73,26 @@ To find what's actually missing before picking a range:
 cargo run -- summary <basename> --basedir <path>
 ```
 
-## 5. Submit the batch
+## 5. Back up any already-confirmed-good segments in this range
+
+If the spec includes a segment whose `_generated.wav` was already listened
+to and confirmed good — most commonly when re-running a batch to fix a
+*different* segment, or to test a new seed across a range that includes
+segments you already approved — copy that segment's `_generated.wav`,
+`_transcript.json`, and `_report.json` aside (e.g. a `-orig` suffix, or a
+dated subfolder) before submitting. The batch overwrites every segment's
+output unconditionally, with no per-segment skip.
+
+This isn't hypothetical: it happened twice in one afternoon during the
+Hypertext87 cleanup — a full-batch resynth silently overwrote already-good
+seg06/seg14 audio with a regressed version (this specific artifact is
+batch-composition-sensitive: identical seed/text/voice can pass in
+isolation and fail when batched with different neighbors), and a later
+single-segment "fix" overwrote the *evidence* of that regression before it
+could be analyzed. Without a backup, the only recourse both times was
+resynthesizing again and hoping it landed the same way.
+
+## 6. Submit the batch
 
 ```bash
 cargo run -- synthesize --speaker Sarah --seed 71463 \
@@ -111,7 +130,7 @@ minute or two end to end, not 15-20x a single segment's time — that's
 the whole point of batching (see the throughput tables in
 `dev/cloudrun/cloudrun-blackwell.md`).
 
-## 6. Check the AlignReport verdict before listening
+## 7. Check the AlignReport verdict before listening
 
 Same as the single-segment path — per-segment `QA <name>: ...` lines
 print for each segment in the batch:
@@ -121,14 +140,14 @@ print for each segment in the batch:
 - `⚠ TRUNCATED — ...` — has correlated with an audible skip both times
   checked.
 
-## 7. Listen and stitch
+## 8. Listen and stitch
 
 Same as listen-test.md §4-5 — `_generated.wav` files land with the
 same naming convention (`<basename>_segNN_generated.wav`), so
 `listen-test/stitch.sh` and the manual concat approach both work unchanged on
 a batch-rendered range.
 
-## 8. If something fails partway through a batch
+## 9. If something fails partway through a batch
 
 A whole-batch failure (the subprocess itself crashed) errors every
 job_id in that batch together. A single segment with no produced wav
@@ -149,4 +168,4 @@ into a follow-up `segments <spec>` call (or fall back to individual
   contiguous range from one in-progress doc, not a huge cross-document
   grab, keeps a partial failure easy to re-run.
 - Cloud Run instances scale to zero — if you've been idle a while
-  before step 5, expect the cold-start delay described in step 2.
+  before step 6, expect the cold-start delay described in step 2.
