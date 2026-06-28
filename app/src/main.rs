@@ -817,9 +817,10 @@ async fn delete_document(
 }
 
 // ---------------------------------------------------------------------------
-// POST /jobs  — enqueue background synthesis
-// GET  /jobs  — list all jobs
-// GET  /jobs/:id — single job status
+// POST   /jobs  — enqueue background synthesis
+// GET    /jobs  — list all jobs
+// GET    /jobs/:id — single job status
+// DELETE /jobs/:id — remove a job's in-memory and on-disk state outright
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -991,6 +992,18 @@ async fn get_job(
         None => (StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "job not found" }))).into_response(),
     }
+}
+
+async fn delete_job(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if !state.jobs.exists(&id) {
+        return (StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "job not found" }))).into_response();
+    }
+    state.jobs.delete(&id);
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn pause_job(
@@ -1884,7 +1897,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/voices", get(get_voices))
         .route("/voices/:voice_id/words", post(get_words))
         .route("/jobs", get(list_jobs).post(create_job))
-        .route("/jobs/:id", get(get_job))
+        .route("/jobs/:id", get(get_job).delete(delete_job))
         .route("/jobs/:id/pause", post(pause_job))
         .route("/jobs/:id/resume", post(resume_job))
         .route("/overrides", get(get_overrides).post(add_override))

@@ -38,8 +38,8 @@ export function mount(onReader: () => void): () => void {
       <header class="header">
         <a class="back-link" id="back-link">← Publish Preview</a>
         <div class="logo">▶ odoru</div>
-        <button id="header-jobs-label" class="header-voice-label" style="display:none"></button>
-        <button id="header-voice-label" class="header-voice-label"></button>
+        <button id="header-jobs-label" class="header-pill" style="display:none"></button>
+        <button id="reset-btn" class="header-pill">New</button>
       </header>
 
       <div id="jobs-panel" class="jobs-panel">
@@ -64,7 +64,7 @@ export function mount(onReader: () => void): () => void {
               <div class="input-tabs-spacer"></div>
               <button id="edit-toggle-btn" class="edit-toggle-btn" style="display:none">Edit</button>
               <button id="copy-annotations-btn" class="edit-toggle-btn" style="display:none">Copy Annotations</button>
-              <button id="reset-btn" class="reset-btn" style="display:none">New</button>
+              <button id="voice-toggle-btn" class="voice-toggle-btn" title="Voice">🎙</button>
             </div>
 
             <div class="url-area">
@@ -680,9 +680,9 @@ export function mount(onReader: () => void): () => void {
   const playerControls = document.getElementById('player-controls') as HTMLDivElement
   const timeEstimate   = document.getElementById('time-estimate')    as HTMLDivElement
   const voiceLabel     = document.getElementById('voice-label')      as HTMLDivElement
+  const voiceToggleBtn = document.getElementById('voice-toggle-btn') as HTMLButtonElement
   const urlInput       = document.getElementById('url-input')        as HTMLInputElement
   const fetchStatus    = document.getElementById('fetch-status')     as HTMLDivElement
-  const headerVoiceLabel   = document.getElementById('header-voice-label')  as HTMLButtonElement
   const headerJobsLabel    = document.getElementById('header-jobs-label')   as HTMLButtonElement
   const jobsPanel          = document.getElementById('jobs-panel')          as HTMLDivElement
   const jobsList           = document.getElementById('jobs-list')           as HTMLDivElement
@@ -696,7 +696,7 @@ export function mount(onReader: () => void): () => void {
     workspace.classList.toggle('voice-panel-open', open)
     jobsPanel.classList.toggle('voice-panel-open', open)
   }
-  headerVoiceLabel.addEventListener('click', toggleVoicePanel)
+  voiceToggleBtn.addEventListener('click', toggleVoicePanel)
   voiceLabel.addEventListener('click', toggleVoicePanel)
 
   headerJobsLabel.addEventListener('click', () => {
@@ -805,7 +805,7 @@ export function mount(onReader: () => void): () => void {
 
   type DocStage = viewState.DocStage
   function setDocStage(stage: DocStage) {
-    viewState.setDocStage({ synthBtn, newBtn, editToggleBtn, copyAnnotationsBtn }, stage)
+    viewState.setDocStage({ synthBtn, editToggleBtn, copyAnnotationsBtn }, stage)
   }
 
   function setOutline(headings: HeadingEntry[]) {
@@ -922,23 +922,29 @@ export function mount(onReader: () => void): () => void {
     pollQueue()
   }
 
-  async function pauseActiveJobsForDoc(docId: string) {
+  // A voice only ever needs to track its single latest job — voices.json
+  // stores one job_id per voice (see documents.rs's VoiceState). Pausing a
+  // superseded job instead of deleting it left it orphaned forever once a
+  // fresh job's id overwrote that slot: never referenced again, so never
+  // cleaned up, surviving reloads as a stale {job_id}.json file. Deleting
+  // outright avoids that — there's nothing useful left to resume.
+  async function cancelStaleJobsForVoice(docId: string, voice: string) {
     try {
       const res = await fetch('/jobs')
       if (!res.ok) return
       const jobs: JobInfo[] = await res.json()
-      const active = jobs.filter(j =>
-        j.document_id === docId &&
-        (j.status === 'in_progress' || j.status === 'pending'),
+      const stale = jobs.filter(j =>
+        j.document_id === docId && j.voice === voice &&
+        (j.status === 'in_progress' || j.status === 'pending' || j.status === 'paused'),
       )
-      await Promise.all(active.map(j => fetch(`/jobs/${j.id}/pause`, { method: 'POST' })))
+      await Promise.all(stale.map(j => fetch(`/jobs/${j.id}`, { method: 'DELETE' })))
     } catch { /* best-effort */ }
   }
 
   async function saveAndSynth(plain: string) {
     await triggerSave()
     if (!selectedVoice || !currentDocId) return
-    await pauseActiveJobsForDoc(currentDocId)
+    await cancelStaleJobsForVoice(currentDocId, selectedVoice)
     // Restart WS stream so new spans get audio wired up
     playerControls.style.display = ''
     player.setPendingSpans(currentPendingSpans)
@@ -1125,13 +1131,21 @@ export function mount(onReader: () => void): () => void {
     }
   }
 
+  // Shown whenever the open doc/draft has no voice committed yet — i.e.
+  // selectVoice() hasn't been called for it. Distinct from `selectedVoice`
+  // itself, which may still hold a carried-forward value from a previous
+  // doc (kept around as a convenient default, but not yet real for this
+  // one) — the label should never claim a voice is chosen until it is.
+  function showNoVoiceSelected() {
+    voiceLabel.textContent = 'No voice selected.'
+  }
+
   function selectVoice(id: string, restartPlayer = false) {
     selectedVoice = id
     const v = voices.find(v => v.id === id)
     voiceDescription.textContent = v?.description ?? ''
     const label = `Voice: ${voiceDisplayName(id)}`
     voiceLabel.textContent = label
-    headerVoiceLabel.textContent = label
     renderVoices()
 
     // Only restart playback (which kicks off a real synth request) when
@@ -1167,6 +1181,7 @@ export function mount(onReader: () => void): () => void {
       voices = data.voices
       hideErrorBar()
       renderVoices()
+      if (!selectedVoice) showNoVoiceSelected()
       updateEstimate(textInput.value)
     } catch {
       voiceList.innerHTML = '<div class="voice-loading">—</div>'
@@ -1249,6 +1264,7 @@ export function mount(onReader: () => void): () => void {
       currentDocId = state.id
       showDocId(currentDocId)
       renderVoices()
+      showNoVoiceSelected()
       docTitleInput.value = state.title ?? ''
       docSourceUrlInput.value = state.source_url ?? url
       textInput.value = state.content ?? ''
@@ -1363,6 +1379,7 @@ export function mount(onReader: () => void): () => void {
     estimateText = ''
     jobStatusText = ''
     renderTimeEstimate()
+    showNoVoiceSelected()
     setDocStage('blank')
     playerControls.style.display = 'none'
     setOutline([])
@@ -1416,6 +1433,7 @@ export function mount(onReader: () => void): () => void {
     timeCurrent.textContent = '0:00'
     timeTotal.textContent = '0:00'
     jobStatusText = ''
+    showNoVoiceSelected()
     setDocStage('loadingDoc')
     playerControls.style.display = 'none'
     setOutline([])
@@ -1449,8 +1467,12 @@ export function mount(onReader: () => void): () => void {
       currentDocId = data.id
       showDocId(currentDocId)
       const voice = pickVoice(data.voices)
-      if (voice) selectVoice(voice)
-      else renderVoices()
+      if (voice) {
+        selectVoice(voice)
+      } else {
+        renderVoices()
+        showNoVoiceSelected()
+      }
       textInput.value = data.content
       docTitleInput.value = data.title ?? ''
       docSourceUrlInput.value = data.source_url ?? ''

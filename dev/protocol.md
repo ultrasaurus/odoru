@@ -24,6 +24,7 @@ POST /jobs                 ← { text, voice, document_id? } → job (deduplicat
                               returns an existing paused job as-is, without resuming it)
 GET  /jobs                 → [job, ...]
 GET  /jobs/:id             → job
+DELETE /jobs/:id           → 204   (removes in-memory + on-disk job state outright; 404 if not found)
 POST /jobs/:id/pause       → job   (404 if not found or not pending/in_progress)
 POST /jobs/:id/resume      → job   (404 if not found, 400 if not paused or has no document_id)
 

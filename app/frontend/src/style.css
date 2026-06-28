@@ -88,7 +88,7 @@ html, body {
   text-transform: uppercase;
 }
 
-.header-voice-label {
+.header-pill {
   position: absolute;
   right: calc(18px + 77px);
   transform: translateX(50%);
@@ -102,7 +102,7 @@ html, body {
   padding: 0.3rem 0.7rem;
 }
 
-.header-voice-label:hover {
+.header-pill:hover {
   background: rgba(200, 169, 110, 0.07);
 }
 
@@ -929,10 +929,28 @@ html, body {
   flex: 1;
 }
 
-.input-tabs .edit-toggle-btn,
-.input-tabs .reset-btn {
+.input-tabs .edit-toggle-btn {
   padding: 0.3rem 0.9rem;
   font-size: 0.72rem;
+}
+
+/* Mic icon — toggles the voice panel open/closed, not an action button
+   like Edit/Copy-Annotations, so it intentionally skips their outlined
+   pill styling. */
+.voice-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.3rem 0.4rem;
+  margin-left: 0.4rem;
+  transition: color 0.15s;
+}
+
+.voice-toggle-btn:hover {
+  color: var(--accent);
 }
 
 .input-tab {
@@ -1124,26 +1142,6 @@ html, body {
   color: var(--text);
   cursor: pointer;
   text-align: center;
-}
-
-.reset-btn {
-  background: transparent;
-  border: 1.5px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  padding: 0.5rem 1.25rem;
-  text-transform: uppercase;
-  transition: border-color 0.15s, color 0.15s;
-}
-
-.reset-btn:hover {
-  border-color: var(--text-dim);
-  color: var(--text);
 }
 
 .article-area {

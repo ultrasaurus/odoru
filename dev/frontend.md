@@ -86,8 +86,12 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
   - Title and Source URL auto-save via 4s debounce (`PATCH /documents/:id`, metadata only, no re-synth)
   - **UUID**: shown as a small selectable label tucked into the bottom-right corner of the player card
     (`#doc-id-display`, absolutely positioned within `.card`), once doc is created
-- **Edit/Preview/New buttons**: live in the `.input-tabs` row alongside URL/Text tabs — Edit/Preview
-  to the left of New, New on the far right (`.input-tabs-spacer` pushes them right)
+- **Edit/Preview/Copy-Annotations/voice-toggle buttons**: live in the `.input-tabs` row alongside
+  URL/Text tabs, pushed right via `.input-tabs-spacer`. These are all scoped to whatever doc is
+  currently open in the card — unlike **New** (see below), which is global and lives in the header
+- **New**: a global action — not associated with any particular open document — so it lives in the
+  header (`#reset-btn`, top-right, `.header-pill` class), always visible regardless of doc stage.
+  Resets to blank state (clears all fields, article, player)
 - **Edit / Preview toggle** (shown once a doc is loaded, replaces Synthesize):
   - **Edit**: textarea visible, article hidden, player stops
   - **Preview**: article visible with rendered spans; if content changed since last render, triggers re-synth (see below)
@@ -100,25 +104,30 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
   `renderPreviewAndSynth()`, which force-synthesizes regardless of whether the textarea content changed
   (clicking Synthesize is itself the signal — it must not depend on `setEditMode`'s content-diff check,
   which would silently no-op for an unedited, never-synthesized draft)
-- New: resets to blank state (clears all fields, article, player)
 - **Draft state** (`setDocStage('draft')` in [view-state.ts](../app/frontend/src/view-state.ts)): a doc
-  that exists but has no audio yet for the active voice. Synthesize/New/Edit/Copy-Annotations are all
+  that exists but has no audio yet for the active voice. Synthesize/Edit/Copy-Annotations are all
   shown; player controls stay hidden. Reached via a fresh URL fetch, or via `loadAndListen` when the
   picked voice has no ready entry in `voices[id]`. Crucially, nothing auto-synthesizes while in this
   state — `loadAndListen`/`startListen()` only call `player.synthesize()` when audio already exists,
   since that call always sends a real WS synth request (an empty voice string makes the server pick its
-  own default, e.g. af_heart) — never as a side effect of just opening or reading a draft
+  own default, e.g. af_heart) — never as a side effect of just opening or reading a draft. New isn't
+  part of this stage matrix at all — it's global, always visible in the header, not doc-scoped
 - `loadAndListen(summary)` — called when a doc title is clicked in the Documents panel; loads doc
   by ID via `Document.load(id)`, renders markdown, populates title/source URL/textarea
   - Switches to URL tab if doc has a `source_url`; Text tab otherwise
   - Always starts in Preview mode; if the doc already has ready audio for the picked voice, shows
-    Listen/New/Edit/Copy-Annotations and calls `startListen()`; otherwise lands in **draft** state instead
+    Listen/Edit/Copy-Annotations and calls `startListen()`; otherwise lands in **draft** state instead
   - Selects the doc's published voice (`voices[id].published === true`) if one exists, else falls back
     to the default-pick logic — but only when the doc already has at least one voice entry; a doc with
     none stays with no voice selected (see voice picker note below)
 - Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
-- Voice picker (sidebar): lists every voice from `/voices`, grouped by backend; each row shows a status
-  badge (✓/⚙/~/✕) for the open document's `voices[id].status`, blank if never synthesized for this doc
+- Voice picker: opened via the mic icon (`#voice-toggle-btn`, rightmost in `.input-tabs`) or the
+  in-controls `#voice-label` text — both scoped to the doc card, since the voice choice is always about
+  whichever doc is currently open. (There used to also be a header-level voice toggle; it was removed
+  since a global voice control didn't match the per-document model — see "New" above for where that
+  header slot went instead.) Sidebar (`#voice-panel`) lists every voice from `/voices`, grouped by
+  backend; each row shows a status badge (✓/⚙/~/✕) for the open document's `voices[id].status`, blank
+  if never synthesized for this doc
   - No voice is pre-selected on load (`loadVoices()` no longer defaults to af_heart or anything else) —
     a brand-new draft shows nothing highlighted until the user clicks a row or clicks Synthesize. This is
     deliberate: the voice isn't "chosen" for a draft until a real synth request is about to fire, so it's

@@ -28,16 +28,19 @@ export function setEditPreviewVisibility(
 // 'loadingDoc' — loadAndListen mid-fetch; nothing actionable yet
 // 'draft'      — doc exists (just fetched, or reopened) but has no audio
 //                for the active voice yet; Synthesize is still live
-//                alongside New/Edit/Copy so the user can edit first
+//                alongside Edit/Copy so the user can edit first
 // 'listening'  — audio exists or is being synthesized
+//
+// New isn't part of this matrix — it's a global action (start a fresh
+// doc), not scoped to whatever's currently open, so it lives in the
+// header and is always visible regardless of doc stage.
 export type DocStage = 'blank' | 'loadingDoc' | 'draft' | 'listening'
 
 export function setDocStage(
-  els: { synthBtn: HTMLElement, newBtn: HTMLElement, editToggleBtn: HTMLElement, copyAnnotationsBtn: HTMLElement },
+  els: { synthBtn: HTMLElement, editToggleBtn: HTMLElement, copyAnnotationsBtn: HTMLElement },
   stage: DocStage,
 ) {
   els.synthBtn.style.display = (stage === 'blank' || stage === 'draft') ? '' : 'none'
-  els.newBtn.style.display = (stage === 'listening' || stage === 'draft') ? '' : 'none'
   els.editToggleBtn.style.display = (stage === 'listening' || stage === 'draft') ? '' : 'none'
   els.copyAnnotationsBtn.style.display = (stage === 'listening' || stage === 'draft') ? '' : 'none'
 }

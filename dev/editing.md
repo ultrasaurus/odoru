@@ -37,9 +37,12 @@ Clicking Edit → Preview (or clicking Synthesize on the text tab with no doc lo
 
 1. Strip markdown to `plain_text` (via `marked` + tag removal)
 2. Re-render article area with `renderMarkdown(raw, plain_text, ...)` so span-to-sentence alignment is correct
-3. Pause any active/pending jobs for this document (`POST /jobs/:id/pause` for each) — the new
-   content gets a different text hash, so step 6 creates an independent job; the paused old-text
-   job is left as orphaned, harmless dead state
+3. Cancel any active/pending/paused job for this document **and voice** (`DELETE /jobs/:id` for
+   each, via `cancelStaleJobsForVoice`) — the new content gets a different text hash, so step 6
+   creates an independent job; the old job is deleted outright rather than left paused, since
+   `voices.json` only tracks one `job_id` per voice and the old job would otherwise become a
+   permanent orphan (never referenced again, so never cleaned up — previously discovered as a bug
+   where deleted/superseded jobs survived indefinitely, including across reloads)
 4. `PATCH /documents/:id` — saves content, marks voices `stale` on the server
 5. Restart WS stream — `player.synthesize(plain, voice, spans, docId)` — new spans get audio wired up immediately
 6. `POST /jobs` — bg job synthesizes to disk cache for persistence
