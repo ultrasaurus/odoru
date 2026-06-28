@@ -12,7 +12,7 @@
 pub mod frontmatter;
 pub mod normalizer;
 pub mod segmenter;
-pub mod splitter;
+pub use splitter;
 pub mod voice;
 pub mod documents;
 pub mod index;

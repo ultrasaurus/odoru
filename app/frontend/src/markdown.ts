@@ -1,37 +1,11 @@
 import { marked, type Token } from 'marked'
+import init, { split as wasmSplit } from './wasm/splitter_wasm.js'
 
-// ---------------------------------------------------------------------------
-// Abbreviation protection — mirrors server-side splitter.rs ABBREVS list.
-// Replaces the trailing period of each abbreviation with a placeholder so
-// the sentence segmenter doesn't treat it as a sentence boundary.
-// ---------------------------------------------------------------------------
-
-const PLACEHOLDER = '￾'
-
-const ABBREVS = [
-  // Titles
-  'Mr', 'Mrs', 'Ms', 'Miss', 'Dr', 'Prof', 'Rev', 'Sr', 'Jr',
-  // Geographic
-  'St', 'Ave', 'Blvd', 'Rd', 'Mt', 'Dept',
-  // Latin
-  'vs', 'etc', 'e.g', 'i.e', 'et al',
-  // Months
-  'Jan', 'Feb', 'Mar', 'Apr', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  // Corporate
-  'Corp', 'Inc', 'Ltd', 'Est',
-]
-
-function protectAbbrevs(text: string): string {
-  let out = text
-  for (const abbrev of ABBREVS) {
-    out = out.replaceAll(`${abbrev}.`, `${abbrev}${PLACEHOLDER}`)
-  }
-  return out
-}
-
-function restorePlaceholders(text: string): string {
-  return text.replaceAll(PLACEHOLDER, '.')
-}
+// Top-level await: blocks ESM evaluation for every importer of this module
+// until the wasm splitter is ready, so renderMarkdown (and splitLines) can
+// stay synchronous below — reader-author.ts relies on renderMarkdown
+// returning synchronously so onSegment callbacks can't race setPendingSpans.
+await init()
 
 // ---------------------------------------------------------------------------
 // Strip inline markdown markers to get plain text for sentence splitting.
@@ -94,42 +68,11 @@ function stripInline(text: string): string {
 
 // ---------------------------------------------------------------------------
 // splitLines — shared sentence splitting used for both plain-text (server
-// match) and raw markdown (for inline rendering). Mirrors split_paragraph
-// in splitter.rs: single newlines are hard breaks, Unicode sentence
-// boundaries are found within each line, abbreviations are protected.
+// match) and raw markdown (for inline rendering). Calls into the wasm build
+// of splitter.rs (splitter-wasm), the same Rust code the server runs, so
+// sentence and paragraph boundaries are identical by construction rather
+// than by parallel maintenance.
 // ---------------------------------------------------------------------------
-
-// Mirrors merge_outline_labels in splitter.rs.
-// Merges a short all-caps label (e.g. "I.", "XIV.", "A.") with the sentence that follows.
-// Lowercase Roman numeral chars only, max 4 chars (covers i–xvii).
-const LOWERCASE_ROMAN_RE = /^[ivxlcdm]{1,4}$/
-
-function mergeOutlineLabels(sentences: string[]): string[] {
-  const isLabel = (s: string): boolean => {
-    const stem = s.trim().replace(/\.$/, '')
-    if (!stem) return false
-    if (/^[A-Z0-9]+$/.test(stem)) {
-      const alpha = stem.replace(/[^A-Za-z]/g, '')
-      return alpha.length <= 4
-    }
-    if (/^[a-z]+$/.test(stem)) {
-      return LOWERCASE_ROMAN_RE.test(stem)
-    }
-    return false
-  }
-  const out: string[] = []
-  let i = 0
-  while (i < sentences.length) {
-    if (isLabel(sentences[i]) && i + 1 < sentences.length) {
-      out.push(sentences[i].trimEnd() + ' ' + sentences[i + 1].trimStart())
-      i += 2
-    } else {
-      out.push(sentences[i])
-      i++
-    }
-  }
-  return out
-}
 
 // Splits a markdown block's text into sentences, treating intra-block single
 // newlines as soft breaks (collapsed to a space) rather than hard sentence
@@ -159,58 +102,8 @@ function splitBlockTextForRender(text: string): string[] {
   return splitLines(collapseHardBreaksToBr(text))
 }
 
-// Attaches any punctuation-only segment (no letters at all) to the
-// previous sentence instead of discarding it — mirrors splitter.rs keeping
-// such segments rather than dropping them (see
-// footnote_marker_splits_into_no_alpha_sentence /
-// bracket_reference_splits_into_no_alpha_sentence), and specifically fixes
-// a real divergence: Rust's recover_dropped_chars now keeps a closing quote
-// immediately after a spaced ellipsis (e.g. `more . . . ". Next.`) attached
-// to the sentence it ends, whereas this segmenter does return that
-// punctuation as its own segment (it doesn't drop characters the way the
-// Rust crate did) — previously dropping it outright here meant the quote
-// vanished on the client even though the server now keeps it. If there's no
-// previous sentence yet, holds it and attaches to the next one instead, so
-// no text is ever silently lost.
-function mergeNoAlphaSentences(sentences: string[]): string[] {
-  const hasAlpha = (s: string) => /[a-zA-Z]/.test(s)
-  const out: string[] = []
-  let pendingPrefix = ''
-  for (const s of sentences) {
-    if (!hasAlpha(s)) {
-      if (out.length > 0) {
-        out[out.length - 1] = out[out.length - 1].trimEnd() + ' ' + s.trimStart()
-      } else {
-        pendingPrefix = pendingPrefix ? pendingPrefix + ' ' + s.trim() : s.trim()
-      }
-      continue
-    }
-    out.push(pendingPrefix ? pendingPrefix + ' ' + s.trimStart() : s)
-    pendingPrefix = ''
-  }
-  if (pendingPrefix) out.push(pendingPrefix) // entire input was non-alpha
-  return out
-}
-
 function splitLines(text: string): string[] {
-  const sentences: string[] = []
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const protected_ = protectAbbrevs(trimmed)
-    if (segmenter) {
-      for (const { segment } of segmenter.segment(protected_)) {
-        const s = restorePlaceholders((segment as string).trim())
-        if (s) sentences.push(s)
-      }
-    } else {
-      protected_.split(/(?<=[.!?])\s+/).forEach(s => {
-        const r = restorePlaceholders(s.trim())
-        if (r) sentences.push(r)
-      })
-    }
-  }
-  return mergeNoAlphaSentences(mergeOutlineLabels(sentences))
+  return wasmSplit(text).map(s => s.text)
 }
 
 // ---------------------------------------------------------------------------
@@ -245,15 +138,10 @@ export function renderMarkdown(
   container: HTMLElement,
 ): RenderResult {
   // Split plain_text into sentences — ground truth that matches the server.
-  // Server treats every non-blank line as its own paragraph (blank lines are
-  // just separators, not required) — to_plain_text always joins blocks with
-  // \n\n and converts in-block soft/hard breaks to spaces, so a bare single
-  // \n in real plain_text is always a paragraph boundary, never a hard break
-  // within one. Mirror that here.
-  const allSentences: string[] = []
-  for (const para of plainText.split(/\n+/).map(p => p.trim()).filter(Boolean)) {
-    allSentences.push(...splitLines(para))
-  }
+  // wasmSplit *is* the server's splitter.rs split(), so paragraph and
+  // sentence boundaries (including outline-label merging and abbreviation
+  // protection) come out identical by construction.
+  const allSentences = wasmSplit(plainText).map(s => s.text)
 
   const pendingSpans: HTMLElement[] = []
   const headings: HeadingEntry[] = []
@@ -370,11 +258,6 @@ function renderToken(
 // (unexpected edge case), we fall back to plain-text sentences from the
 // global list so synthesis indices stay aligned.
 // ---------------------------------------------------------------------------
-
-const segmenter: Intl.Segmenter | null =
-  typeof Intl !== 'undefined' && 'Segmenter' in Intl
-    ? new (Intl as any).Segmenter('en', { granularity: 'sentence' })
-    : null
 
 function weaveSpans(
   rawText: string,

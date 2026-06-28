@@ -17,6 +17,8 @@ COPY config/ config/
 COPY cli/ cli/
 COPY dl/ dl/
 COPY py-venv/ py-venv/
+COPY splitter/ splitter/
+COPY splitter-wasm/ splitter-wasm/
 COPY tts/ tts/
 COPY util/ util/
 RUN cargo chef prepare --recipe-path recipe.json
@@ -31,6 +33,8 @@ COPY config/ config/
 COPY cli/ cli/
 COPY dl/ dl/
 COPY py-venv/ py-venv/
+COPY splitter/ splitter/
+COPY splitter-wasm/ splitter-wasm/
 COPY tts/ tts/
 COPY util/ util/
 # debug build for now -- testing deploy mechanics, will use hosted server for dev

@@ -3189,6 +3189,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "splitter"
+version = "0.1.0"
+dependencies = [
+ "roman",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "splitter-wasm"
+version = "0.1.0"
+dependencies = [
+ "splitter",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "spm_precompiled"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4076,10 +4092,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "splitter",
  "tempfile",
  "tokio",
  "tracing",
- "unicode-segmentation",
  "url",
  "uuid",
 ]

@@ -179,13 +179,6 @@ fn merge_outline_labels(sentences: Vec<String>) -> Vec<String> {
     out
 }
 
-/// Convenience: return just the sentence strings, dropping structure.
-/// Used by callers that don't need paragraph information.
-#[allow(dead_code)]
-pub fn split_text(text: &str) -> Vec<String> {
-    split(text).into_iter().map(|s| s.text).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,22 +189,6 @@ mod tests {
 
     fn paragraph_ends(sentences: &[Sentence]) -> Vec<bool> {
         sentences.iter().map(|s| s.paragraph_end).collect()
-    }
-
-    // ── split_text ────────────────────────────────────────────────────────
-
-    #[test]
-    fn split_text_returns_just_strings() {
-        let result = split_text("Hello world. How are you?");
-        assert_eq!(result, vec!["Hello world.", "How are you?"]);
-    }
-
-    #[test]
-    fn split_text_matches_split_texts() {
-        let input = "One. Two.\n\nThree.";
-        let from_split: Vec<String> = split(input).into_iter().map(|s| s.text).collect();
-        let from_split_text = split_text(input);
-        assert_eq!(from_split, from_split_text);
     }
 
     // ── split ─────────────────────────────────────────────────────────────

@@ -1,0 +1,8 @@
+[package]
+name = "splitter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+unicode-segmentation = "1"
+roman = "0.2"
