@@ -245,5 +245,3 @@ Permission to copy without fee all or part of this material is granted provided 
 Copyright 1996 ACM 1072-5520/96/0300 $3.50
 
 Text extracted from the article printed in Communications of the ACM (Vol. 31, No. 7). Printed by permission of ACM.
-
-webmaster
