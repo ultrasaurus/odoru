@@ -258,7 +258,8 @@ fn import_segment(
         }
     }
 
-    let ranges = split_gaps(&raw_ranges);
+    let mut ranges = split_gaps(&raw_ranges);
+    extend_to_segment_edges(&mut ranges, samples.len() as f64 / sample_rate as f64);
 
     for (i, sentence) in seg.sentences.iter().enumerate() {
         let sentence_index = *next_sentence_index;
@@ -471,6 +472,27 @@ fn split_gaps(raw_ranges: &[Option<(f64, f64)>]) -> Vec<Option<(f64, f64)>> {
         }
     }
     ranges
+}
+
+/// Unlike interior sentences, the first and last sentence in a segment have
+/// no neighbor on their outward side for `split_gaps` to borrow slack from
+/// — their outward edge sits exactly at their own first/last aligned word's
+/// timestamp, with no margin. `apply_fade`'s fade-out/in then eats straight
+/// into that word's real audio instead of silence, audibly clipping it.
+/// Push the first valid sentence's start back to `0.0` and the last valid
+/// sentence's end out to `segment_duration` so the fade always has the
+/// segment's own leading/trailing silence (or breath) to work with.
+fn extend_to_segment_edges(ranges: &mut [Option<(f64, f64)>], segment_duration: f64) {
+    if let Some(i) = ranges.iter().position(|r| r.is_some()) {
+        if let Some((_, e)) = ranges[i] {
+            ranges[i] = Some((0.0, e));
+        }
+    }
+    if let Some(i) = ranges.iter().rposition(|r| r.is_some()) {
+        if let Some((s, _)) = ranges[i] {
+            ranges[i] = Some((s, segment_duration));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -764,6 +786,43 @@ mod tests {
         assert_eq!(split[0], Some((0.0, 1.1)));
         assert_eq!(split[1], Some((1.1, 1.9)));
         assert_eq!(split[2], Some((1.9, 3.0)));
+    }
+
+    // ── extend_to_segment_edges ────────────────────────────────────────────
+
+    #[test]
+    fn extend_to_segment_edges_pushes_first_start_to_zero() {
+        let mut ranges = vec![Some((0.5, 1.0)), Some((1.2, 2.0))];
+        extend_to_segment_edges(&mut ranges, 3.0);
+        assert_eq!(ranges[0], Some((0.0, 1.0)));
+    }
+
+    #[test]
+    fn extend_to_segment_edges_pushes_last_end_to_segment_duration() {
+        let mut ranges = vec![Some((0.5, 1.0)), Some((1.2, 2.0))];
+        extend_to_segment_edges(&mut ranges, 3.0);
+        assert_eq!(ranges[1], Some((1.2, 3.0)));
+    }
+
+    #[test]
+    fn extend_to_segment_edges_single_sentence_gets_both_edges() {
+        let mut ranges = vec![Some((0.5, 1.0))];
+        extend_to_segment_edges(&mut ranges, 3.0);
+        assert_eq!(ranges[0], Some((0.0, 3.0)));
+    }
+
+    #[test]
+    fn extend_to_segment_edges_skips_leading_and_trailing_none() {
+        let mut ranges = vec![None, Some((0.5, 1.0)), Some((1.2, 2.0)), None];
+        extend_to_segment_edges(&mut ranges, 3.0);
+        assert_eq!(ranges, vec![None, Some((0.0, 1.0)), Some((1.2, 3.0)), None]);
+    }
+
+    #[test]
+    fn extend_to_segment_edges_all_none_is_noop() {
+        let mut ranges: Vec<Option<(f64, f64)>> = vec![None, None];
+        extend_to_segment_edges(&mut ranges, 3.0);
+        assert_eq!(ranges, vec![None, None]);
     }
 
     // ── find_sidecar ──────────────────────────────────────────────────────
