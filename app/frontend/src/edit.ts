@@ -10,6 +10,7 @@ import {
 } from './ui'
 import { pollJob } from './jobs'
 import { applyAnnotations, initAnnotationPicker, listenAnnotation, copyAnnotationsToNewDoc } from './annotations'
+import * as viewState from './view-state'
 
 export function mount(onReader: () => void): () => void {
   const app = document.getElementById('app')!
@@ -786,11 +787,34 @@ export function mount(onReader: () => void): () => void {
 
   let lastRenderedContent = ''
 
+  // ── View-state helpers ──────────────────────────────────────────────────────
+  // Single source of truth for the handful of elements whose visibility is
+  // driven by edit/preview mode, doc lifecycle stage, or heading count —
+  // every transition point calls these instead of hand-rolling its own
+  // subset of .style.display assignments. Implementations live in
+  // view-state.ts (plain functions over passed-in elements) so they're
+  // unit-testable without mounting this whole view.
+
+  function setInputAreaVisibility() {
+    viewState.setInputAreaVisibility({ urlArea, docFields }, activeTab, urlFetched)
+  }
+
+  function setEditPreviewVisibility(edit: boolean) {
+    viewState.setEditPreviewVisibility({ editArea, articleArea, editToggleBtn }, edit)
+  }
+
+  type DocStage = viewState.DocStage
+  function setDocStage(stage: DocStage) {
+    viewState.setDocStage({ synthBtn, newBtn, editToggleBtn, copyAnnotationsBtn }, stage)
+  }
+
+  function setOutline(headings: HeadingEntry[]) {
+    viewState.setOutline({ editOutlineSection }, headings)
+  }
+
   function setEditMode(edit: boolean) {
     isEditMode = edit
-    editArea.style.display = edit ? '' : 'none'
-    articleArea.style.display = edit ? 'none' : ''
-    editToggleBtn.textContent = edit ? 'Read' : 'Edit'
+    setEditPreviewVisibility(edit)
     if (edit) {
       player.stop()
     } else {
@@ -805,11 +829,11 @@ export function mount(onReader: () => void): () => void {
             currentPendingSpans = pendingSpans
             currentHeadings = headings
             editCore.renderOutline(headings, i => player.seekTo(i))
-            editOutlineSection.style.display = headings.length ? '' : 'none'
+            setOutline(headings)
             if (currentDocId) applyAnnotations(articleContent, currentDocId)
           } else {
             articleContent.innerHTML = '<div class="placeholder">Nothing to preview.</div>'
-            editOutlineSection.style.display = 'none'
+            setOutline([])
           }
           saveAndSynth(plain)
         })
@@ -953,30 +977,24 @@ export function mount(onReader: () => void): () => void {
     activeTab = tab
     tabUrl.classList.toggle('active', tab === 'url')
     tabText.classList.toggle('active', tab === 'text')
-    urlArea.style.display = (tab === 'url' && !urlFetched) ? '' : 'none'
-    docFields.style.display = (tab === 'text' || urlFetched) ? '' : 'none'
+    setInputAreaVisibility()
 
     if (tab === 'text') {
       if (currentDocId) {
         // Doc already loaded — switch to Edit mode to show the textarea
         isEditMode = true
-        editArea.style.display = ''
-        articleArea.style.display = 'none'
-        editToggleBtn.textContent = 'Read'
+        setEditPreviewVisibility(true)
       } else {
-        // No doc — blank edit slate
+        // No doc — blank edit slate. (isEditMode intentionally left
+        // unchanged here, matching prior behavior.)
         editArea.style.display = ''
         articleArea.style.display = 'none'
-        synthBtn.style.display = ''
-        newBtn.style.display = 'none'
-        editToggleBtn.style.display = 'none'
-        copyAnnotationsBtn.style.display = 'none'
+        setDocStage('blank')
       }
     } else {
       // Switching back to URL tab — restore article view
       if (!isEditMode) {
-        editArea.style.display = 'none'
-        articleArea.style.display = ''
+        setEditPreviewVisibility(false)
       }
     }
 
@@ -1219,7 +1237,7 @@ export function mount(onReader: () => void): () => void {
       currentPendingSpans = pendingSpans
       currentHeadings = headings
       editCore.renderOutline(headings, _i => { /* seek wired in startListen */ })
-      editOutlineSection.style.display = headings.length ? '' : 'none'
+      setOutline(headings)
       if (currentDocId) applyAnnotations(articleContent, currentDocId)
       updateEstimate(state.plain_text ?? '')
       const suffix = wasDedup ? ' (previously fetched)' : ''
@@ -1227,8 +1245,7 @@ export function mount(onReader: () => void): () => void {
       fetchStatus.className = 'fetch-status success'
       urlInput.disabled = true
       urlFetched = true
-      urlArea.style.display = 'none'
-      docFields.style.display = ''
+      setInputAreaVisibility()
       return true
     } catch (e: any) {
       fetchStatus.textContent = e?.message ?? 'Fetch failed'
@@ -1245,10 +1262,7 @@ export function mount(onReader: () => void): () => void {
   // ── Background job ─────────────────────────────────────────────────────────
 
   function showListenNew() {
-    synthBtn.style.display = 'none'
-    newBtn.style.display = ''
-    editToggleBtn.style.display = ''
-    copyAnnotationsBtn.style.display = ''
+    setDocStage('listening')
     synthBtn.disabled = false
   }
 
@@ -1327,14 +1341,10 @@ export function mount(onReader: () => void): () => void {
     estimateText = ''
     jobStatusText = ''
     renderTimeEstimate()
-    synthBtn.style.display = ''
+    setDocStage('blank')
     playerControls.style.display = 'none'
-    newBtn.style.display = 'none'
-    editToggleBtn.style.display = 'none'
-    copyAnnotationsBtn.style.display = 'none'
-    editOutlineSection.style.display = 'none'
-    editArea.style.display = 'none'
-    articleArea.style.display = ''
+    setOutline([])
+    setEditPreviewVisibility(false)
     playBtn.disabled = true
     downloadBtn.disabled = true
     progressFill.style.width = '0%'
@@ -1349,8 +1359,7 @@ export function mount(onReader: () => void): () => void {
     tabUrl.classList.add('active')
     tabText.classList.remove('active')
     urlFetched = false
-    urlArea.style.display = ''
-    docFields.style.display = 'none'
+    setInputAreaVisibility()
     pollQueue()
   }
 
@@ -1366,22 +1375,17 @@ export function mount(onReader: () => void): () => void {
       tabUrl.classList.add('active')
       tabText.classList.remove('active')
       urlFetched = true
-      urlArea.style.display = 'none'
-      docFields.style.display = ''
     } else {
       activeTab = 'text'
       tabText.classList.add('active')
       tabUrl.classList.remove('active')
       urlFetched = false
-      urlArea.style.display = 'none'
-      docFields.style.display = ''
     }
+    setInputAreaVisibility()
 
     // Reset to Preview mode
     isEditMode = false
-    editArea.style.display = 'none'
-    articleArea.style.display = ''
-    editToggleBtn.textContent = 'Edit'
+    setEditPreviewVisibility(false)
 
     playBtn.disabled = true
     playBtn.querySelector('.play-icon')!.textContent = '▶'
@@ -1390,12 +1394,9 @@ export function mount(onReader: () => void): () => void {
     timeCurrent.textContent = '0:00'
     timeTotal.textContent = '0:00'
     jobStatusText = ''
-    synthBtn.style.display = 'none'
+    setDocStage('loadingDoc')
     playerControls.style.display = 'none'
-    newBtn.style.display = 'none'
-    editToggleBtn.style.display = 'none'
-    copyAnnotationsBtn.style.display = 'none'
-    editOutlineSection.style.display = 'none'
+    setOutline([])
     articleContent.innerHTML = '<div class="loading">Loading…</div>'
 
     fetchedDocument?.destroy()
@@ -1438,7 +1439,7 @@ export function mount(onReader: () => void): () => void {
       currentPendingSpans = pendingSpans
       currentHeadings = headings
       editCore.renderOutline(headings, _i => {})
-      editOutlineSection.style.display = headings.length ? '' : 'none'
+      setOutline(headings)
       applyAnnotations(articleContent, currentDocId!)
 
       const voiceEntry = voice ? data.voices[voice] : undefined
