@@ -31,15 +31,23 @@ pub struct Sentence {
 
 /// Split `text` into sentences, preserving paragraph boundaries.
 ///
-/// Paragraphs are separated by one or more blank lines. Within each paragraph,
-/// sentence boundaries are detected at `.` `!` `?` with abbreviation protection.
-/// Single newlines within a paragraph are treated as hard sentence breaks.
+/// Each non-blank line is its own paragraph — blank lines are just
+/// separators (allowed but not required). This matches plain text with no
+/// blank lines at all (e.g. Odoru's `plain_text`, one paragraph per line) as
+/// well as old-style blank-line-separated text. There's no "single newline
+/// as a hard break within one paragraph" case here: `to_plain_text()`
+/// always joins blocks with `\n\n` and converts in-block soft/hard breaks to
+/// spaces, so a bare single `\n` in real plain_text is always a paragraph
+/// boundary, never a hard break inside one. (Markdown-level hard breaks are
+/// handled separately, at render time, by `collapseHardBreaksToBr` in
+/// `markdown.ts` — this splitter only ever sees post-`to_plain_text` text.)
 ///
-/// The last sentence of each paragraph is tagged with `paragraph_end: true`.
+/// Within each paragraph, sentence boundaries are detected at `.` `!` `?`
+/// with abbreviation protection. The last sentence of each paragraph is
+/// tagged with `paragraph_end: true`.
 pub fn split(text: &str) -> Vec<Sentence> {
-    // Split into paragraphs on blank lines (one or more empty lines).
     let paragraphs: Vec<&str> = text
-        .split("\n\n")
+        .lines()
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .collect();
@@ -219,11 +227,26 @@ mod tests {
     }
 
     #[test]
-    fn single_newline_is_hard_break_within_paragraph() {
+    fn single_newline_is_a_paragraph_boundary() {
+        // A bare single `\n` never survives from real markdown-derived
+        // plain_text (to_plain_text always uses `\n\n` between blocks), so
+        // this is always a paragraph boundary — matching Odoru's
+        // one-paragraph-per-line `plain_text` format (no blank lines at all).
         let result = split("First line\nSecond line");
         assert_eq!(texts(result.clone()), vec!["First line", "Second line"]);
-        // Both in same paragraph, only last is paragraph_end
-        assert_eq!(paragraph_ends(&result), vec![false, true]);
+        assert_eq!(paragraph_ends(&result), vec![true, true]);
+    }
+
+    #[test]
+    fn no_blank_lines_still_splits_into_paragraphs() {
+        // Odoru's plain_text: one paragraph per line, zero blank lines.
+        let input = "First paragraph.\nSecond paragraph.\nThird paragraph.";
+        let result = split(input);
+        assert_eq!(
+            texts(result.clone()),
+            vec!["First paragraph.", "Second paragraph.", "Third paragraph."]
+        );
+        assert_eq!(paragraph_ends(&result), vec![true, true, true]);
     }
 
     // ── abbreviations ─────────────────────────────────────────────────────
@@ -331,3 +354,4 @@ mod tests {
         assert_eq!(texts(result), vec!["Wait... are you sure?", "Yes."]);
     }
 }
+

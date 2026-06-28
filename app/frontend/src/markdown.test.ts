@@ -130,3 +130,19 @@ describe('renderMarkdown — hard breaks', () => {
     expect(pendingSpans[2].textContent).toBe('Right here.')
   })
 })
+
+describe('renderMarkdown — plain_text with no blank lines', () => {
+  it('still resolves paragraph boundaries when plain_text has single newlines only', () => {
+    // Odoru's plain_text: one paragraph per line, zero blank lines at all
+    // (no \n\n anywhere) — must still split into separate paragraphs/sentences,
+    // not collapse into one.
+    const content = 'First paragraph.\n\nSecond paragraph. Has two sentences.'
+    const plainText = 'First paragraph.\nSecond paragraph. Has two sentences.'
+    const { pendingSpans } = render(content, plainText)
+
+    expect(pendingSpans).toHaveLength(3)
+    expect(pendingSpans[0].textContent).toBe('First paragraph.')
+    expect(pendingSpans[1].textContent).toBe('Second paragraph.')
+    expect(pendingSpans[2].textContent).toBe('Has two sentences.')
+  })
+})

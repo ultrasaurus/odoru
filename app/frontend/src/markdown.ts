@@ -212,10 +212,13 @@ export function renderMarkdown(
   container: HTMLElement,
 ): RenderResult {
   // Split plain_text into sentences — ground truth that matches the server.
-  // Server splits on \n\n for paragraphs, then single \n + unicode_sentences
-  // within each paragraph. Mirror that here.
+  // Server treats every non-blank line as its own paragraph (blank lines are
+  // just separators, not required) — to_plain_text always joins blocks with
+  // \n\n and converts in-block soft/hard breaks to spaces, so a bare single
+  // \n in real plain_text is always a paragraph boundary, never a hard break
+  // within one. Mirror that here.
   const allSentences: string[] = []
-  for (const para of plainText.split(/\n\n+/).map(p => p.trim()).filter(Boolean)) {
+  for (const para of plainText.split(/\n+/).map(p => p.trim()).filter(Boolean)) {
     allSentences.push(...splitLines(para))
   }
 
