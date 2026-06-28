@@ -78,6 +78,15 @@ describe('setDocStage', () => {
     expect(els.editToggleBtn.style.display).toBe('')
     expect(els.copyAnnotationsBtn.style.display).toBe('')
   })
+
+  it('draft: all four shown', () => {
+    const els = elsFor()
+    setDocStage(els, 'draft')
+    expect(els.synthBtn.style.display).toBe('')
+    expect(els.newBtn.style.display).toBe('')
+    expect(els.editToggleBtn.style.display).toBe('')
+    expect(els.copyAnnotationsBtn.style.display).toBe('')
+  })
 })
 
 describe('setOutline', () => {

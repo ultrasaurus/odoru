@@ -807,7 +807,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 1rem 2rem;
+  padding: 1.75rem 2rem 1rem;
   border-top: 1px solid var(--border);
   background: var(--bg);
   flex-shrink: 0;
@@ -817,6 +817,14 @@ html, body {
   display: flex;
   align-items: center;
   gap: 1.25rem;
+}
+
+/* The play button overflows above .player-row's 3px height; normally the
+   voice-label row above it absorbs that overflow. Reader views with no
+   voice-label (the export SPA) need extra top padding so the circle
+   doesn't bleed past the border into the content above. */
+.controls.controls-no-label {
+  padding-top: 2.25rem;
 }
 
 .player-controls {

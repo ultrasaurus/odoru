@@ -78,8 +78,10 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
 
 ## Edit view
 - Two input modes, selected via **URL | Text** tabs:
-  - **URL tab**: paste a URL, press Enter — fetches and extracts article via trafilatura; starts in Preview + Listen mode
-  - **Text tab**: textarea for markdown; starts in Edit mode for new docs; existing docs start in Preview + Listen
+  - **URL tab**: paste a URL, press Enter — fetches and extracts article via trafilatura, renders it in
+    Preview. Enter only fetches; it does **not** start synthesis (see "Draft state" below) — pressing
+    Synthesize is the explicit next step
+  - **Text tab**: textarea for markdown; starts in Edit mode for new docs; existing docs start in Preview
 - Always-visible fields below the tabs (both modes): **Title**, **Source URL**
   - Title and Source URL auto-save via 4s debounce (`PATCH /documents/:id`, metadata only, no re-synth)
   - **UUID**: shown as a small selectable label tucked into the bottom-right corner of the player card
@@ -93,23 +95,43 @@ all earlier sentences to be synthesized first, making mid-document seeks much sl
 - **Auto-save** while in Edit mode: PATCH content only (no job) — on sentence-ending punctuation (`.?!`) or 4s debounce
 - **Preview re-synth** (only when content changed): pause active jobs → PATCH content → WS stream → `POST /jobs`; see [editing.md](editing.md)
 - `lastRenderedContent` guard: Edit → Preview with unchanged content keeps existing live spans and audio intact
-- **Synthesize** button (shown for new text docs before first save): calls `setEditMode(false)`, triggering the same Preview re-synth flow
+- **Synthesize** button: shown whenever the open doc is a **draft** (see below) — a brand-new text doc,
+  a just-fetched URL doc, or any reopened doc with no audio yet for the active voice. Calls
+  `renderPreviewAndSynth()`, which force-synthesizes regardless of whether the textarea content changed
+  (clicking Synthesize is itself the signal — it must not depend on `setEditMode`'s content-diff check,
+  which would silently no-op for an unedited, never-synthesized draft)
 - New: resets to blank state (clears all fields, article, player)
+- **Draft state** (`setDocStage('draft')` in [view-state.ts](../app/frontend/src/view-state.ts)): a doc
+  that exists but has no audio yet for the active voice. Synthesize/New/Edit/Copy-Annotations are all
+  shown; player controls stay hidden. Reached via a fresh URL fetch, or via `loadAndListen` when the
+  picked voice has no ready entry in `voices[id]`. Crucially, nothing auto-synthesizes while in this
+  state — `loadAndListen`/`startListen()` only call `player.synthesize()` when audio already exists,
+  since that call always sends a real WS synth request (an empty voice string makes the server pick its
+  own default, e.g. af_heart) — never as a side effect of just opening or reading a draft
 - `loadAndListen(summary)` — called when a doc title is clicked in the Documents panel; loads doc
-  by ID via `Document.load(id)`, renders markdown, populates title/source URL/textarea, calls `startListen()` immediately
+  by ID via `Document.load(id)`, renders markdown, populates title/source URL/textarea
   - Switches to URL tab if doc has a `source_url`; Text tab otherwise
-  - Always starts in Preview mode; Edit/New buttons shown, player controls hidden until audio starts
+  - Always starts in Preview mode; if the doc already has ready audio for the picked voice, shows
+    Listen/New/Edit/Copy-Annotations and calls `startListen()`; otherwise lands in **draft** state instead
   - Selects the doc's published voice (`voices[id].published === true`) if one exists, else falls back
-    to the default-pick logic
+    to the default-pick logic — but only when the doc already has at least one voice entry; a doc with
+    none stays with no voice selected (see voice picker note below)
 - Doc panel titles are always clickable (gold hover glow); clicking any doc opens it in the article area
 - Voice picker (sidebar): lists every voice from `/voices`, grouped by backend; each row shows a status
   badge (✓/⚙/~/✕) for the open document's `voices[id].status`, blank if never synthesized for this doc
+  - No voice is pre-selected on load (`loadVoices()` no longer defaults to af_heart or anything else) —
+    a brand-new draft shows nothing highlighted until the user clicks a row or clicks Synthesize. This is
+    deliberate: the voice isn't "chosen" for a draft until a real synth request is about to fire, so it's
+    never saved to the doc before that point. `defaultVoiceId()` (the af_heart → kokoro: → first-available
+    fallback) is resolved lazily, only inside the Synthesize click handlers, when no voice has been picked
   - `selectVoice(id, restartPlayer?)` — updates labels/description always; when `restartPlayer` is true
-    (the queue's publish-voice picker was changed for the open doc) and a doc with `plain_text` is
-    loaded, stops the player and re-runs `synthesize()` with the new voice
-  - Clicking a voice row in the sidebar only updates the label/description — it does not start
-    playback or a background job
-  - user can synthesize the same doc with a second voice later
+    (a voice row was clicked, or the queue's publish-voice picker was changed for the open doc) **and**
+    the doc already has at least one ready voice (`hasReadyVoice`, i.e. it's not a draft), stops the
+    player and re-runs `synthesize()` with the new voice
+  - For a draft (no ready voice yet), clicking a row only updates the label/description/highlight —
+    it does **not** start playback or any synth request. Synthesize is the only thing that commits
+  - user can synthesize the same doc with a second voice later (still via clicking a row directly —
+    a clearer, separate "add a voice" affordance is a known gap, not yet built)
 - Player/controls (`.controls`, built by `controlsHtml()` in [ui.ts](../app/frontend/src/ui.ts)):
   - Top row: `#voice-label` ("Voice: af_heart"), centered
   - Middle row (`.controls-row`): `#player-controls` (play button, progress bar, download button —

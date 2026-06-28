@@ -95,13 +95,17 @@ function render() {
         <div id="transcript-container" class="transcript-container">
           <div class="loading">${data.manifest.length === 0 ? 'No published documents.' : 'Select a document.'}</div>
         </div>
-        <div class="controls">
-          <button id="play-btn" class="play-btn" disabled><span id="play-icon" class="play-icon">▶</span></button>
-          <div class="progress-wrap">
-            <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-            <div class="time-row">
-              <span id="time-current" class="time">0:00</span>
-              <span id="time-total" class="time">0:00</span>
+        <div class="controls controls-no-label">
+          <div class="controls-row">
+            <div class="player-controls">
+              <div class="player-row">
+                <button id="play-btn" class="play-btn" disabled><span id="play-icon" class="play-icon">▶</span></button>
+                <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+              </div>
+              <div class="time-row">
+                <span id="time-current" class="time">0:00</span>
+                <span id="time-total" class="time">0:00</span>
+              </div>
             </div>
           </div>
         </div>

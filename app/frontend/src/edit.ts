@@ -812,6 +812,30 @@ export function mount(onReader: () => void): () => void {
     viewState.setOutline({ editOutlineSection }, headings)
   }
 
+  // Re-renders the article from the textarea's current content and
+  // (re)synthesizes it. Used both when Edit→Preview detects a real
+  // content change, and when Synthesize is clicked explicitly — the
+  // latter must force this regardless of whether content changed,
+  // since "click Synthesize" is itself the user's signal that audio
+  // should exist now, not a proxy inferred from a content diff.
+  async function renderPreviewAndSynth(raw: string) {
+    lastRenderedContent = raw
+    const plain = await stripMarkdown(raw)
+    articleContent.innerHTML = ''
+    if (raw.trim()) {
+      const { pendingSpans, headings } = renderMarkdown(raw, plain, articleContent)
+      currentPendingSpans = pendingSpans
+      currentHeadings = headings
+      editCore.renderOutline(headings, i => player.seekTo(i))
+      setOutline(headings)
+      if (currentDocId) applyAnnotations(articleContent, currentDocId)
+    } else {
+      articleContent.innerHTML = '<div class="placeholder">Nothing to preview.</div>'
+      setOutline([])
+    }
+    await saveAndSynth(plain)
+  }
+
   function setEditMode(edit: boolean) {
     isEditMode = edit
     setEditPreviewVisibility(edit)
@@ -820,23 +844,9 @@ export function mount(onReader: () => void): () => void {
     } else {
       const raw = textInput.value
       if (raw !== lastRenderedContent) {
-        // Content changed — strip markdown, re-render with plain_text, save + re-synth
-        lastRenderedContent = raw
-        stripMarkdown(raw).then(plain => {
-          articleContent.innerHTML = ''
-          if (raw.trim()) {
-            const { pendingSpans, headings } = renderMarkdown(raw, plain, articleContent)
-            currentPendingSpans = pendingSpans
-            currentHeadings = headings
-            editCore.renderOutline(headings, i => player.seekTo(i))
-            setOutline(headings)
-            if (currentDocId) applyAnnotations(articleContent, currentDocId)
-          } else {
-            articleContent.innerHTML = '<div class="placeholder">Nothing to preview.</div>'
-            setOutline([])
-          }
-          saveAndSynth(plain)
-        })
+        // Content changed — re-render + re-synth. Fire-and-forget,
+        // matching this call site's existing (non-awaited) behavior.
+        void renderPreviewAndSynth(raw)
       }
       // else: content unchanged — keep existing rendered spans and live audio
     }
@@ -1124,12 +1134,29 @@ export function mount(onReader: () => void): () => void {
     headerVoiceLabel.textContent = label
     renderVoices()
 
-    if (restartPlayer && fetchedDocument?.current?.plain_text && currentDocId) {
+    // Only restart playback (which kicks off a real synth request) when
+    // this doc already has some audio — i.e. this is "switch to a
+    // different/new voice for an existing doc," not "merely looked at a
+    // voice for a still-unsynthesized draft." A draft's voice choice
+    // isn't committed until Synthesize is clicked.
+    const doc = fetchedDocument?.current
+    if (restartPlayer && doc && hasReadyVoice(doc) && doc.plain_text && currentDocId) {
       player.stop()
       player.setPendingSpans(currentPendingSpans)
       synthStart = Date.now()
-      player.synthesize(fetchedDocument.current.plain_text, id, currentPendingSpans, currentDocId)
+      player.synthesize(doc.plain_text, id, currentPendingSpans, currentDocId)
     }
+  }
+
+  // Resolved lazily, only at the moment a synth is actually about to
+  // happen for a doc/draft that has no chosen voice yet — never as an
+  // ambient default, so a brand-new draft doesn't silently "have" a
+  // voice (and isn't synthesized with one) before the user commits.
+  function defaultVoiceId(): string | null {
+    if (voices.length === 0) return null
+    return (voices.find(v => v.id === 'kokoro:af_heart')
+      ?? voices.find(v => v.id.startsWith('kokoro:'))
+      ?? voices[0]).id
   }
 
   async function loadVoices() {
@@ -1139,13 +1166,7 @@ export function mount(onReader: () => void): () => void {
       const data: VoicesResponse = await res.json()
       voices = data.voices
       hideErrorBar()
-      if (voices.length > 0 && !selectedVoice) {
-        const preferred = voices.find(v => v.id === 'kokoro:af_heart')
-          ?? voices.find(v => v.id.startsWith('kokoro:'))
-          ?? voices[0]
-        selectVoice(preferred.id)
-      }
-      else renderVoices()
+      renderVoices()
       updateEstimate(textInput.value)
     } catch {
       voiceList.innerHTML = '<div class="voice-loading">—</div>'
@@ -1246,6 +1267,7 @@ export function mount(onReader: () => void): () => void {
       urlInput.disabled = true
       urlFetched = true
       setInputAreaVisibility()
+      setDocStage('draft')
       return true
     } catch (e: any) {
       fetchStatus.textContent = e?.message ?? 'Fetch failed'
@@ -1444,15 +1466,20 @@ export function mount(onReader: () => void): () => void {
 
       const voiceEntry = voice ? data.voices[voice] : undefined
       const audioReady = !!voiceEntry && voiceEntry.status !== 'error'
-      if (!audioReady) {
-        updateEstimate(data.plain_text)
-        synthBtn.style.display = ''
-      } else {
+      if (audioReady) {
         setEstimateText('')
+        showListenNew()
+        startListen()
+      } else {
+        // No audio for this doc/voice yet — this is a draft. Don't call
+        // startListen() (it always calls player.synthesize(), which the
+        // server treats as a real synth request — sending voice:'' picks
+        // a server-side default rather than truly doing nothing). Leave
+        // the player inert; Synthesize is the only thing that should
+        // start synthesis.
+        updateEstimate(data.plain_text)
+        setDocStage('draft')
       }
-
-      showListenNew()
-      startListen()
     } catch {
       articleContent.innerHTML = '<div class="error">Could not load document.</div>'
       fetchedDocument?.destroy()
@@ -1473,6 +1500,21 @@ export function mount(onReader: () => void): () => void {
     const text = fetchedDocument?.current.plain_text
     if (!text) return
 
+    if (!selectedVoice) {
+      const id = defaultVoiceId()
+      if (id) selectVoice(id)
+    }
+
+    // If the user was tweaking the textarea (Edit mode) before clicking
+    // Synthesize, switch to Preview so they land on the player/article
+    // view that's about to receive audio — not a plain visibility flip
+    // via setEditMode(false), since that branch's content-diff check
+    // would also re-trigger save+resynth and race with startBgJob below.
+    if (isEditMode) {
+      isEditMode = false
+      setEditPreviewVisibility(false)
+    }
+
     showListenNew()
     startListen()
     await startBgJob(text, fetchedDocument?.current.id)
@@ -1480,8 +1522,19 @@ export function mount(onReader: () => void): () => void {
 
   synthBtn.addEventListener('click', async () => {
     if (activeTab === 'text') {
+      if (!selectedVoice) {
+        const id = defaultVoiceId()
+        if (id) selectVoice(id)
+      }
+      if (isEditMode) {
+        isEditMode = false
+        setEditPreviewVisibility(false)
+      }
       showListenNew()
-      setEditMode(false)
+      // Force synth regardless of content diff — clicking Synthesize is
+      // the explicit signal, not setEditMode's "did the text change" proxy
+      // (which would no-op for an unedited, never-synthesized draft).
+      await renderPreviewAndSynth(textInput.value)
       return
     }
 
@@ -1500,7 +1553,10 @@ export function mount(onReader: () => void): () => void {
     if (e.key !== 'Enter') return
     const url = urlInput.value.trim()
     if (!url) return
-    await synthesizeUrlDoc(url)
+    // Enter only fetches — gives the user a chance to edit before
+    // committing to synthesis. The Synthesize button (synthBtn handler
+    // above) is the explicit trigger that fetches-if-needed and synths.
+    await fetchDocument(url)
   })
 
   return () => {
