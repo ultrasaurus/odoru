@@ -1,0 +1,3 @@
+Speaker 1: Permission to copy without fee all or part of this material is granted provided that the copies are not made or distributed for direct commercial advantage, the A C M copyright notice and the title of the publication and its date appear, and notice is given that copying is by permission of the Association for Computing Machinery. To copy otherwise, or to republish, requires a fee and/or specific permission.
+Speaker 1: Copyright nineteen ninety six A C M ten seventy two to fifty five twenty/ninety six/zero three zero zero three dollars and fifty cents Text extracted from the article printed in Communications of the A C M Volume thirty one, Number seven. Printed by permission of A C M.
+Speaker 1: webmaster

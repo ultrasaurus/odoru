@@ -63,4 +63,3 @@ Author's Present Address: Andries van Dam, Brown University, Dept. of Computer S
 Permission to copy without fee all or part of this material is granted provided that the copies are not made or distributed for direct commercial advantage, the ACM copyright notice and the title of the publication and its date appear, and notice is given that copying is by permission of the Association for Computing Machinery. To copy otherwise, or to republish, requires a fee and/or specific permission.
 Copyright 1996 ACM 1072-5520/96/0300 $3.50
 Text extracted from the article printed in Communications of the ACM (Vol. 31, No. 7). Printed by permission of ACM.
-webmaster

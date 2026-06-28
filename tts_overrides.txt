@@ -121,7 +121,7 @@ Dept.	Department
 CD ROMs	C D Roms
 U.S.	U S
 "But wait, there's more . . . ".	But wait, there's more!
-bon mot	Bohn Moh
+bon mot	Bon Moh
 $3.50	three dollars and fifty cents
 
 # Augment
