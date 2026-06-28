@@ -66,6 +66,34 @@ window and exact leaked text to search for.
 
 ---
 
+## hypertext87-2026-06-27 (49-segment, seed=993445, cfg=1.3, speed=0.95)
+
+Full from-scratch resynth after the splitter/segmenter fixes and the
+general-digit-spelling normalizer fix. Listened through the whole batch.
+Findings below, three distinct failure signatures (see discussion in the
+2026-06-27/28 session — text-domain QA misses two of these three
+entirely):
+
+| Seg | Description | QA/alignment signal |
+|-----|-------------|----------------------|
+| 05 | Garbled around "Well, I've used that bon mot ever since" and again around "and I think he is absolutely right: displays are the way to go" | Mixed — `report.json` does flag `"I've"`(0.14) `"used"`(0.15) `"that"`(0.10) as low-score near the first spot, but the words around "absolutely right: displays are the way to go" all score 0.97-0.999, despite reported garbling there. |
+| 06 | Heard "Another thing we should thank Ted for is that he did not just say, 'branch, link, make arbitrary associations.'" as a ref-clip-style problem | **No signal at all** — `report.json` clean, transcript shows a single clean occurrence, full expected word count (202) and duration (78.4s), no other segment's transcript contains a stray copy of this text either. Worth noting seg06 was also the segment that hallucinated the literal Andy reference-clip transcript in the earlier seed=993444 runs (see seg06 section above) — same segment, different seed, a difference-looking symptom this time, and this time invisible to every text-based check we have. |
+| 14 | Reference-clip leak — "I want to mention a couple of numbers, just so that you can size the system. We" | Matches our ranked candidate list from `check-ref-leak.sh` (own-text: 8 low-score words; ref-clip slice test: 3/10 suspect, near the top of the ranking). |
+| 20 | Reported as garbled — "And then we would play peek-a-boo, strip off the first overlay" | High-confidence alignment throughout (`peek`=0.66, `boo,`=0.99, `strip`=0.98, `overlay`=0.97) — QA reported only 1 unrelated low-score word and 4 filtered ellipsis tokens elsewhere in the segment; this spot wasn't flagged at all. |
+
+Text-side fixes already applied to `tts_overrides.txt` for unrelated
+issues found during this same listen: `CD ROMs` → `C D Roms` (was being
+read as Roman numeral CD = "four hundred"), `U.S.` → `U S` (was being
+read as "U dot S" via the identifier-dot-replacement pass misfiring on
+this abbreviation).
+
+These three signatures argue that any further detection needs to look at
+the audio itself (spectral/energy/pitch discontinuities), not just
+transcript alignment — segments 06 and 20 above transcribe and time
+*perfectly*, so no text-domain check could ever flag them by construction.
+
+---
+
 ## Stitching Artifacts (fixed)
 
 | Issue | Fix |
