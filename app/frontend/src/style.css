@@ -247,7 +247,7 @@ html, body {
   right: 18px;
   bottom: 0;
   width: 154px;
-  padding: 1.5rem 1rem;
+  padding: .4rem 1rem;
   background: var(--surface);
   border-left: 1px solid var(--border);
   overflow-y: auto;
