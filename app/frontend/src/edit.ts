@@ -1168,7 +1168,7 @@ export function mount(onReader: () => void): () => void {
   // (doc load, or the Documents-panel voice picker) — never via picking
   // a candidate in the side panel.
   function showNoVoiceSelected() {
-    voiceLabel.textContent = ''
+      voiceLabel.textContent = 'No voice synthesized yet.'
   }
 
   // The doc's current/published voice — drives the bottom #voice-label
