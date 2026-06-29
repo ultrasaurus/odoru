@@ -1,15 +1,5 @@
 # odoru — Architecture & Development Notes
 
-## What it is (& will be)
-A hypertext audio reading (and authoring) app. Fetches web articles, synthesizes
-them to speech, plays back with synchronized transcript highlighting.
-Name means "dance/leap/journey" in Japanese.
-
-Features currently supported:
-* Create/Edit document from URL or type/paste into new doc - [editing.md](editing.md)
-* Listen to a documet, including seeking anywhere, even while synth is in progress
-* Publish a collection of documents and export to SPA - [export.md](export.md)
-
 ## Workspace layout
 ```
 odoru/

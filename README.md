@@ -1,21 +1,24 @@
 # odoru
 
-The name means dance, leap or take a journey in Japanese depending on context and how it is written. All of those words feel applicable to this experiment in the transformation of text and voice.
+The name means dance, leap or take a journey in Japanese depending on context and how it is written. All of those words feel applicable to this experiment in the transformation of text and voice. 踊って!
+
+## What it is (& will be)
+A hypertext audio reading (and authoring) app. Fetches web articles, synthesizes
+them to speech, plays back with synchronized transcript highlighting. 
+
+Features currently supported:
+* Create/Edit document from URL or type/paste into new doc - [editing.md](editing.md)
+* Listen to a documet, including seeking anywhere, even while synth is in progress
+* Add highlights "annotations" to a doc, and copy to a new doc
+* Publish a collection of documents and export to SPA - [export.md](export.md)
 
 
-## Setup
+## Dev Setup
 
-### Frontend
+The app is written in 
+* Front end: Typescript
+* Backend: Rust and Python (via Py03) 
 
-in `app/frontend` see `.nvmrc` for version of node
-```
-cd app/frontend
-nvm use
-npx tsc
-npx vite build
-```
-
-Run `tsc` separately before `vite build` — Vite bundles the compiled `.js` files in `src/`, not the `.ts` sources directly. If `tsc` fails, Vite silently uses stale `.js` files and produces a build that looks successful but doesn't reflect your changes.
 
 ### Python environment
 
@@ -40,6 +43,30 @@ python -m spacy download en_core_web_sm
 
 If you skip this step, the first call to `G2P()` will attempt to download it
 automatically, which can cause confusing errors in some environments.
+
+Always run from the workspace root, running the server automatically
+builds and serves the front end: `app/frontend/dist`:
+
+```bash
+cargo run -p app
+```
+
+For now, you need to specify which backend to build. Typically you would build for `f5` and `kokoro`:
+```bash
+ODORU_BACKEND=both cargo run -p app
+```
+
+### Frontend
+
+in `app/frontend` see `.nvmrc` for version of node
+```
+cd app/frontend
+nvm use
+npx tsc
+npx vite build
+```
+
+Run `tsc` separately before `vite build` — Vite bundles the compiled `.js` files in `src/`, not the `.ts` sources directly. If `tsc` fails, Vite silently uses stale `.js` files and produces a build that looks successful but doesn't reflect your changes.
 
 
 ## CLI
@@ -83,6 +110,8 @@ Audio is written to `out/<name>.wav` by default (directory created if needed).
 Override with `-o <path>` — if the path is an existing directory, the filename
 is derived from the input as usual.
 
+see `dl --help` for more options
+
 ### Backends
 
 | Backend | Speed | Notes |
@@ -96,25 +125,6 @@ is derived from the input as usual.
 Edit `tts_overrides.txt` in the workspace root to customize how words are
 spoken by the F5 backend. Changes take effect on the next run — no recompile
 needed. See the file for format and examples.
-
-
-## App server
-
-Always run from the workspace root, with the frontend built at `app/frontend/dist`:
-
-```bash
-cargo run -p app
-```
-
-for now, you need to specify which backend to build
-```bash
-ODORU_BACKEND=f5 cargo run -p app
-```
-
-or for both:
-```bash
-ODORU_BACKEND=both cargo run -p app
-```
 
 ## Known Issues
 
