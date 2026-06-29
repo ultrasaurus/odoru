@@ -75,7 +75,9 @@ let core: ReaderCore | null = null
 function render() {
   const app = document.getElementById('app')!
   app.innerHTML = `
-    <div class="reader-layout">
+    <div class="reader-layout reader-layout-export">
+      <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle documents menu">☰</button>
+      <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
       <nav class="article-sidebar">
         <div class="sidebar-top">
           <div class="sidebar-tabs">
@@ -120,6 +122,24 @@ function render() {
   populateSidebar()
   wireTabSwitcher()
   wirePlayButton()
+  wireSidebarToggle()
+}
+
+// ---------------------------------------------------------------------------
+// Mobile sidebar drawer
+// ---------------------------------------------------------------------------
+
+function wireSidebarToggle() {
+  const layout = document.querySelector('.reader-layout')!
+  const toggle = document.getElementById('sidebar-toggle')!
+  const backdrop = document.getElementById('sidebar-backdrop')!
+
+  const closeSidebar = () => layout.classList.remove('sidebar-open')
+
+  toggle.addEventListener('click', () => layout.classList.toggle('sidebar-open'))
+  backdrop.addEventListener('click', closeSidebar)
+  document.getElementById('article-list')!.addEventListener('click', closeSidebar)
+  document.getElementById('outline-list')!.addEventListener('click', closeSidebar)
 }
 
 // ---------------------------------------------------------------------------

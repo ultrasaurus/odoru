@@ -8,13 +8,14 @@
   --bg:        #0e0e0f;
   --surface:   #161618;
   --border:    #63636d;
-  --text:      #e8e4dc;
-  --text-dim:  #a09a94;
+  --text:      #e0e0c9;
+  --text-dim:  #b0aaa4;
   --accent:    #c8a96e;
   --highlight: #c8a96e;
   --active-bg: rgba(200, 169, 110, 0.15);
   --radius:    12px;
   --font-serif: 'DM Serif Display', Georgia, serif;
+  --font-body:  'Literata', Georgia, serif;
   --font-mono:  'DM Mono', 'Courier New', monospace;
 }
 
@@ -1361,6 +1362,66 @@ html, body {
   overflow: hidden;
 }
 
+/* Mobile off-canvas drawer (export SPA only, see reader-export.ts) */
+.sidebar-toggle {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .reader-layout-export .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: .7rem;
+    left: 0.5rem;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 1.8rem;
+    cursor: pointer;
+    z-index: 110;
+  }
+
+  .reader-layout-export .reader-header {
+    padding-top: 1.25rem;
+  }
+
+  .reader-layout-export .transcript-container {
+    padding-top: 1.25rem;
+  }
+
+  .reader-layout-export .article-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: min(80vw, 280px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 105;
+  }
+
+  .reader-layout-export.sidebar-open .article-sidebar {
+    transform: translateX(0);
+  }
+
+  .reader-layout-export.sidebar-open .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 100;
+  }
+}
+
 .sidebar-top {
   padding: 1.25rem 1rem 0;
   border-bottom: 1px solid var(--border);
@@ -1430,8 +1491,8 @@ html, body {
 .article-item {
   padding: 0.6rem 1rem;
   font-family: var(--font-serif);
-  font-size: 0.85rem;
-  line-height: 1.4;
+  font-size: 1rem;
+  line-height: 1.5;
   color: var(--text-dim);
   border-left: 2px solid transparent;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
@@ -1478,8 +1539,8 @@ html, body {
 .outline-item {
   padding: 0.35rem 1rem;
   font-family: var(--font-serif);
-  font-size: 0.82rem;
-  line-height: 1.35;
+  font-size: 1rem;
+  line-height: 1.5;
   color: var(--text-dim);
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -1645,6 +1706,13 @@ html, body {
   margin-bottom: 1.25em;
 }
 
+:is(.transcript-container, .article-content) .md-paragraph,
+:is(.transcript-container, .article-content) .md-blockquote,
+:is(.transcript-container, .article-content) .md-list,
+:is(.transcript-container, .article-content) .md-code {
+  font-family: var(--font-body);
+}
+
 :is(.transcript-container, .article-content) .md-heading:last-child,
 :is(.transcript-container, .article-content) .md-paragraph:last-child,
 :is(.transcript-container, .article-content) .md-blockquote:last-child,
@@ -1653,7 +1721,8 @@ html, body {
   margin-bottom: 0;
 }
 
-/* Headings */
+/* Headings — keep the display serif now that body copy uses --font-body */
+:is(.transcript-container, .article-content) .md-heading { font-family: var(--font-serif); }
 :is(.transcript-container, .article-content) h1.md-heading { font-size: 1.6rem; font-weight: 600; margin-top: 1.5em; color: var(--text); line-height: 1.25; }
 :is(.transcript-container, .article-content) h2.md-heading { font-size: 1.3rem; font-weight: 500; margin-top: 1.25em; color: var(--text); line-height: 1.3; }
 :is(.transcript-container, .article-content) h3.md-heading { font-size: 1.1rem; font-weight: 500; margin-top: 1.1em; color: var(--text); line-height: 1.35; }
