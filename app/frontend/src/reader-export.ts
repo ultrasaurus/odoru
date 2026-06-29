@@ -1,6 +1,7 @@
 import './style.css'
 import { renderMarkdownFromEntries } from './markdown'
 import { ReaderCore, formatByline } from './reader-core'
+import { initTheme } from './theme'
 
 // ---------------------------------------------------------------------------
 // Types — injected by CLI at export time via window.__ODORU__
@@ -436,4 +437,5 @@ function wireTabSwitcher() {
   })
 }
 
+initTheme()
 render()

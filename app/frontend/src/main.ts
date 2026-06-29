@@ -1,6 +1,9 @@
 import './style.css'
 import { mount as mountReader } from './reader-author'
 import { mount as mountEdit } from './edit'
+import { initTheme } from './theme'
+
+initTheme()
 
 let cleanup: (() => void) | null = null
 
