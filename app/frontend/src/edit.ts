@@ -16,7 +16,8 @@ export function mount(onReader: () => void): () => void {
   const app = document.getElementById('app')!
 
   let voices: VoiceInfo[] = []
-  let selectedVoice: string | null = null
+  let selectedVoice: string | null = null  // doc's active/published voice — see setActiveVoice
+  let candidateVoice: string | null = null // voice panel's pick — see setCandidateVoice
   let synthStart = 0
   let fetchedDocument: Document | null = null
   let currentPendingSpans: HTMLElement[] = []
@@ -120,11 +121,12 @@ export function mount(onReader: () => void): () => void {
 
       <aside id="voice-panel" class="voice-panel">
         <div class="sidebar-section">
-          <div class="sidebar-label">Voice</div>
+          <div id="voice-panel-heading" class="sidebar-label">Voice</div>
           <div id="voice-list" class="voice-list">
             <div class="voice-loading">Loading voices…</div>
           </div>
           <div id="voice-description" class="voice-description"></div>
+          <button id="voice-synth-btn" class="synth-btn" disabled>Synthesize</button>
         </div>
       </aside>
     </div>
@@ -504,7 +506,7 @@ export function mount(onReader: () => void): () => void {
           // Update the open editor's voice label/state to match, but don't
           // restart playback — picking a publish target isn't a request to
           // play it right now.
-          if (doc.id === currentDocId) selectVoice(select.value)
+          if (doc.id === currentDocId) setActiveVoice(select.value)
         })
 
         const editBtn = document.createElement('button')
@@ -670,7 +672,6 @@ export function mount(onReader: () => void): () => void {
   }
   errorBarRetry.addEventListener('click', () => loadVoices())
 
-  const synthBtn       = document.getElementById('synth-btn')        as HTMLButtonElement
   const newBtn         = document.getElementById('reset-btn')        as HTMLButtonElement
   const editToggleBtn  = document.getElementById('edit-toggle-btn')  as HTMLButtonElement
   const copyAnnotationsBtn = document.getElementById('copy-annotations-btn') as HTMLButtonElement
@@ -687,9 +688,16 @@ export function mount(onReader: () => void): () => void {
   const jobsPanel          = document.getElementById('jobs-panel')          as HTMLDivElement
   const jobsList           = document.getElementById('jobs-list')           as HTMLDivElement
   const voicePanel         = document.getElementById('voice-panel')        as HTMLDivElement
+  const voicePanelHeading  = document.getElementById('voice-panel-heading') as HTMLDivElement
   const voiceList          = document.getElementById('voice-list')          as HTMLDivElement
   const voiceDescription   = document.getElementById('voice-description')   as HTMLDivElement
+  const voiceSynthBtn      = document.getElementById('voice-synth-btn')      as HTMLButtonElement
 
+  function openVoicePanel() {
+    voicePanel.classList.add('open')
+    workspace.classList.add('voice-panel-open')
+    jobsPanel.classList.add('voice-panel-open')
+  }
   function toggleVoicePanel() {
     voicePanel.classList.toggle('open')
     const open = voicePanel.classList.contains('open')
@@ -698,6 +706,23 @@ export function mount(onReader: () => void): () => void {
   }
   voiceToggleBtn.addEventListener('click', toggleVoicePanel)
   voiceLabel.addEventListener('click', toggleVoicePanel)
+
+  // A doc with no voices at all has nowhere else to trigger synthesis —
+  // Synthesize lives only in the voice panel now — so force it open
+  // rather than leaving the user to discover the mic icon. Once a doc
+  // has at least one voice, the panel reverts to a plain toggle.
+  function hasAnyVoice(doc: DocumentState | null | undefined): boolean {
+    return !!doc && Object.keys(doc.voices).length > 0
+  }
+  function ensureVoicePanelOpenIfNoVoice() {
+    if (!hasAnyVoice(fetchedDocument?.current)) openVoicePanel()
+  }
+  function updateVoicePanelHeading() {
+    voicePanelHeading.textContent = hasAnyVoice(fetchedDocument?.current) ? 'New Voice' : 'Voice'
+  }
+  function updateVoiceSynthEnabled() {
+    voiceSynthBtn.disabled = !textInput.value.trim()
+  }
 
   headerJobsLabel.addEventListener('click', () => {
     jobsPanel.classList.toggle('open')
@@ -799,13 +824,23 @@ export function mount(onReader: () => void): () => void {
     viewState.setInputAreaVisibility({ urlArea, docFields }, activeTab, urlFetched)
   }
 
+  // URL/Text tabs only matter for choosing how to start a brand-new doc —
+  // once one exists (draft or fully synthesized), they're just two more
+  // ways to land in inconsistent state (most of this session's bugs
+  // traced back to activeTab/urlFetched interacting with doc state), so
+  // hide them entirely rather than letting them go stale.
+  function setTabsVisible(visible: boolean) {
+    tabUrl.style.display = visible ? '' : 'none'
+    tabText.style.display = visible ? '' : 'none'
+  }
+
   function setEditPreviewVisibility(edit: boolean) {
     viewState.setEditPreviewVisibility({ editArea, articleArea, editToggleBtn }, edit)
   }
 
   type DocStage = viewState.DocStage
   function setDocStage(stage: DocStage) {
-    viewState.setDocStage({ synthBtn, editToggleBtn, copyAnnotationsBtn }, stage)
+    viewState.setDocStage({ editToggleBtn, copyAnnotationsBtn }, stage)
   }
 
   function setOutline(headings: HeadingEntry[]) {
@@ -943,12 +978,12 @@ export function mount(onReader: () => void): () => void {
 
   async function saveAndSynth(plain: string) {
     await triggerSave()
-    if (!selectedVoice || !currentDocId) return
-    await cancelStaleJobsForVoice(currentDocId, selectedVoice)
+    if (!candidateVoice || !currentDocId) return
+    await cancelStaleJobsForVoice(currentDocId, candidateVoice)
     // Restart WS stream so new spans get audio wired up
     playerControls.style.display = ''
     player.setPendingSpans(currentPendingSpans)
-    player.synthesize(plain, selectedVoice, currentPendingSpans, currentDocId)
+    player.synthesize(plain, candidateVoice, currentPendingSpans, currentDocId)
     // Bg job caches to disk
     await startBgJob(plain, currentDocId)
   }
@@ -981,6 +1016,7 @@ export function mount(onReader: () => void): () => void {
 
   textInput.addEventListener('input', () => {
     updateEstimate(textInput.value)
+    updateVoiceSynthEnabled()
     scheduleSave()
   })
 
@@ -996,17 +1032,12 @@ export function mount(onReader: () => void): () => void {
     setInputAreaVisibility()
 
     if (tab === 'text') {
-      if (currentDocId) {
-        // Doc already loaded — switch to Edit mode to show the textarea
-        isEditMode = true
-        setEditPreviewVisibility(true)
-      } else {
-        // No doc — blank edit slate. (isEditMode intentionally left
-        // unchanged here, matching prior behavior.)
-        editArea.style.display = ''
-        articleArea.style.display = 'none'
-        setDocStage('blank')
-      }
+      // Tabs are hidden once a doc exists (setTabsVisible), so this only
+      // ever runs pre-creation — no doc yet, blank edit slate.
+      // (isEditMode intentionally left unchanged, matching prior behavior.)
+      editArea.style.display = ''
+      articleArea.style.display = 'none'
+      setDocStage('closed')
     } else {
       // Switching back to URL tab — restore article view
       if (!isEditMode) {
@@ -1040,7 +1071,7 @@ export function mount(onReader: () => void): () => void {
 
   player.onError(msg => {
     setJobStatus(`Error: ${msg}`)
-    synthBtn.disabled = false
+    updateVoiceSynthEnabled()
     playBtn.disabled = true
   })
 
@@ -1048,7 +1079,7 @@ export function mount(onReader: () => void): () => void {
     downloadFilename)
 
   player.onEnded(() => {
-    synthBtn.disabled = false
+    updateVoiceSynthEnabled()
     if (synthStart > 0) {
       const elapsed = ((Date.now() - synthStart) / 1000).toFixed(0)
       const words = player.synthesizedWordCount
@@ -1085,8 +1116,8 @@ export function mount(onReader: () => void): () => void {
 
     function appendVoiceRow(id: string, name: string) {
       const row = document.createElement('button')
-      row.className = 'voice-row' + (id === selectedVoice ? ' selected' : '')
-      row.addEventListener('click', () => selectVoice(id, true))
+      row.className = 'voice-row' + (id === candidateVoice ? ' selected' : '')
+      row.addEventListener('click', () => setCandidateVoice(id))
 
       const nameEl = document.createElement('span')
       nameEl.className = 'voice-row-name'
@@ -1131,41 +1162,39 @@ export function mount(onReader: () => void): () => void {
     }
   }
 
-  // Shown whenever the open doc/draft has no voice committed yet — i.e.
-  // selectVoice() hasn't been called for it. Distinct from `selectedVoice`
-  // itself, which may still hold a carried-forward value from a previous
-  // doc (kept around as a convenient default, but not yet real for this
-  // one) — the label should never claim a voice is chosen until it is.
+  // Shown whenever the open doc has no active/published voice — distinct
+  // from `selectedVoice` possibly being null vs. set; this is just the
+  // bottom-of-card label, which only ever changes via setActiveVoice
+  // (doc load, or the Documents-panel voice picker) — never via picking
+  // a candidate in the side panel.
   function showNoVoiceSelected() {
     voiceLabel.textContent = 'No voice selected.'
   }
 
-  function selectVoice(id: string, restartPlayer = false) {
+  // The doc's current/published voice — drives the bottom #voice-label
+  // and is what playback (startListen) uses. Only ever set by loading a
+  // doc or by the Documents-panel's per-document voice picker, never by
+  // picking a row in the side panel (that's setCandidateVoice, below).
+  function setActiveVoice(id: string) {
     selectedVoice = id
-    const v = voices.find(v => v.id === id)
-    voiceDescription.textContent = v?.description ?? ''
-    const label = `Voice: ${voiceDisplayName(id)}`
-    voiceLabel.textContent = label
-    renderVoices()
-
-    // Only restart playback (which kicks off a real synth request) when
-    // this doc already has some audio — i.e. this is "switch to a
-    // different/new voice for an existing doc," not "merely looked at a
-    // voice for a still-unsynthesized draft." A draft's voice choice
-    // isn't committed until Synthesize is clicked.
-    const doc = fetchedDocument?.current
-    if (restartPlayer && doc && hasReadyVoice(doc) && doc.plain_text && currentDocId) {
-      player.stop()
-      player.setPendingSpans(currentPendingSpans)
-      synthStart = Date.now()
-      player.synthesize(doc.plain_text, id, currentPendingSpans, currentDocId)
-    }
+    voiceLabel.textContent = `Voice: ${voiceDisplayName(id)}`
   }
 
-  // Resolved lazily, only at the moment a synth is actually about to
-  // happen for a doc/draft that has no chosen voice yet — never as an
-  // ambient default, so a brand-new draft doesn't silently "have" a
-  // voice (and isn't synthesized with one) before the user commits.
+  // The voice highlighted in the side panel, about to be synthesized by
+  // its Synthesize button. Deliberately separate from the doc's active
+  // voice — auditioning/picking a candidate here must never change what
+  // the doc currently plays or is published as.
+  function setCandidateVoice(id: string) {
+    candidateVoice = id
+    const v = voices.find(v => v.id === id)
+    voiceDescription.textContent = v?.description ?? ''
+    renderVoices()
+  }
+
+  // Resolved once voices load, as the panel's default candidate — safe
+  // to default here (unlike the old single shared variable) since
+  // picking a candidate never auto-synthesizes anything on its own;
+  // Synthesize is always a deliberate, separate click.
   function defaultVoiceId(): string | null {
     if (voices.length === 0) return null
     return (voices.find(v => v.id === 'kokoro:af_heart')
@@ -1180,8 +1209,14 @@ export function mount(onReader: () => void): () => void {
       const data: VoicesResponse = await res.json()
       voices = data.voices
       hideErrorBar()
-      renderVoices()
+      if (!candidateVoice) {
+        const id = defaultVoiceId()
+        if (id) setCandidateVoice(id)
+      } else {
+        renderVoices()
+      }
       if (!selectedVoice) showNoVoiceSelected()
+      updateVoiceSynthEnabled()
       updateEstimate(textInput.value)
     } catch {
       voiceList.innerHTML = '<div class="voice-loading">—</div>'
@@ -1222,7 +1257,7 @@ export function mount(onReader: () => void): () => void {
   function updateEstimate(text: string) {
     const words = text.trim().split(/\s+/).filter(Boolean).length
     if (words === 0) { setEstimateText(''); return }
-    const backend = selectedVoice?.split(':')[0] ?? 'kokoro'
+    const backend = candidateVoice?.split(':')[0] ?? 'kokoro'
     const rate = SECS_PER_WORD[backend] ?? 0.2
     const secs = words * rate
     setEstimateText(`${fmtDuration(secs)} to synthesize (${words} words)`)
@@ -1249,7 +1284,6 @@ export function mount(onReader: () => void): () => void {
     fetchStatus.textContent = 'Fetching…'
     fetchStatus.className = 'fetch-status loading'
     urlInput.disabled = true
-    synthBtn.disabled = true
     fetchedDocument?.destroy()
     fetchedDocument = null
     currentPendingSpans = []
@@ -1268,6 +1302,7 @@ export function mount(onReader: () => void): () => void {
       docTitleInput.value = state.title ?? ''
       docSourceUrlInput.value = state.source_url ?? url
       textInput.value = state.content ?? ''
+      updateVoiceSynthEnabled()
       lastRenderedContent = state.content ?? ''
       articleContent.innerHTML = ''
       const { pendingSpans, headings } = renderMarkdown(state.content ?? '', state.plain_text ?? '', articleContent)
@@ -1283,7 +1318,10 @@ export function mount(onReader: () => void): () => void {
       urlInput.disabled = true
       urlFetched = true
       setInputAreaVisibility()
-      setDocStage('draft')
+      setTabsVisible(false)
+      setDocStage('open')
+      updateVoicePanelHeading()
+      ensureVoicePanelOpenIfNoVoice()
       return true
     } catch (e: any) {
       fetchStatus.textContent = e?.message ?? 'Fetch failed'
@@ -1292,25 +1330,17 @@ export function mount(onReader: () => void): () => void {
       currentDocId = null
       showDocId(null)
       return false
-    } finally {
-      synthBtn.disabled = false
     }
   }
 
   // ── Background job ─────────────────────────────────────────────────────────
 
-  function showListenNew() {
-    setDocStage('listening')
-    synthBtn.disabled = false
-  }
-
   async function startBgJob(text: string, documentId?: string) {
     stopBgPoll()
-    synthBtn.disabled = true
     setJobStatus('Queuing…')
     try {
       const body: Record<string, string> = { text }
-      if (selectedVoice) body.voice = selectedVoice
+      if (candidateVoice) body.voice = candidateVoice
       if (documentId) body.document_id = documentId
       const res = await fetch('/jobs', {
         method: 'POST',
@@ -1320,7 +1350,6 @@ export function mount(onReader: () => void): () => void {
       const job: JobInfo = await res.json()
       if (!res.ok) {
         setJobStatus(job.error ?? 'Failed to queue job')
-        synthBtn.disabled = false
         return
       }
       if (job.status === 'done') {
@@ -1335,11 +1364,11 @@ export function mount(onReader: () => void): () => void {
           onError: msg => setJobStatus(msg),
         })
       }
-      showListenNew()
+      setDocStage('open')
+      updateVoicePanelHeading()
       pollQueue()
     } catch {
       setJobStatus('Could not reach server')
-      synthBtn.disabled = false
     }
   }
 
@@ -1374,13 +1403,14 @@ export function mount(onReader: () => void): () => void {
     fetchStatus.textContent = ''
     fetchStatus.className = 'fetch-status'
     textInput.value = ''
+    updateVoiceSynthEnabled()
     docTitleInput.value = ''
     docSourceUrlInput.value = ''
     estimateText = ''
     jobStatusText = ''
     renderTimeEstimate()
     showNoVoiceSelected()
-    setDocStage('blank')
+    setDocStage('closed')
     playerControls.style.display = 'none'
     setOutline([])
     setEditPreviewVisibility(false)
@@ -1399,6 +1429,9 @@ export function mount(onReader: () => void): () => void {
     tabText.classList.remove('active')
     urlFetched = false
     setInputAreaVisibility()
+    setTabsVisible(true)
+    updateVoicePanelHeading()
+    ensureVoicePanelOpenIfNoVoice()
     pollQueue()
   }
 
@@ -1421,6 +1454,7 @@ export function mount(onReader: () => void): () => void {
       urlFetched = false
     }
     setInputAreaVisibility()
+    setTabsVisible(false)
 
     // Reset to Preview mode
     isEditMode = false
@@ -1434,7 +1468,7 @@ export function mount(onReader: () => void): () => void {
     timeTotal.textContent = '0:00'
     jobStatusText = ''
     showNoVoiceSelected()
-    setDocStage('loadingDoc')
+    setDocStage('loading')
     playerControls.style.display = 'none'
     setOutline([])
     articleContent.innerHTML = '<div class="loading">Loading…</div>'
@@ -1468,12 +1502,13 @@ export function mount(onReader: () => void): () => void {
       showDocId(currentDocId)
       const voice = pickVoice(data.voices)
       if (voice) {
-        selectVoice(voice)
+        setActiveVoice(voice)
       } else {
         renderVoices()
         showNoVoiceSelected()
       }
       textInput.value = data.content
+      updateVoiceSynthEnabled()
       docTitleInput.value = data.title ?? ''
       docSourceUrlInput.value = data.source_url ?? ''
 
@@ -1486,21 +1521,23 @@ export function mount(onReader: () => void): () => void {
       setOutline(headings)
       applyAnnotations(articleContent, currentDocId!)
 
+      setDocStage('open')
+      updateVoicePanelHeading()
+      ensureVoicePanelOpenIfNoVoice()
+
       const voiceEntry = voice ? data.voices[voice] : undefined
       const audioReady = !!voiceEntry && voiceEntry.status !== 'error'
       if (audioReady) {
         setEstimateText('')
-        showListenNew()
         startListen()
       } else {
         // No audio for this doc/voice yet — this is a draft. Don't call
         // startListen() (it always calls player.synthesize(), which the
         // server treats as a real synth request — sending voice:'' picks
         // a server-side default rather than truly doing nothing). Leave
-        // the player inert; Synthesize is the only thing that should
-        // start synthesis.
+        // the player inert; Synthesize (in the voice panel) is the only
+        // thing that should start synthesis.
         updateEstimate(data.plain_text)
-        setDocStage('draft')
       }
     } catch {
       articleContent.innerHTML = '<div class="error">Could not load document.</div>'
@@ -1511,64 +1548,27 @@ export function mount(onReader: () => void): () => void {
 
   newBtn.addEventListener('click', resetEdit)
 
-  // ── URL synthesize / text create ───────────────────────────────────────────
+  // ── Synthesize (voice panel) ────────────────────────────────────────────────
+  // The single synthesis trigger, for both new docs and existing ones:
+  // tied to whatever voice is picked in the panel (candidateVoice), not
+  // to which tab created the doc — by the time this is clickable, content
+  // already exists (textInput is populated for both URL and Text tab
+  // flows), so there's no separate "fetch-if-needed" step to do here.
 
-  async function synthesizeUrlDoc(url: string): Promise<void> {
-    if (!fetchedDocument) {
-      const ok = await fetchDocument(url)
-      if (!ok) return
-    }
-
-    const text = fetchedDocument?.current.plain_text
-    if (!text) return
-
-    if (!selectedVoice) {
-      const id = defaultVoiceId()
-      if (id) selectVoice(id)
-    }
-
-    // If the user was tweaking the textarea (Edit mode) before clicking
-    // Synthesize, switch to Preview so they land on the player/article
-    // view that's about to receive audio — not a plain visibility flip
-    // via setEditMode(false), since that branch's content-diff check
-    // would also re-trigger save+resynth and race with startBgJob below.
+  voiceSynthBtn.addEventListener('click', async () => {
     if (isEditMode) {
       isEditMode = false
       setEditPreviewVisibility(false)
     }
-
-    showListenNew()
-    startListen()
-    await startBgJob(text, fetchedDocument?.current.id)
-  }
-
-  synthBtn.addEventListener('click', async () => {
-    if (activeTab === 'text') {
-      if (!selectedVoice) {
-        const id = defaultVoiceId()
-        if (id) selectVoice(id)
-      }
-      if (isEditMode) {
-        isEditMode = false
-        setEditPreviewVisibility(false)
-      }
-      showListenNew()
+    voiceSynthBtn.disabled = true
+    try {
       // Force synth regardless of content diff — clicking Synthesize is
       // the explicit signal, not setEditMode's "did the text change" proxy
       // (which would no-op for an unedited, never-synthesized draft).
       await renderPreviewAndSynth(textInput.value)
-      return
+    } finally {
+      updateVoiceSynthEnabled()
     }
-
-    const url = urlInput.value.trim()
-
-    if (!fetchedDocument && !url) {
-      fetchStatus.textContent = 'Paste a URL first.'
-      fetchStatus.className = 'fetch-status error'
-      return
-    }
-
-    await synthesizeUrlDoc(url)
   })
 
   urlInput.addEventListener('keydown', async (e: KeyboardEvent) => {
@@ -1576,8 +1576,7 @@ export function mount(onReader: () => void): () => void {
     const url = urlInput.value.trim()
     if (!url) return
     // Enter only fetches — gives the user a chance to edit before
-    // committing to synthesis. The Synthesize button (synthBtn handler
-    // above) is the explicit trigger that fetches-if-needed and synths.
+    // committing to synthesis via the voice panel's Synthesize button.
     await fetchDocument(url)
   })
 

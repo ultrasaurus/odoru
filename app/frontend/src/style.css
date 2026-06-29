@@ -1118,6 +1118,13 @@ html, body {
   transition: background 0.15s, color 0.15s;
 }
 
+/* Lives in the voice panel now — full width of the sidebar, with some
+   breathing room above it since it follows the description text. */
+#voice-synth-btn {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
 .synth-btn:hover:not(:disabled) {
   background: var(--accent);
   color: var(--bg);
@@ -1170,14 +1177,6 @@ html, body {
   flex: 1;
   min-width: 0;
   padding: 2.5rem 2rem 2.5rem 1rem;
-}
-
-.synth-buttons {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-shrink: 0;
-  margin-left: auto;
 }
 
 .download-btn {

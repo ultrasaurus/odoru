@@ -24,25 +24,23 @@ export function setEditPreviewVisibility(
   els.editToggleBtn.textContent = edit ? 'Read' : 'Edit'
 }
 
-// 'blank'      — no doc loaded (initial state, or after New)
-// 'loadingDoc' — loadAndListen mid-fetch; nothing actionable yet
-// 'draft'      — doc exists (just fetched, or reopened) but has no audio
-//                for the active voice yet; Synthesize is still live
-//                alongside Edit/Copy so the user can edit first
-// 'listening'  — audio exists or is being synthesized
+// 'closed'  — no doc loaded (initial state, or after New)
+// 'loading' — loadAndListen mid-fetch; nothing actionable yet
+// 'open'    — a doc/draft exists, regardless of whether it has audio yet —
+//             Edit/Copy-Annotations apply equally either way
 //
-// New isn't part of this matrix — it's a global action (start a fresh
-// doc), not scoped to whatever's currently open, so it lives in the
-// header and is always visible regardless of doc stage.
-export type DocStage = 'blank' | 'loadingDoc' | 'draft' | 'listening'
+// Synthesize isn't part of this matrix at all anymore — it lives in the
+// voice panel now, tied to whatever voice is picked there, not to doc
+// stage. New also isn't part of this matrix — it's a global action, not
+// scoped to whatever's currently open, so it lives in the header.
+export type DocStage = 'closed' | 'loading' | 'open'
 
 export function setDocStage(
-  els: { synthBtn: HTMLElement, editToggleBtn: HTMLElement, copyAnnotationsBtn: HTMLElement },
+  els: { editToggleBtn: HTMLElement, copyAnnotationsBtn: HTMLElement },
   stage: DocStage,
 ) {
-  els.synthBtn.style.display = (stage === 'blank' || stage === 'draft') ? '' : 'none'
-  els.editToggleBtn.style.display = (stage === 'listening' || stage === 'draft') ? '' : 'none'
-  els.copyAnnotationsBtn.style.display = (stage === 'listening' || stage === 'draft') ? '' : 'none'
+  els.editToggleBtn.style.display = stage === 'open' ? '' : 'none'
+  els.copyAnnotationsBtn.style.display = stage === 'open' ? '' : 'none'
 }
 
 export function setOutline(els: { editOutlineSection: HTMLElement }, headings: HeadingEntry[]) {

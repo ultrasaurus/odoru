@@ -49,37 +49,26 @@ describe('setEditPreviewVisibility', () => {
 
 describe('setDocStage', () => {
   function elsFor() {
-    return { synthBtn: div(), editToggleBtn: div(), copyAnnotationsBtn: div() }
+    return { editToggleBtn: div(), copyAnnotationsBtn: div() }
   }
 
-  it('blank: only synthBtn shown', () => {
+  it('closed: both hidden', () => {
     const els = elsFor()
-    setDocStage(els, 'blank')
-    expect(els.synthBtn.style.display).toBe('')
+    setDocStage(els, 'closed')
     expect(els.editToggleBtn.style.display).toBe('none')
     expect(els.copyAnnotationsBtn.style.display).toBe('none')
   })
 
-  it('loadingDoc: everything hidden', () => {
+  it('loading: both hidden', () => {
     const els = elsFor()
-    setDocStage(els, 'loadingDoc')
-    expect(els.synthBtn.style.display).toBe('none')
+    setDocStage(els, 'loading')
     expect(els.editToggleBtn.style.display).toBe('none')
     expect(els.copyAnnotationsBtn.style.display).toBe('none')
   })
 
-  it('listening: synthBtn hidden, the other two shown', () => {
+  it('open: both shown', () => {
     const els = elsFor()
-    setDocStage(els, 'listening')
-    expect(els.synthBtn.style.display).toBe('none')
-    expect(els.editToggleBtn.style.display).toBe('')
-    expect(els.copyAnnotationsBtn.style.display).toBe('')
-  })
-
-  it('draft: all three shown', () => {
-    const els = elsFor()
-    setDocStage(els, 'draft')
-    expect(els.synthBtn.style.display).toBe('')
+    setDocStage(els, 'open')
     expect(els.editToggleBtn.style.display).toBe('')
     expect(els.copyAnnotationsBtn.style.display).toBe('')
   })
