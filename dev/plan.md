@@ -32,6 +32,16 @@ build incrementally to support word-level timestamps, pre-req for transclusion
 
 # Open questions / future work
 
+## trafilatura - imperfect HTML => Markdown
+Long-term would like this to be native in Rust. For now collecting un-handled
+cases that were found in testing, not docs that matter to me
+- import https://www.theblogstarter.com/html-for-beginners/ fails to produce correct markdown.
+  Original page:  
+  `If we add &lt;b&gt;This is some text.&lt;/b&gt; to our HTML file`  
+  Incorrect markdown:  
+  `If we add <b>This is some text.</b> to our HTML file`
+
+
 ## Mutable text and audio cache invalidation
 See [tts-backend/cache.md](tts-backend/cache.md) for cache details.
 

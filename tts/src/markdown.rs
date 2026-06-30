@@ -151,6 +151,11 @@ pub fn to_plain_text(markdown: &str) -> String {
                     current.push_str(&text);
                 }
             }
+            Event::InlineHtml(html) => {
+                if !in_image {
+                    current.push_str(&html);
+                }
+            }
             Event::SoftBreak | Event::HardBreak => {
                 current.push(' ');
             }
@@ -360,5 +365,25 @@ mod tests {
         let (sentences, block_lengths) = split_for_export(md);
         assert_eq!(block_lengths, vec![1]);
         assert_eq!(sentences[0].text, "He invented the mouse.");
+    }
+
+    // Literal "<...>"-shaped text (e.g. citation-link syntax like "<Ref-1>"
+    // from source documents predating HTML/markdown) is valid CommonMark raw
+    // inline HTML syntax, so a naive "strip markup" pass can silently drop
+    // it. See dev/document.md's plain_text contract and the historical bug
+    // in dl::augment::extract_content (fixed by e9e9268).
+    #[test]
+    fn preserves_literal_angle_bracket_text() {
+        let md = "A short history may be found in <Ref-1>, along with a summary.";
+        assert_eq!(
+            to_plain_text(md),
+            "A short history may be found in <Ref-1>, along with a summary."
+        );
+    }
+
+    #[test]
+    fn preserves_literal_angle_bracket_text_adjacent_to_real_link() {
+        let md = "See <[Ref-1](https://example.com/Ref-1)> for details.";
+        assert_eq!(to_plain_text(md), "See <Ref-1> for details.");
     }
 }

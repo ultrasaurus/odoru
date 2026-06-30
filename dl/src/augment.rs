@@ -90,6 +90,16 @@ fn strip_sibling_chrome(html: &str) -> String {
     out
 }
 
+/// Escape characters that have special meaning in CommonMark so that literal
+/// text extracted from HTML renders correctly when stored as markdown.
+/// `\` must be escaped first to avoid double-escaping the backslashes we add.
+fn escape_markdown(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('[', "\\[")
+}
+
 /// Extract body content from NLS/Augment-style outline HTML.
 /// Returns `(markdown, plain_text)`, or `None` if no outline elements were found.
 /// - `markdown`: headings prefixed with `#`/`##` etc., paragraphs as-is.
@@ -120,9 +130,10 @@ pub fn extract_content(html: &str) -> Option<(String, String)> {
             continue;
         }
 
+        let md_text = escape_markdown(&text);
         let md_chunk = match heading_prefix(tag) {
-            Some(prefix) => format!("{}{}", prefix, text),
-            None => text.clone(),
+            Some(prefix) => format!("{}{}", prefix, md_text),
+            None => md_text,
         };
 
         md_chunks.push(md_chunk);
@@ -139,6 +150,14 @@ pub fn extract_content(html: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_escape_markdown() {
+        assert_eq!(escape_markdown("<Ref-1>"), "&lt;Ref-1&gt;");
+        assert_eq!(escape_markdown("[1a]"), "\\[1a]");
+        assert_eq!(escape_markdown("a\\b"), "a\\\\b");
+        assert_eq!(escape_markdown("normal text"), "normal text");
+    }
 
     #[test]
     fn test_is_augment_site() {
@@ -202,5 +221,25 @@ mod tests {
     fn test_extract_content_empty() {
         let html = "<html><body><p>No level classes here.</p></body></html>";
         assert!(extract_content(html).is_none(), "expected None for content with no level classes");
+    }
+
+    // AUGMENT documents use "<Ref-1>"-style citation-link syntax that
+    // predates HTML/markdown; the source HTML escapes the literal brackets
+    // as &lt;/&gt; around a real <a> tag (e.g.
+    // "&lt;<a href="...">Ref-1</a>&gt;"). Regression test for a historical
+    // bug where this combination got swallowed (fixed by e9e9268).
+    #[test]
+    fn test_literal_angle_bracket_text_around_real_link_preserved() {
+        let html = r##"
+            <html><body>
+            <p class="level3">
+                A short history may be found in &lt;<a href="https://example.com/Ref-1">Ref-1</a>&gt;,
+                along with a summary.
+            </p>
+            </body></html>
+        "##;
+        let (markdown, plain_text) = extract_content(html).unwrap();
+        assert!(markdown.contains("&lt;Ref-1&gt;"), "markdown should escape brackets: {markdown:?}");
+        assert!(plain_text.contains("<Ref-1>"), "plain_text lost literal brackets: {plain_text:?}");
     }
 }
