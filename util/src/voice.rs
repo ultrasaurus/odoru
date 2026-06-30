@@ -118,14 +118,14 @@ impl VoiceDef {
     }
 }
 
-/// Resolve the voices directory.
+/// Resolve a voices directory by subpath.
 ///
 /// Resolution order:
-///   1. `$VOICES_DIR` environment variable
-///   2. Next to the installed binary (`<exe_dir>/voices`)
-///   3. Workspace root baked in at compile time (`CARGO_MANIFEST_DIR/../voices`)
-pub fn voices_dir() -> Result<PathBuf> {
-    // 1. Env var
+///   1. `$VOICES_DIR` environment variable (used as-is; `subpath` is ignored)
+///   2. Next to the installed binary (`<exe_dir>/<subpath>`)
+///   3. Compile-time path (`CARGO_MANIFEST_DIR/../<subpath>`)
+pub fn voices_dir_for(subpath: &str) -> Result<PathBuf> {
+    // 1. Env var (full path override — subpath not appended)
     if let Ok(dir) = std::env::var("VOICES_DIR") {
         let p = PathBuf::from(dir);
         if p.is_dir() { return Ok(p); }
@@ -134,17 +134,27 @@ pub fn voices_dir() -> Result<PathBuf> {
 
     // 2. Next to the binary
     if let Ok(exe) = std::env::current_exe() {
-        let p = exe.parent().unwrap_or(Path::new(".")).join("voices");
+        let p = exe.parent().unwrap_or(Path::new(".")).join(subpath);
         if p.is_dir() { return Ok(p); }
     }
 
-    // 3. Compile-time workspace root
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../voices");
+    // 3. Compile-time path
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join(subpath);
     if p.is_dir() { return Ok(p); }
 
     anyhow::bail!(
-        "voices directory not found. Set $VOICES_DIR or place a voices/ directory next to the binary."
+        "voices directory not found at '{subpath}'. Set $VOICES_DIR or place a {subpath}/ directory next to the binary."
     )
+}
+
+/// Resolve the voices directory (F5-TTS voices).
+///
+/// Resolution order:
+///   1. `$VOICES_DIR` environment variable
+///   2. Next to the installed binary (`<exe_dir>/voices`)
+///   3. Compile-time path (`CARGO_MANIFEST_DIR/../voices`)
+pub fn voices_dir() -> Result<PathBuf> {
+    voices_dir_for("voices")
 }
 
 #[cfg(test)]
@@ -249,6 +259,28 @@ mod tests {
         let result = voices_dir();
         std::env::remove_var("VOICES_DIR");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn voices_dir_for_uses_subpath_next_to_binary() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // No VOICES_DIR set; rely on the subpath being absent next to the binary
+        // and the compile-time path. We can't easily test the binary-adjacent
+        // case in unit tests, but we verify that passing a subpath that doesn't
+        // exist anywhere returns an error.
+        std::env::remove_var("VOICES_DIR");
+        assert!(voices_dir_for("nonexistent/subpath/xyz").is_err());
+    }
+
+    #[test]
+    fn voices_dir_for_env_var_ignores_subpath() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempdir().unwrap();
+        std::env::set_var("VOICES_DIR", tmp.path());
+        // subpath is ignored when env var is set
+        let result = voices_dir_for("some/other/path");
+        std::env::remove_var("VOICES_DIR");
+        assert_eq!(result.unwrap(), tmp.path());
     }
 
     #[test]

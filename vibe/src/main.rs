@@ -2,6 +2,7 @@ mod config;
 mod runpod;
 mod segment;
 mod synth;
+mod voice;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -190,6 +191,18 @@ enum Command {
 }
 
 
+/// Poll `<base_url>/health` until the service reports ready, then return.
+async fn wait_for_health(http: &reqwest::Client, base_url: &str) {
+    loop {
+        match http.get(format!("{base_url}/health")).send().await {
+            Ok(r) if r.status().is_success() => break,
+            Ok(r) => tracing::info!("health: HTTP {} — retrying", r.status()),
+            Err(e) => tracing::info!("health: {e} — retrying"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+}
+
 /// Run a command, streaming its output, and bail if it fails.
 fn run(argv: &[String]) -> Result<()> {
     info!("running: {}", argv.join(" "));
@@ -266,7 +279,7 @@ async fn main() -> Result<()> {
             let bytes = std::fs::read(&wav_path).with_context(|| format!("reading {wav_path}"))?;
             info!("uploading {wav_path} ({} bytes) as voice {name}/{gender}", bytes.len());
 
-            let proxy_base_url = match url {
+            let base_url = match url {
                 Some(url) => url,
                 None => {
                     let pod_id = pod_id.context("pod_id or --url is required")?;
@@ -278,26 +291,9 @@ async fn main() -> Result<()> {
                 .timeout(std::time::Duration::from_secs(30))
                 .build()?;
 
-            info!("waiting for vibe-service at {proxy_base_url}/health ...");
-            loop {
-                match http.get(format!("{proxy_base_url}/health")).send().await {
-                    Ok(r) if r.status().is_success() => break,
-                    Ok(r) => info!("health: HTTP {} — retrying", r.status()),
-                    Err(e) => info!("health: {e} — retrying"),
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            }
-
-            let mut req = http.post(format!("{proxy_base_url}/voices/{name}/{gender}")).body(bytes);
-            if let Some(ref s) = secret {
-                req = req.bearer_auth(s);
-            }
-            let resp = req.send().await.context("POST /voices")?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("upload failed: HTTP {status} {body}");
-            }
+            info!("waiting for vibe-service at {base_url}/health ...");
+            wait_for_health(&http, &base_url).await;
+            voice::upload_wav(&http, &base_url, &name, &gender, bytes, &secret).await?;
             info!("uploaded voice {name}/{gender} — pass --speaker {name} to synthesize");
         }
         Command::Ssh { pod_id } => {
