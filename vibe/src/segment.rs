@@ -206,7 +206,7 @@ pub fn run(name: &str, basedir: Option<&str>) -> Result<()> {
 /// Split a segment stem like "authorship_seg01" into its document name and
 /// 1-based segment index. Returns `None` if it doesn't match that pattern
 /// (e.g. a name not produced by `run` above).
-fn parse_segment_name(name: &str) -> Option<(&str, u32)> {
+pub(crate) fn parse_segment_name(name: &str) -> Option<(&str, u32)> {
     let pos = name.rfind("_seg")?;
     let (doc_name, rest) = (&name[..pos], &name[pos + 4..]);
     let index: u32 = rest.parse().ok()?;
@@ -285,15 +285,13 @@ pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
         .with_context(|| format!("reading {sidecar_path}"))?;
     let sidecar: Sidecar = serde_json::from_str(&sidecar_json)
         .with_context(|| format!("parsing {sidecar_path}"))?;
+    let missing = missing_segments(name, basedir)?;
+    let missing_set: std::collections::HashSet<&str> = missing.iter().map(String::as_str).collect();
 
-    let mut missing = Vec::new();
     for seg in &sidecar.segments {
         let seg_name = format!("{name}_seg{:02}", seg.index);
-        let audio_exists = seg.files.audio.as_deref()
-            .is_some_and(|f| std::path::Path::new(&format!("{seg_dir}/{f}")).exists());
-        if !audio_exists {
+        if missing_set.contains(seg_name.as_str()) {
             println!("{seg_name}: MISSING (not yet synthesized)");
-            missing.push(seg_name);
             continue;
         }
         let verdict = seg.files.report.as_deref()
@@ -316,6 +314,26 @@ pub fn summary(name: &str, basedir: Option<&str>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Returns segment names (e.g. "authorship_seg05") from
+/// `<basedir>/<name>.segments.json` that don't yet have a generated audio
+/// file on disk — either never synthesized, or synthesized then deleted.
+pub fn missing_segments(name: &str, basedir: Option<&str>) -> Result<Vec<String>> {
+    let seg_dir = resolve_basedir(basedir);
+    let sidecar_path = format!("{seg_dir}/{name}.segments.json");
+    let sidecar_json = std::fs::read_to_string(&sidecar_path)
+        .with_context(|| format!("reading {sidecar_path}"))?;
+    let sidecar: Sidecar = serde_json::from_str(&sidecar_json)
+        .with_context(|| format!("parsing {sidecar_path}"))?;
+
+    Ok(sidecar.segments.iter()
+        .filter(|seg| {
+            !seg.files.audio.as_deref()
+                .is_some_and(|f| std::path::Path::new(&format!("{seg_dir}/{f}")).exists())
+        })
+        .map(|seg| format!("{name}_seg{:02}", seg.index))
+        .collect())
 }
 
 /// Regenerate `<basedir>/<name>.segments.json` from whatever

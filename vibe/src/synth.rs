@@ -35,6 +35,11 @@ pub enum SynthInput {
         name: String,
         /// Odoru document id to export from and import into
         doc_id: String,
+        /// Resume an existing run: skip export/segment, synthesize only
+        /// segments that don't yet have audio in --basedir, then import.
+        /// Errors if --basedir doesn't already contain a prior `doc` run.
+        #[arg(long)]
+        missing: bool,
     },
 }
 
@@ -67,10 +72,10 @@ pub async fn run(
     let temp = temp.or(voice_def.as_ref().and_then(|v| v.temp));
 
     match input {
-        SynthInput::Doc { name, doc_id } => {
+        SynthInput::Doc { name, doc_id, missing } => {
             crate::doc::run(
-                client, name, doc_id, voice_def.as_ref(), pod_id, url, speaker, cfg_scale, temp,
-                speed, seed, gpu_price, port, basedir,
+                client, name, doc_id, missing, voice_def.as_ref(), pod_id, url, speaker,
+                cfg_scale, temp, speed, seed, gpu_price, port, basedir,
             )
             .await?;
         }
@@ -530,6 +535,36 @@ fn expand_range_token(token: &str) -> Result<Vec<String>> {
     Ok(vec![token.to_string()])
 }
 
+/// Compresses a sorted-or-not list of segment indices into a comma-joined
+/// range spec parseable by [`parse_segment_list`], e.g. `[5, 6, 7, 9]` with
+/// prefix "authorship_seg" -> "authorship_seg05-07,authorship_seg09".
+/// Indices are deduplicated; each number is zero-padded to at least 2
+/// digits, matching `segment::run`'s `<name>_seg{:02}` naming convention.
+pub(crate) fn compress_segment_indices(prefix: &str, indices: &[u32]) -> String {
+    let mut sorted: Vec<u32> = indices.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for n in sorted {
+        match runs.last_mut() {
+            Some((_, end)) if n == *end + 1 => *end = n,
+            _ => runs.push((n, n)),
+        }
+    }
+
+    runs.iter()
+        .map(|(start, end)| {
+            if start == end {
+                format!("{prefix}{start:02}")
+            } else {
+                format!("{prefix}{start:02}-{end:02}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// Read `voice_def.wav_path` and upload it to the resolved service URL,
 /// so a `--voice`-selected voice is available before the job is submitted.
 async fn upload_voice_def(
@@ -706,5 +741,56 @@ mod segment_list_tests {
     fn empty_spec_errors() {
         assert!(parse_segment_list("").is_err());
         assert!(parse_segment_list(" , ,").is_err());
+    }
+}
+
+#[cfg(test)]
+mod compress_segment_indices_tests {
+    use super::compress_segment_indices;
+
+    #[test]
+    fn all_contiguous_collapses_to_one_range() {
+        let spec = compress_segment_indices("authorship_seg", &[5, 6, 7, 8]);
+        assert_eq!(spec, "authorship_seg05-08");
+    }
+
+    #[test]
+    fn single_gap_splits_into_two_runs() {
+        let spec = compress_segment_indices("authorship_seg", &[5, 6, 7, 9]);
+        assert_eq!(spec, "authorship_seg05-07,authorship_seg09");
+    }
+
+    #[test]
+    fn multiple_runs() {
+        let spec = compress_segment_indices("augment_seg", &[1, 2, 3, 10, 12, 13, 14, 20]);
+        assert_eq!(spec, "augment_seg01-03,augment_seg10,augment_seg12-14,augment_seg20");
+    }
+
+    #[test]
+    fn unsorted_and_duplicate_indices_are_normalized() {
+        let spec = compress_segment_indices("doc_seg", &[3, 1, 2, 2, 1]);
+        assert_eq!(spec, "doc_seg01-03");
+    }
+
+    #[test]
+    fn single_index() {
+        let spec = compress_segment_indices("doc_seg", &[42]);
+        assert_eq!(spec, "doc_seg42");
+    }
+
+    #[test]
+    fn empty_indices_produces_empty_string() {
+        let spec = compress_segment_indices("doc_seg", &[]);
+        assert_eq!(spec, "");
+    }
+
+    #[test]
+    fn round_trips_through_parse_segment_list() {
+        let spec = compress_segment_indices("authorship_seg", &[5, 6, 7, 9]);
+        let names = super::parse_segment_list(&spec).unwrap();
+        assert_eq!(
+            names,
+            vec!["authorship_seg05", "authorship_seg06", "authorship_seg07", "authorship_seg09"]
+        );
     }
 }

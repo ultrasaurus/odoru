@@ -24,6 +24,7 @@ pub async fn run(
     client: &runpod::Client,
     basename: String,
     doc_id: String,
+    missing: bool,
     voice_def: Option<&voice::VibeVoiceDef>,
     pod_id: Option<String>,
     url: Option<String>,
@@ -37,29 +38,52 @@ pub async fn run(
     basedir: Option<String>,
 ) -> Result<()> {
     let data_dir = segment::resolve_basedir(basedir.as_deref());
-    std::fs::create_dir_all(&data_dir).with_context(|| format!("creating {data_dir}"))?;
 
-    let txt_path = format!("{data_dir}/{basename}.txt");
-    if std::path::Path::new(&txt_path).exists() {
-        anyhow::bail!(
-            "{txt_path} already exists — `doc` expects a fresh basedir; \
-             remove it or pass a different --basedir to re-run"
+    let spec = if missing {
+        let txt_path = format!("{data_dir}/{basename}.txt");
+        anyhow::ensure!(
+            std::path::Path::new(&txt_path).exists(),
+            "{txt_path} doesn't exist — `doc --missing` expects a prior `doc` run in this \
+             basedir; run `doc` (without --missing) first"
         );
-    }
 
-    info!("exporting doc {doc_id} -> {txt_path}");
-    dl(&["export", &doc_id, &txt_path])?;
+        let missing_names = segment::missing_segments(&basename, basedir.as_deref())?;
+        if missing_names.is_empty() {
+            info!("no missing segments for {basename} in {data_dir} — nothing to do");
+            return Ok(());
+        }
+        let indices: Vec<u32> = missing_names
+            .iter()
+            .filter_map(|n| segment::parse_segment_name(n).map(|(_, i)| i))
+            .collect();
+        info!("{} missing segment(s): {}", indices.len(), missing_names.join(", "));
+        synth::compress_segment_indices(&format!("{basename}_seg"), &indices)
+    } else {
+        std::fs::create_dir_all(&data_dir).with_context(|| format!("creating {data_dir}"))?;
 
-    segment::run(&basename, Some(data_dir.as_str()))?;
+        let txt_path = format!("{data_dir}/{basename}.txt");
+        if std::path::Path::new(&txt_path).exists() {
+            anyhow::bail!(
+                "{txt_path} already exists — `doc` expects a fresh basedir; \
+                 remove it or pass a different --basedir to re-run"
+            );
+        }
 
-    let sidecar_path = format!("{data_dir}/{basename}.segments.json");
-    let sidecar: Sidecar = serde_json::from_str(
-        &std::fs::read_to_string(&sidecar_path).with_context(|| format!("reading {sidecar_path}"))?,
-    )
-    .with_context(|| format!("parsing {sidecar_path}"))?;
-    let segment_count = sidecar.segments.len();
-    anyhow::ensure!(segment_count > 0, "segmenting {basename} produced no segments");
-    let spec = format!("{basename}_seg01-{segment_count:02}");
+        info!("exporting doc {doc_id} -> {txt_path}");
+        dl(&["export", &doc_id, &txt_path])?;
+
+        segment::run(&basename, Some(data_dir.as_str()))?;
+
+        let sidecar_path = format!("{data_dir}/{basename}.segments.json");
+        let sidecar: Sidecar = serde_json::from_str(
+            &std::fs::read_to_string(&sidecar_path)
+                .with_context(|| format!("reading {sidecar_path}"))?,
+        )
+        .with_context(|| format!("parsing {sidecar_path}"))?;
+        let segment_count = sidecar.segments.len();
+        anyhow::ensure!(segment_count > 0, "segmenting {basename} produced no segments");
+        format!("{basename}_seg01-{segment_count:02}")
+    };
 
     synth::run_segments_batch(
         client, voice_def, spec, pod_id, url, speaker, cfg_scale, temp, speed, seed, gpu_price,
