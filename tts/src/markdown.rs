@@ -61,7 +61,16 @@ pub fn split_for_export(markdown: &str) -> (Vec<ExportSentence>, Vec<usize>) {
             Event::SoftBreak | Event::HardBreak => {
                 current_plain.push(' ');
             }
-            Event::End(TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item) => {
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some(start) = block_start.take() {
+                    // Strip leading "## " so markdown_text doesn't include "#"
+                    // markers — renderToken already wraps the span in <h1>/<h2>/etc.
+                    let raw = markdown[start..last_end].trim().trim_start_matches('#').trim_start();
+                    push_export_block(&mut sentences, &mut block_lengths, &current_plain, raw);
+                }
+                current_plain.clear();
+            }
+            Event::End(TagEnd::Paragraph | TagEnd::Item) => {
                 if let Some(start) = block_start.take() {
                     let raw = markdown[start..last_end].trim();
                     push_export_block(&mut sentences, &mut block_lengths, &current_plain, raw);
@@ -348,6 +357,15 @@ mod tests {
         let (sentences, block_lengths) = split_for_export(md);
         assert_eq!(block_lengths, vec![1, 1, 1]);
         assert_eq!(sentences.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), vec!["Title", "one", "two"]);
+    }
+
+    #[test]
+    fn export_heading_markdown_text_has_no_hash_prefix() {
+        let md = "## Section Two\n\nSome text.";
+        let (sentences, _) = split_for_export(md);
+        assert_eq!(sentences[0].text, "Section Two");
+        assert_eq!(sentences[0].markdown_text, "Section Two",
+            "markdown_text should not include '##' — renderToken wraps the span in <h2>");
     }
 
     #[test]

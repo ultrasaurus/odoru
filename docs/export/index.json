@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1",
+  "documents": [
+    {
+      "slug": "1987-11-13-hypertext-87-keynote-address",
+      "title": "Hypertext '87 Keynote Address",
+      "authors": [
+        "Andries van Dam"
+      ],
+      "date": "1987-11-13",
+      "has_audio": true
+    },
+    {
+      "slug": "1884-02-27-authorship-provisions-in-augment-1984-oad2250",
+      "title": "Authorship Provisions in AUGMENT - 1984 (OAD,2250,)",
+      "authors": [
+        "Christina Engelbart",
+        "Doug Engelbart Institute"
+      ],
+      "date": "1884-02-27",
+      "description": "Visit the Doug Engelbart Institute to explore his remarkable legacy and all it inspires (official site)",
+      "source_url": "https://www.dougengelbart.org/content/view/148/",
+      "has_audio": true
+    },
+    {
+      "slug": "1891-11-09-hope-is-the-thing-with-feathers",
+      "title": "“Hope” is the thing with feathers",
+      "authors": [
+        "Emily Dickenson"
+      ],
+      "date": "1891-11-09",
+      "has_audio": true
+    }
+  ]
+}

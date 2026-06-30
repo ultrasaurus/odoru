@@ -1,0 +1,438 @@
+{
+  "schema_version": "0.1",
+  "doc_id": "f8634bde-07d4-46c6-b496-ffa414d99755",
+  "title": "“Hope” is the thing with feathers",
+  "authors": [
+    "Emily Dickenson"
+  ],
+  "date": "1891-11-09",
+  "voice_id": "Sarah:f8634bde-07d4-46c6-b496-ffa414d99755",
+  "source_sha256": "b48aaf913105af4d2ec0d2c2527a6ceda546cd5403a4e35802cf73cfe082e582",
+  "sentences": [
+    {
+      "index": 0,
+      "text": "“Hope” is the thing with feathers",
+      "markdown": "“Hope” is the thing with feathers",
+      "duration": 3.1619292974472044,
+      "paragraph_end": true,
+      "words": [
+        {
+          "word": "“Hope”",
+          "start": 0.6405231952667236,
+          "end": 0.8807194232940674
+        },
+        {
+          "word": "is",
+          "start": 0.9607847929000854,
+          "end": 1.0408501625061035
+        },
+        {
+          "word": "the",
+          "start": 1.1008992195129397,
+          "end": 1.1809645891189575
+        },
+        {
+          "word": "thing",
+          "start": 1.2410136461257937,
+          "end": 1.461193561553955
+        },
+        {
+          "word": "with",
+          "start": 1.521242618560791,
+          "end": 1.661357045173645
+        },
+        {
+          "word": "feathers",
+          "start": 1.741422414779663,
+          "end": 2.1217331886291504
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "text": "By Emily Dickinson",
+      "markdown": "By Emily Dickinson",
+      "duration": 2.8416676998138426,
+      "paragraph_end": true,
+      "words": [
+        {
+          "word": "By",
+          "start": 0.2401961088180542,
+          "end": 0.3602942228317261
+        },
+        {
+          "word": "Emily",
+          "start": 0.5204249620437622,
+          "end": 0.8006540536880493
+        },
+        {
+          "word": "Dickinson",
+          "start": 0.8807193040847778,
+          "end": 1.4011443853378296
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "text": "“Hope” is the thing with feathers -That perches in the soul -And sings the tune without the words -And never stops - at all -",
+      "markdown": "“Hope” is the thing with feathers - <br>That perches in the soul - <br>And sings the tune without the words - <br>And never stops - at all -",
+      "duration": 10.477904963493348,
+      "paragraph_end": true,
+      "words": [
+        {
+          "word": "“Hope”",
+          "start": 0.6405233144760132,
+          "end": 0.8807195425033569
+        },
+        {
+          "word": "is",
+          "start": 0.980800986289978,
+          "end": 1.040850043296814
+        },
+        {
+          "word": "the",
+          "start": 1.10089910030365,
+          "end": 1.1809648275375366
+        },
+        {
+          "word": "thing",
+          "start": 1.2410138845443726,
+          "end": 1.4211605787277222
+        },
+        {
+          "word": "with",
+          "start": 1.481209635734558,
+          "end": 1.60130774974823
+        },
+        {
+          "word": "feathers",
+          "start": 1.661356806755066,
+          "end": 2.0416678190231323
+        },
+        {
+          "word": "That",
+          "start": 2.52206027507782,
+          "end": 2.6421583890914917
+        },
+        {
+          "word": "perches",
+          "start": 2.72222363948822,
+          "end": 3.082517981529236
+        },
+        {
+          "word": "in",
+          "start": 3.1625832319259644,
+          "end": 3.2026160955429077
+        },
+        {
+          "word": "the",
+          "start": 3.2626651525497437,
+          "end": 3.342730402946473
+        },
+        {
+          "word": "soul",
+          "start": 3.4227956533432007,
+          "end": 3.703024744987488
+        },
+        {
+          "word": "And",
+          "start": 4.483662486076355,
+          "end": 4.563728213310242
+        },
+        {
+          "word": "sings",
+          "start": 4.663809657096863,
+          "end": 4.9640549421310425
+        },
+        {
+          "word": "the",
+          "start": 5.064136385917665,
+          "end": 5.14420211315155
+        },
+        {
+          "word": "tune",
+          "start": 5.204251170158386,
+          "end": 5.5245121717453
+        },
+        {
+          "word": "without",
+          "start": 5.784725069999695,
+          "end": 6.185051798820497
+        },
+        {
+          "word": "the",
+          "start": 6.325166583061218,
+          "end": 6.405232310295105
+        },
+        {
+          "word": "words",
+          "start": 6.485297083854677,
+          "end": 6.945673823356628
+        },
+        {
+          "word": "And",
+          "start": 8.086604952812195,
+          "end": 8.16667068004608
+        },
+        {
+          "word": "never",
+          "start": 8.246736407279968,
+          "end": 8.44689929485321
+        },
+        {
+          "word": "stops",
+          "start": 8.526965022087097,
+          "end": 8.84722697734833
+        },
+        {
+          "word": "at",
+          "start": 8.927291750907896,
+          "end": 8.967325091362001
+        },
+        {
+          "word": "all",
+          "start": 9.127455592155457,
+          "end": 9.227537035942076
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "text": "And sweetest - in the Gale - is heard -And sore must be the storm -That could abash the little BirdThat kept so many warm -",
+      "markdown": "And sweetest - in the Gale - is heard - <br>And sore must be the storm - <br>That could abash the little Bird <br>That kept so many warm -",
+      "duration": 11.778967666625975,
+      "paragraph_end": true,
+      "words": [
+        {
+          "word": "And",
+          "start": 0.45036792755126953,
+          "end": 0.5304336547851562
+        },
+        {
+          "word": "sweetest",
+          "start": 0.6305150985717773,
+          "end": 1.0708751678466797
+        },
+        {
+          "word": "in",
+          "start": 1.1709566116333008,
+          "end": 1.210988998413086
+        },
+        {
+          "word": "the",
+          "start": 1.2910547256469729,
+          "end": 1.3711204528808594
+        },
+        {
+          "word": "Gale",
+          "start": 1.4111528396606463,
+          "end": 1.771447181701662
+        },
+        {
+          "word": "is",
+          "start": 2.5721006393432617,
+          "end": 2.652167320251465
+        },
+        {
+          "word": "heard",
+          "start": 2.7522478103637695,
+          "end": 3.052493095397949
+        },
+        {
+          "word": "And",
+          "start": 3.172591209411621,
+          "end": 3.2726736068725586
+        },
+        {
+          "word": "sore",
+          "start": 3.3927717208862305,
+          "end": 3.69301700592041
+        },
+        {
+          "word": "must",
+          "start": 4.37357234954834,
+          "end": 4.553719520568844
+        },
+        {
+          "word": "be",
+          "start": 4.613768577575687,
+          "end": 4.693833351135254
+        },
+        {
+          "word": "the",
+          "start": 4.773900032043457,
+          "end": 4.873980522155762
+        },
+        {
+          "word": "storm",
+          "start": 4.934029579162598,
+          "end": 5.274308204650879
+        },
+        {
+          "word": "That",
+          "start": 6.495305061340332,
+          "end": 6.6554365158081055
+        },
+        {
+          "word": "could",
+          "start": 6.7555189132690465,
+          "end": 6.91564846038818
+        },
+        {
+          "word": "abash",
+          "start": 6.975697517395023,
+          "end": 7.356009483337402
+        },
+        {
+          "word": "the",
+          "start": 7.476107597351074,
+          "end": 7.576188087463379
+        },
+        {
+          "word": "little",
+          "start": 7.61622142791748,
+          "end": 7.83640193939209
+        },
+        {
+          "word": "BirdThat",
+          "start": 7.876433372497559,
+          "end": 9.137463569641112
+        },
+        {
+          "word": "kept",
+          "start": 9.277577400207516,
+          "end": 9.53779125213623
+        },
+        {
+          "word": "so",
+          "start": 9.657889366149902,
+          "end": 9.777987480163574
+        },
+        {
+          "word": "many",
+          "start": 9.87806797027588,
+          "end": 10.078232765197754
+        },
+        {
+          "word": "warm",
+          "start": 10.17831325531006,
+          "end": 10.478558540344238
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "text": "I’ve heard it in the chillest land -And on the strangest Sea -Yet - never - in Extremity,It asked a crumb - of me.",
+      "markdown": "I’ve heard it in the chillest land - <br>And on the strangest Sea - <br>Yet - never - in Extremity, <br>It asked a crumb - of me.",
+      "duration": 9.872863705952962,
+      "paragraph_end": true,
+      "words": [
+        {
+          "word": "I’ve",
+          "start": 0.5004091262817383,
+          "end": 0.6405229568481445
+        },
+        {
+          "word": "heard",
+          "start": 0.7205896377563477,
+          "end": 0.9207525253295898
+        },
+        {
+          "word": "it",
+          "start": 1.0008172988891602,
+          "end": 1.0408506393432615
+        },
+        {
+          "word": "in",
+          "start": 1.120915412902832,
+          "end": 1.1609487533569336
+        },
+        {
+          "word": "the",
+          "start": 1.241013526916504,
+          "end": 1.3010625839233398
+        },
+        {
+          "word": "chillest",
+          "start": 1.4011449813842771,
+          "end": 1.7814550399780271
+        },
+        {
+          "word": "land",
+          "start": 1.8815374374389648,
+          "end": 2.221816062927246
+        },
+        {
+          "word": "And",
+          "start": 3.30269718170166,
+          "end": 3.3827638626098597
+        },
+        {
+          "word": "on",
+          "start": 3.5228776931762695,
+          "end": 3.562911033630374
+        },
+        {
+          "word": "the",
+          "start": 3.6429758071899414,
+          "end": 3.723040580749512
+        },
+        {
+          "word": "strangest",
+          "start": 3.783089637756348,
+          "end": 4.243466377258301
+        },
+        {
+          "word": "Sea",
+          "start": 4.363564491271973,
+          "end": 4.583745002746582
+        },
+        {
+          "word": "Yet",
+          "start": 5.544529914855957,
+          "end": 5.704659461975098
+        },
+        {
+          "word": "never",
+          "start": 5.844775199890137,
+          "end": 6.0849714279174805
+        },
+        {
+          "word": "in",
+          "start": 6.205069541931152,
+          "end": 6.265118598937988
+        },
+        {
+          "word": "Extremity,It",
+          "start": 6.345183372497559,
+          "end": 7.74632740020752
+        },
+        {
+          "word": "asked",
+          "start": 7.90645694732666,
+          "end": 8.106621742248535
+        },
+        {
+          "word": "a",
+          "start": 8.186688423156738,
+          "end": 8.206704139709473
+        },
+        {
+          "word": "crumb",
+          "start": 8.286770820617676,
+          "end": 8.50694751739502
+        },
+        {
+          "word": "of",
+          "start": 8.607029914855957,
+          "end": 8.647065162658691
+        },
+        {
+          "word": "me.",
+          "start": 8.767163276672363,
+          "end": 8.887261390686035
+        }
+      ]
+    }
+  ]
+}

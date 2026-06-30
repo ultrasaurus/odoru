@@ -483,6 +483,7 @@ dependencies = [
  "futures",
  "hound",
  "indicatif",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

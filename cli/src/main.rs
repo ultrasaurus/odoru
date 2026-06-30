@@ -1,5 +1,6 @@
 mod audio;
 mod import;
+mod spa_json;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -136,6 +137,9 @@ struct FetchArgs {
 struct SpaArgs {
     /// Directory to write the exported SPA into (created if it doesn't exist)
     output_dir: String,
+    /// Also write index.json (manifest) and documents/<slug>/<slug>.json (per-doc sentences + word timing)
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -561,6 +565,7 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
         std::collections::HashMap::new();
     let mut doc_contents: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
+    let mut spa_docs: Vec<(String, spa_json::SpaDoc)> = Vec::new();
 
     for doc in &published {
         // Need content — re-fetch with full body.
@@ -571,6 +576,7 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
 
         let meta = full.export_meta();
         let slug = export_slug(meta.title.as_deref(), meta.date.as_deref());
+        let mut spa_sentences: Option<Vec<spa_json::SpaSentence>> = None;
 
         // ── Attempt audio export ─────────────────────────────────────────
         let has_audio = match &meta.voice_id {
@@ -639,7 +645,23 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
                                 }
                             }).collect();
                             transcripts.insert(slug.clone(), timed);
-                            sentence_blocks.insert(slug.clone(), markdown_texts.block_lengths);
+                            sentence_blocks.insert(slug.clone(), markdown_texts.block_lengths.clone());
+                            if args.json {
+                                spa_sentences = Some(audio_entries.iter().enumerate().map(|(i, e)| {
+                                    spa_json::SpaSentence {
+                                        index: e.index,
+                                        text: e.text.clone(),
+                                        markdown: markdown_texts.sentences.get(i).cloned().unwrap_or_else(|| e.text.clone()),
+                                        duration: e.duration,
+                                        paragraph_end: e.paragraph_end,
+                                        words: e.words.as_ref().map(|ws| ws.iter().map(|w| spa_json::SpaWord {
+                                            word: w.word.clone(),
+                                            start: w.start,
+                                            end: w.end,
+                                        }).collect()),
+                                    }
+                                }).collect());
+                            }
                             true
                         }
                     }
@@ -661,8 +683,36 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
                     paragraph_end: s.paragraph_end,
                 })
                 .collect();
+            if args.json {
+                spa_sentences = Some(entries.iter().map(|e| spa_json::SpaSentence {
+                    index: e.index,
+                    text: e.text.clone(),
+                    markdown: e.markdown_text.clone(),
+                    duration: 0.0,
+                    paragraph_end: e.paragraph_end,
+                    words: None,
+                }).collect());
+            }
             transcripts.insert(slug.clone(), entries);
             sentence_blocks.insert(slug.clone(), markdown_texts.block_lengths);
+        }
+
+        if args.json {
+            if let Some(sentences) = spa_sentences {
+                let source_sha256 = import::sha256_hex(&full.plain_text);
+                let spa_doc = spa_json::SpaDoc::new(
+                    full.id.clone(),
+                    meta.title.clone().unwrap_or_else(|| slug.clone()),
+                    meta.authors.clone(),
+                    meta.date.clone(),
+                    full.description.clone(),
+                    meta.source_url.clone(),
+                    meta.voice_id.clone(),
+                    source_sha256,
+                    sentences,
+                );
+                spa_docs.push((slug.clone(), spa_doc));
+            }
         }
 
         manifest.push(ManifestEntry {
@@ -712,6 +762,34 @@ fn run_spa(args: SpaArgs) -> anyhow::Result<()> {
     if favicon_src.exists() {
         std::fs::copy(&favicon_src, out.join("favicon.ico"))
             .context("failed to copy favicon.ico")?;
+    }
+
+    if args.json {
+        // ── index.json ───────────────────────────────────────────────────
+        let index_entries = manifest.iter().map(|m| spa_json::SpaIndexEntry {
+            slug: m.slug.clone(),
+            title: m.title.clone(),
+            authors: m.authors.clone(),
+            date: m.date.clone(),
+            description: m.description.clone(),
+            source_url: m.source_url.clone(),
+            has_audio: m.has_audio,
+        }).collect();
+        let index_json = serde_json::to_string_pretty(&spa_json::SpaIndex::new(index_entries))
+            .context("failed to serialize index.json")?;
+        std::fs::write(out.join("index.json"), &index_json)
+            .context("failed to write index.json")?;
+
+        // ── <slug>.json per document ─────────────────────────────────────
+        for (slug, spa_doc) in spa_docs {
+            let doc_dir = out.join("documents").join(&slug);
+            std::fs::create_dir_all(&doc_dir)
+                .with_context(|| format!("failed to create {}", doc_dir.display()))?;
+            let doc_json = serde_json::to_string_pretty(&spa_doc)
+                .with_context(|| format!("failed to serialize {slug}.json"))?;
+            std::fs::write(doc_dir.join(format!("{slug}.json")), &doc_json)
+                .with_context(|| format!("failed to write {slug}.json"))?;
+        }
     }
 
     println!("✔ Exported {} document(s) to {}", manifest.len(), out.display());

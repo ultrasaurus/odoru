@@ -4,6 +4,7 @@
 use crate::audio_cache;
 use crate::backend::Voice;
 use crate::splitter;
+use forced_alignment::transcript::Word;
 
 /// One sentence's worth of export data.
 pub struct SentenceAudio {
@@ -14,6 +15,8 @@ pub struct SentenceAudio {
     /// Duration in seconds (from cache metadata).  `0.0` on a cache miss.
     pub duration: f64,
     pub paragraph_end: bool,
+    /// Word-level timestamps, if stored in the cache (e.g. by `dl import vibe`).
+    pub words: Option<Vec<Word>>,
 }
 
 /// Split `text` into sentences and look each one up in the audio cache for
@@ -24,13 +27,15 @@ pub fn export_audio(text: &str, voice: &Voice) -> Vec<SentenceAudio> {
         .into_iter()
         .enumerate()
         .map(|(index, sentence)| {
-            let (mp3, duration) = lookup_sentence(&sentence.text, voice);
+            let (key, mp3, duration) = lookup_sentence(&sentence.text, voice);
+            let words = key.and_then(|k| audio_cache::read_meta(&k)).and_then(|m| m.words);
             SentenceAudio {
                 index,
                 text: sentence.text,
                 mp3,
                 duration,
                 paragraph_end: sentence.paragraph_end,
+                words,
             }
         })
         .collect()
@@ -51,18 +56,20 @@ pub fn export_audio_imported(text: &str, voice_id: &str) -> Vec<SentenceAudio> {
                 Some((mp3, duration)) => (Some(mp3), duration),
                 None => (None, 0.0),
             };
+            let words = audio_cache::read_meta(&key).and_then(|m| m.words);
             SentenceAudio {
                 index,
                 text: sentence.text,
                 mp3,
                 duration,
                 paragraph_end: sentence.paragraph_end,
+                words,
             }
         })
         .collect()
 }
 
-fn lookup_sentence(text: &str, voice: &Voice) -> (Option<Vec<u8>>, f64) {
+fn lookup_sentence(text: &str, voice: &Voice) -> (Option<String>, Option<Vec<u8>>, f64) {
     let key = match voice {
         Voice::F5Tts { .. } => {
             let normalized = crate::f5::normalizer::normalize(text);
@@ -71,11 +78,11 @@ fn lookup_sentence(text: &str, voice: &Voice) -> (Option<Vec<u8>>, f64) {
         Voice::Kokoro { .. } => {
             audio_cache::cache_key(text, &voice.cache_key())
         }
-        Voice::Mock => return (None, 0.0),
+        Voice::Mock => return (None, None, 0.0),
     };
 
     match audio_cache::lookup(&key) {
-        Some((mp3, duration)) => (Some(mp3), duration),
-        None => (None, 0.0),
+        Some((mp3, duration)) => (Some(key), Some(mp3), duration),
+        None => (Some(key), None, 0.0),
     }
 }
