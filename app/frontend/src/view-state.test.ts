@@ -49,28 +49,31 @@ describe('setEditPreviewVisibility', () => {
 
 describe('setDocStage', () => {
   function elsFor() {
-    return { editToggleBtn: div(), copyAnnotationsBtn: div() }
+    return { editToggleBtn: div(), copyAnnotationsBtn: div(), inputTabs: div() }
   }
 
-  it('closed: both hidden', () => {
+  it('closed: both hidden, divider shown', () => {
     const els = elsFor()
     setDocStage(els, 'closed')
     expect(els.editToggleBtn.style.display).toBe('none')
     expect(els.copyAnnotationsBtn.style.display).toBe('none')
+    expect(els.inputTabs.classList.contains('input-tabs-divider')).toBe(true)
   })
 
-  it('loading: both hidden', () => {
+  it('loading: both hidden, divider hidden', () => {
     const els = elsFor()
     setDocStage(els, 'loading')
     expect(els.editToggleBtn.style.display).toBe('none')
     expect(els.copyAnnotationsBtn.style.display).toBe('none')
+    expect(els.inputTabs.classList.contains('input-tabs-divider')).toBe(false)
   })
 
-  it('open: both shown', () => {
+  it('open: both shown, divider hidden', () => {
     const els = elsFor()
     setDocStage(els, 'open')
     expect(els.editToggleBtn.style.display).toBe('')
     expect(els.copyAnnotationsBtn.style.display).toBe('')
+    expect(els.inputTabs.classList.contains('input-tabs-divider')).toBe(false)
   })
 })
 

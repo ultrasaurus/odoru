@@ -59,7 +59,7 @@ export function mount(onReader: () => void): () => void {
 
           <div class="card-column">
           <div class="card">
-            <div class="input-tabs">
+            <div class="input-tabs input-tabs-divider">
               <button id="tab-url" class="input-tab active">URL</button>
               <button id="tab-text" class="input-tab">Text</button>
               <div class="input-tabs-spacer"></div>
@@ -791,6 +791,7 @@ export function mount(onReader: () => void): () => void {
 
   const tabUrl           = document.getElementById('tab-url')            as HTMLButtonElement
   const tabText          = document.getElementById('tab-text')           as HTMLButtonElement
+  const inputTabs        = document.querySelector('.input-tabs')         as HTMLDivElement
   const urlArea          = document.querySelector('.url-area')           as HTMLDivElement
   const textInput        = document.getElementById('text-input')         as HTMLTextAreaElement
   const docTitleInput    = document.getElementById('doc-title-input')    as HTMLInputElement
@@ -840,7 +841,7 @@ export function mount(onReader: () => void): () => void {
 
   type DocStage = viewState.DocStage
   function setDocStage(stage: DocStage) {
-    viewState.setDocStage({ editToggleBtn, copyAnnotationsBtn }, stage)
+    viewState.setDocStage({ editToggleBtn, copyAnnotationsBtn, inputTabs }, stage)
   }
 
   function setOutline(headings: HeadingEntry[]) {

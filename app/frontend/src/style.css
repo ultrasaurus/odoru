@@ -955,6 +955,10 @@ html, body {
   align-items: center;
   gap: 0.5rem;
   padding-right: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.input-tabs.input-tabs-divider {
   border-bottom: 1px solid var(--border);
 }
 
@@ -963,7 +967,7 @@ html, body {
 }
 
 .input-tabs .edit-toggle-btn {
-  padding: 0.3rem 0.9rem;
+  padding: 0.2rem 0.9rem;
   font-size: 0.72rem;
 }
 

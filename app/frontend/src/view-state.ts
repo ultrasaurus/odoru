@@ -36,11 +36,15 @@ export function setEditPreviewVisibility(
 export type DocStage = 'closed' | 'loading' | 'open'
 
 export function setDocStage(
-  els: { editToggleBtn: HTMLElement, copyAnnotationsBtn: HTMLElement },
+  els: { editToggleBtn: HTMLElement, copyAnnotationsBtn: HTMLElement, inputTabs: HTMLElement },
   stage: DocStage,
 ) {
   els.editToggleBtn.style.display = stage === 'open' ? '' : 'none'
   els.copyAnnotationsBtn.style.display = stage === 'open' ? '' : 'none'
+  // The divider under URL/Text only makes sense while picking an input mode
+  // for a new/empty doc — once a doc is loaded, Edit/Copy-Annotations sit on
+  // that same row and the divider just looks like stray clutter.
+  els.inputTabs.classList.toggle('input-tabs-divider', stage === 'closed')
 }
 
 export function setOutline(els: { editOutlineSection: HTMLElement }, headings: HeadingEntry[]) {
