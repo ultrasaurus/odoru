@@ -160,8 +160,16 @@ enum Command {
         url: Option<String>,
         #[arg(long, default_value = "Sarah")]
         speaker: String,
-        #[arg(long, default_value_t = 1.3)]
-        cfg_scale: f64,
+        /// Named voice from vibe/voices/<name>/voice.md — auto-uploads
+        /// ref.wav before synthesizing and supplies cfg_scale/seed/speed/temp
+        /// defaults from voice.md (CLI flags still take precedence over
+        /// those defaults). Mutually exclusive with --speaker.
+        #[arg(long, conflicts_with = "speaker")]
+        voice: Option<String>,
+        /// Classifier-free guidance scale. Defaults to the voice's value (if
+        /// --voice is given) or 1.3.
+        #[arg(long)]
+        cfg_scale: Option<f64>,
         /// Sampling temperature. When set, enables sampling (non-deterministic);
         /// omit for greedy/deterministic generation.
         #[arg(long)]
@@ -170,9 +178,10 @@ enum Command {
         /// cloned voice, >1 speeds it up; omit (or 1.0) to leave unchanged.
         #[arg(long)]
         speed: Option<f64>,
-        /// Random seed (default: 71463)
-        #[arg(long, default_value_t = 71463)]
-        seed: u64,
+        /// Random seed. Defaults to the voice's value (if --voice is given)
+        /// or 71463.
+        #[arg(long)]
+        seed: Option<u64>,
         /// GPU price per hour (from new-pod output), stored in run log
         #[arg(long)]
         gpu_price: Option<f64>,
@@ -191,13 +200,28 @@ enum Command {
 }
 
 
-/// Poll `<base_url>/health` until the service reports ready, then return.
-async fn wait_for_health(http: &reqwest::Client, base_url: &str) {
+/// Poll `<base_url>/health` until the service reports ready, then return its
+/// reported GPU name and VRAM (in MiB), if any.
+pub(crate) async fn wait_for_health(http: &reqwest::Client, base_url: &str) -> Result<(String, Option<u64>)> {
     loop {
         match http.get(format!("{base_url}/health")).send().await {
-            Ok(r) if r.status().is_success() => break,
-            Ok(r) => tracing::info!("health: HTTP {} — retrying", r.status()),
-            Err(e) => tracing::info!("health: {e} — retrying"),
+            Ok(r) if r.status().is_success() => {
+                let body: serde_json::Value = r.json().await.unwrap_or_default();
+                if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
+                    let gpu_info = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    info!("service ready — GPU: {gpu_info}");
+                    let mut parts = gpu_info.splitn(2, ',');
+                    let gpu_name = parts.next().unwrap_or("unknown").trim().to_string();
+                    let gpu_vram_mb = parts.next()
+                        .and_then(|s| s.trim().trim_end_matches(" MiB").parse::<u64>().ok());
+                    return Ok((gpu_name, gpu_vram_mb));
+                }
+                if let Some(msg) = body.get("message").and_then(|v| v.as_str()) {
+                    anyhow::bail!("service reported error: {msg}");
+                }
+            }
+            Ok(r) => info!("health: HTTP {} — retrying", r.status()),
+            Err(e) => info!("health: {e} — retrying"),
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
@@ -292,7 +316,7 @@ async fn main() -> Result<()> {
                 .build()?;
 
             info!("waiting for vibe-service at {base_url}/health ...");
-            wait_for_health(&http, &base_url).await;
+            wait_for_health(&http, &base_url).await?;
             voice::upload_wav(&http, &base_url, &name, &gender, bytes, &secret).await?;
             info!("uploaded voice {name}/{gender} — pass --speaker {name} to synthesize");
         }
@@ -396,6 +420,7 @@ async fn main() -> Result<()> {
             pod_id,
             url,
             speaker,
+            voice,
             cfg_scale,
             temp,
             speed,
@@ -405,8 +430,8 @@ async fn main() -> Result<()> {
             basedir,
         } => {
             synth::run(
-                &client, input, pod_id, url, speaker, cfg_scale, temp, speed, seed, gpu_price,
-                port, basedir,
+                &client, input, pod_id, url, speaker, voice, cfg_scale, temp, speed, seed,
+                gpu_price, port, basedir,
             )
             .await?;
         }

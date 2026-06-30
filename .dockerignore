@@ -3,6 +3,8 @@ target/
 .venv/
 **/node_modules/
 vibe/data/
+vibe/voices/
+voices/
 out/
 docs/
 **/*.mp3

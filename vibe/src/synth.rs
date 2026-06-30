@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use clap::Subcommand;
 use tracing::{info, warn};
 
-use crate::{runpod, segment};
+use crate::{runpod, segment, voice};
 
 /// What to synthesize: a pre-split segment file or a whole document.
 #[derive(Subcommand)]
@@ -42,14 +42,27 @@ pub async fn run(
     pod_id: Option<String>,
     url: Option<String>,
     speaker: String,
-    cfg_scale: f64,
+    voice_name: Option<String>,
+    cfg_scale: Option<f64>,
     temp: Option<f64>,
     speed: Option<f64>,
-    seed: u64,
+    seed: Option<u64>,
     gpu_price: Option<f64>,
     port: u16,
     basedir: Option<String>,
 ) -> Result<()> {
+    // --voice supplies the speaker name plus cfg_scale/seed/speed/temp
+    // defaults from its voice.md; explicit CLI flags still take precedence.
+    let voice_def = voice_name
+        .as_deref()
+        .map(voice::VibeVoiceDef::load_named)
+        .transpose()?;
+    let speaker = voice_def.as_ref().map(|v| v.name.clone()).unwrap_or(speaker);
+    let cfg_scale = cfg_scale.or(voice_def.as_ref().and_then(|v| v.cfg_scale)).unwrap_or(1.3);
+    let seed = seed.or(voice_def.as_ref().and_then(|v| v.seed)).unwrap_or(71463);
+    let speed = speed.or(voice_def.as_ref().and_then(|v| v.speed));
+    let temp = temp.or(voice_def.as_ref().and_then(|v| v.temp));
+
     match input {
         SynthInput::Doc { .. } => {
             anyhow::bail!("synthesize doc is not yet implemented — run `segment <name>` first, then synthesize each segment");
@@ -83,6 +96,9 @@ pub async fn run(
                 .build()?;
             let (synth_base_url, via, gpu_name, gpu_vram_mb) =
                 resolve_synth_target(client, &http, &url, &pod_id, port).await?;
+            if let Some(v) = &voice_def {
+                upload_voice_def(&http, &synth_base_url, v, &secret).await?;
+            }
 
             // POST /jobs — returns immediately with job_id.
             info!("submitting job: {name} (seed={seed}, cfg={cfg_scale}, speaker={speaker}, temp={temp:?}, speed={speed:?})");
@@ -210,6 +226,9 @@ pub async fn run(
 
             let (synth_base_url, via, gpu_name, gpu_vram_mb) =
                 resolve_synth_target(client, &http, &url, &pod_id, port).await?;
+            if let Some(v) = &voice_def {
+                upload_voice_def(&http, &synth_base_url, v, &secret).await?;
+            }
 
             info!(
                 "submitting batch: {} segments (seed={seed}, cfg={cfg_scale}, speaker={speaker}, temp={temp:?}, speed={speed:?})",
@@ -474,6 +493,20 @@ fn expand_range_token(token: &str) -> Result<Vec<String>> {
     Ok(vec![token.to_string()])
 }
 
+/// Read `voice_def.wav_path` and upload it to the resolved service URL,
+/// so a `--voice`-selected voice is available before the job is submitted.
+async fn upload_voice_def(
+    http: &reqwest::Client,
+    synth_base_url: &str,
+    voice_def: &voice::VibeVoiceDef,
+    secret: &Option<String>,
+) -> Result<()> {
+    let bytes = std::fs::read(&voice_def.wav_path)
+        .with_context(|| format!("reading {}", voice_def.wav_path.display()))?;
+    info!("uploading voice {} ({} bytes)", voice_def.name, bytes.len());
+    voice::upload_wav(http, synth_base_url, &voice_def.name, &voice_def.gender, bytes, secret).await
+}
+
 /// Shared by both `SynthInput::Segment` and `SynthInput::Segments`: resolves
 /// `--url`/`pod_id` to an actual reachable base URL, waits for `/health`,
 /// then (RunPod only) looks up the pod's direct IP. Returns
@@ -496,28 +529,7 @@ async fn resolve_synth_target(
     // Poll /health via proxy until ready (proxy URL works before the pod
     // IP/portMappings are populated, so we use it here).
     info!("waiting for vibe-service at {base_url}/health ...");
-    let (gpu_name, gpu_vram_mb) = loop {
-        match http.get(format!("{base_url}/health")).send().await {
-            Ok(r) if r.status().is_success() => {
-                let body: serde_json::Value = r.json().await.unwrap_or_default();
-                if body.get("status").and_then(|v| v.as_str()) == Some("ready") {
-                    let gpu_info = body.get("gpu").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    info!("service ready — GPU: {gpu_info}");
-                    let mut parts = gpu_info.splitn(2, ',');
-                    let gpu_name = parts.next().unwrap_or("unknown").trim().to_string();
-                    let gpu_vram_mb = parts.next()
-                        .and_then(|s| s.trim().trim_end_matches(" MiB").parse::<u64>().ok());
-                    break (gpu_name, gpu_vram_mb);
-                }
-                if let Some(msg) = body.get("message").and_then(|v| v.as_str()) {
-                    anyhow::bail!("service reported error: {msg}");
-                }
-            }
-            Ok(r) => info!("health: HTTP {} — retrying", r.status()),
-            Err(e) => info!("health: {e} — retrying"),
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-    };
+    let (gpu_name, gpu_vram_mb) = crate::wait_for_health(http, &base_url).await?;
 
     // After health is confirmed, fetch pod details for direct IP — only
     // applies to RunPod; a --url target has no such concept.
