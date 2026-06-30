@@ -1,4 +1,5 @@
 mod config;
+mod doc;
 mod runpod;
 mod segment;
 mod synth;
@@ -158,8 +159,9 @@ enum Command {
         /// Skips RunPod-specific direct-IP lookup when set.
         #[arg(long)]
         url: Option<String>,
-        #[arg(long, default_value = "Sarah")]
-        speaker: String,
+        /// Required unless --voice is given.
+        #[arg(long, required_unless_present = "voice")]
+        speaker: Option<String>,
         /// Named voice from vibe/voices/<name>/voice.md — auto-uploads
         /// ref.wav before synthesizing and supplies cfg_scale/seed/speed/temp
         /// defaults from voice.md (CLI flags still take precedence over
@@ -220,15 +222,15 @@ pub(crate) async fn wait_for_health(http: &reqwest::Client, base_url: &str) -> R
                     anyhow::bail!("service reported error: {msg}");
                 }
             }
-            Ok(r) => info!("health: HTTP {} — retrying", r.status()),
-            Err(e) => info!("health: {e} — retrying"),
+            Ok(r) => info!("health: HTTP {} — retrying ({base_url:?})", r.status()),
+            Err(e) => info!("health: {e} — retrying ({base_url:?})"),
         }
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     }
 }
 
 /// Run a command, streaming its output, and bail if it fails.
-fn run(argv: &[String]) -> Result<()> {
+pub(crate) fn run(argv: &[String]) -> Result<()> {
     info!("running: {}", argv.join(" "));
     let status = std::process::Command::new(&argv[0])
         .args(&argv[1..])
@@ -429,9 +431,12 @@ async fn main() -> Result<()> {
             port,
             basedir,
         } => {
+            // clap enforces speaker.is_some() unless --voice is given (see
+            // required_unless_present); when --voice is given, synth::run
+            // overrides speaker with the voice's name regardless.
             synth::run(
-                &client, input, pod_id, url, speaker, voice, cfg_scale, temp, speed, seed,
-                gpu_price, port, basedir,
+                &client, input, pod_id, url, speaker.unwrap_or_default(), voice, cfg_scale, temp,
+                speed, seed, gpu_price, port, basedir,
             )
             .await?;
         }

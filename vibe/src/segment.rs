@@ -173,11 +173,8 @@ fn build_sidecar(name: &str, source_text: &str, segments: &[Vec<String>]) -> Sid
 /// Reads `<basedir>/<name>.txt`, writes `<basedir>/<name>_seg01.txt` etc.
 /// with `Speaker 1: ` prefix per paragraph, plus `<basedir>/<name>.segments.json`.
 pub fn run(name: &str, basedir: Option<&str>) -> Result<()> {
-    // Source documents live in the workspace data/ dir (odoru/data/).
-    // Segment files are written to --basedir (default: vibe/data).
-    let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
     let seg_dir = resolve_basedir(basedir);
-    let input_path = format!("{src_dir}/{name}.txt");
+    let input_path = format!("{seg_dir}/{name}.txt");
     let text = std::fs::read_to_string(&input_path)
         .with_context(|| format!("reading {input_path}"))?;
 
@@ -375,8 +372,7 @@ pub fn segments_from_files(name: &str, basedir: Option<&str>, voice_id: Option<&
 
     // Needed for canonical sentence splitting below regardless of whether
     // source_sha256 can be reused from an existing sidecar.
-    let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../data");
-    let input_path = format!("{src_dir}/{name}.txt");
+    let input_path = format!("{seg_dir}/{name}.txt");
     let source_text = std::fs::read_to_string(&input_path)
         .with_context(|| format!("reading {input_path}"))?;
     let source_sha256 = existing

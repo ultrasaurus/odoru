@@ -19,19 +19,22 @@ pub enum SynthInput {
     },
     /// Synthesize an explicit list/range of segments as one batch (POST
     /// /batches) — not a whole document. E.g. "augment_seg41-56" or
-    /// "augment_seg41,augment_seg43,augment_seg50". See dev/parallel.md
-    /// "Stage 3 implementation plan" for why this is list/range, not
-    /// whole-doc: current workflow is iterative and listen-driven.
+    /// "augment_seg41,augment_seg43,augment_seg50".
     Segments {
         /// Comma-separated names and/or "<prefix><N>-<M>" ranges.
         spec: String,
     },
-    /// Segment a whole document and synthesize each part in sequence.
-    /// Reads <basedir>/<name>.txt, writes <basedir>/<name>_seg*.txt, then
-    /// synthesizes each segment in order.
+    /// Export a document's text from Odoru, segment it, synthesize all
+    /// segments as one batch, then import the result back into Odoru.
+    /// Expects a fresh --basedir (errors if <basedir>/<name>.txt exists).
+    #[command(after_help = "Note: --url/--basedir/--voice/etc. are options of \
+        `synthesize`, not of `doc` — they go before the subcommand:\n\n  \
+        vibe synthesize --url <URL> --basedir <DIR> doc <NAME> <DOC_ID>")]
     Doc {
-        /// Stem of vibe/data/<name>.txt (no extension, e.g. authorship)
+        /// Stem of <basedir>/<name>.txt (no extension, e.g. authorship)
         name: String,
+        /// Odoru document id to export from and import into
+        doc_id: String,
     },
 }
 
@@ -64,8 +67,12 @@ pub async fn run(
     let temp = temp.or(voice_def.as_ref().and_then(|v| v.temp));
 
     match input {
-        SynthInput::Doc { .. } => {
-            anyhow::bail!("synthesize doc is not yet implemented — run `segment <name>` first, then synthesize each segment");
+        SynthInput::Doc { name, doc_id } => {
+            crate::doc::run(
+                client, name, doc_id, voice_def.as_ref(), pod_id, url, speaker, cfg_scale, temp,
+                speed, seed, gpu_price, port, basedir,
+            )
+            .await?;
         }
         SynthInput::Segment { name } => {
             let data_dir = segment::resolve_basedir(basedir.as_deref());
@@ -193,194 +200,224 @@ pub async fn run(
             info!("done: {data_dir}/{name}_generated.wav");
         }
         SynthInput::Segments { spec } => {
-            let names = parse_segment_list(&spec)?;
-            let data_dir = segment::resolve_basedir(basedir.as_deref());
-            let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
-            let http = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()?;
+            run_segments_batch(
+                client, voice_def.as_ref(), spec, pod_id, url, speaker, cfg_scale, temp, speed,
+                seed, gpu_price, port, basedir,
+            )
+            .await?;
+        }
+    }
 
-            // Normalize each segment, building the batch payload.
-            let mut segments_json = Vec::with_capacity(names.len());
-            for name in &names {
-                let input_path = format!("{data_dir}/{name}.txt");
-                let normalized_path = format!("{data_dir}/{name}_normalized.txt");
-                info!("normalizing {input_path}");
-                let input = std::fs::read_to_string(&input_path)
-                    .with_context(|| format!("reading {input_path}"))?;
-                let normalized: String = input
-                    .lines()
-                    .map(|line| {
-                        if let Some(rest) = line.strip_prefix("Speaker 1: ") {
-                            format!("Speaker 1: {}", util::normalizer::normalize(rest))
-                        } else {
-                            util::normalizer::normalize(line)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                std::fs::write(&normalized_path, normalized.clone() + "\n")
-                    .with_context(|| format!("writing {normalized_path}"))?;
-                segments_json.push(serde_json::json!({ "text": normalized, "name": name }));
-            }
+    Ok(())
+}
 
-            let (synth_base_url, via, gpu_name, gpu_vram_mb) =
-                resolve_synth_target(client, &http, &url, &pod_id, port).await?;
-            if let Some(v) = &voice_def {
-                upload_voice_def(&http, &synth_base_url, v, &secret).await?;
-            }
+/// Submit a list/range of segments as one batch (POST /batches), poll for
+/// completion, and fetch + finalize each segment's result. Shared by
+/// `SynthInput::Segments` and [`crate::doc::run`], which both need to
+/// synthesize an already-known set of segments without going back through
+/// [`run`]'s top-level `SynthInput` dispatch (that would recurse for `doc`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_segments_batch(
+    client: &runpod::Client,
+    voice_def: Option<&voice::VibeVoiceDef>,
+    spec: String,
+    pod_id: Option<String>,
+    url: Option<String>,
+    speaker: String,
+    cfg_scale: f64,
+    temp: Option<f64>,
+    speed: Option<f64>,
+    seed: u64,
+    gpu_price: Option<f64>,
+    port: u16,
+    basedir: Option<String>,
+) -> Result<()> {
+    let names = parse_segment_list(&spec)?;
+    let data_dir = segment::resolve_basedir(basedir.as_deref());
+    let secret = std::env::var("VIBE_SERVICE_SECRET").ok();
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
 
-            info!(
-                "submitting batch: {} segments (seed={seed}, cfg={cfg_scale}, speaker={speaker}, temp={temp:?}, speed={speed:?})",
-                names.len()
-            );
-            let mut submit_req = http
-                .post(format!("{synth_base_url}/batches"))
-                .json(&serde_json::json!({
-                    "segments": segments_json,
-                    "seed": seed,
-                    "speaker": speaker,
-                    "cfg_scale": cfg_scale,
-                    "temp": temp,
-                    "speed": speed,
-                }));
-            if let Some(ref s) = secret {
-                submit_req = submit_req.bearer_auth(s);
-            }
-            let submit_resp = submit_req.send().await.context("POST /batches")?;
-            if !submit_resp.status().is_success() {
-                let body = submit_resp.text().await.unwrap_or_default();
-                anyhow::bail!("batch submission failed: {body}");
-            }
-            let batch: serde_json::Value = submit_resp.json().await.context("reading batch response")?;
-            let batch_id = batch["batch_id"].as_str().context("missing batch_id in response")?.to_string();
-            let job_ids: Vec<String> = batch["job_ids"]
-                .as_array()
-                .context("missing job_ids in response")?
-                .iter()
-                .map(|v| v.as_str().unwrap_or_default().to_string())
-                .collect();
-            info!("batch submitted: batch_id={batch_id} segments={}", names.len());
+    // Normalize each segment, building the batch payload.
+    let mut segments_json = Vec::with_capacity(names.len());
+    for name in &names {
+        let input_path = format!("{data_dir}/{name}.txt");
+        let normalized_path = format!("{data_dir}/{name}_normalized.txt");
+        info!("normalizing {input_path}");
+        let input = std::fs::read_to_string(&input_path)
+            .with_context(|| format!("reading {input_path}"))?;
+        let normalized: String = input
+            .lines()
+            .map(|line| {
+                if let Some(rest) = line.strip_prefix("Speaker 1: ") {
+                    format!("Speaker 1: {}", util::normalizer::normalize(rest))
+                } else {
+                    util::normalizer::normalize(line)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&normalized_path, normalized.clone() + "\n")
+            .with_context(|| format!("writing {normalized_path}"))?;
+        segments_json.push(serde_json::json!({ "text": normalized, "name": name }));
+    }
 
-            // Poll GET /batches/:id once, not per-job — all segments in a
-            // batch share fate (one generate() call), so there's no
-            // staggered per-job completion to poll for separately (see
-            // dev/parallel.md "Polling: once, not N times"). Falls back to
-            // per-job polling if the batch_id isn't found (e.g. instance
-            // churn — the in-memory batch map is an accepted gap; the
-            // job_ids already in hand survive churn individually via the
-            // durable store).
-            let poll_client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()?;
-            let batch_url = format!("{synth_base_url}/batches/{batch_id}");
-            let synth_start = std::time::Instant::now();
-            let mut batch_not_found = false;
+    let (synth_base_url, via, gpu_name, gpu_vram_mb) =
+        resolve_synth_target(client, &http, &url, &pod_id, port).await?;
+    if let Some(v) = &voice_def {
+        upload_voice_def(&http, &synth_base_url, v, &secret).await?;
+    }
+
+    info!(
+        "submitting batch: {} segments (seed={seed}, cfg={cfg_scale}, speaker={speaker}, temp={temp:?}, speed={speed:?})",
+        names.len()
+    );
+    let mut submit_req = http
+        .post(format!("{synth_base_url}/batches"))
+        .json(&serde_json::json!({
+            "segments": segments_json,
+            "seed": seed,
+            "speaker": speaker,
+            "cfg_scale": cfg_scale,
+            "temp": temp,
+            "speed": speed,
+        }));
+    if let Some(ref s) = secret {
+        submit_req = submit_req.bearer_auth(s);
+    }
+    let submit_resp = submit_req.send().await.context("POST /batches")?;
+    if !submit_resp.status().is_success() {
+        let body = submit_resp.text().await.unwrap_or_default();
+        anyhow::bail!("batch submission failed: {body}");
+    }
+    let batch: serde_json::Value = submit_resp.json().await.context("reading batch response")?;
+    let batch_id = batch["batch_id"].as_str().context("missing batch_id in response")?.to_string();
+    let job_ids: Vec<String> = batch["job_ids"]
+        .as_array()
+        .context("missing job_ids in response")?
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default().to_string())
+        .collect();
+    info!("batch submitted: batch_id={batch_id} segments={}", names.len());
+
+    // Poll GET /batches/:id once, not per-job — all segments in a
+    // batch share fate (one generate() call), so there's no
+    // staggered per-job completion to poll for separately (see
+    // dev/parallel.md "Polling: once, not N times"). Falls back to
+    // per-job polling if the batch_id isn't found (e.g. instance
+    // churn — the in-memory batch map is an accepted gap; the
+    // job_ids already in hand survive churn individually via the
+    // durable store).
+    let poll_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let batch_url = format!("{synth_base_url}/batches/{batch_id}");
+    let synth_start = std::time::Instant::now();
+    let mut batch_not_found = false;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        let mut poll_req = poll_client.get(&batch_url);
+        if let Some(ref s) = secret {
+            poll_req = poll_req.bearer_auth(s);
+        }
+        match poll_req.send().await {
+            Err(e) => {
+                warn!("poll batch_id={batch_id}: {e} — retrying");
+                continue;
+            }
+            Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+                warn!("batch_id={batch_id} not found (instance churn?) — falling back to per-job polling");
+                batch_not_found = true;
+                break;
+            }
+            Ok(r) if !r.status().is_success() => {
+                anyhow::bail!("GET /batches/{batch_id} returned HTTP {}", r.status());
+            }
+            Ok(r) => {
+                let j: serde_json::Value = r.json().await.context("reading batch status")?;
+                let status = j["status"].as_str().unwrap_or("unknown");
+                let elapsed = synth_start.elapsed().as_secs_f64();
+                info!("batch_id={batch_id} status={status} elapsed={elapsed:.0}s");
+                match status {
+                    "done" => break,
+                    "error" => {
+                        let errored = j["errored_job_ids"].as_array().map(|a| a.len()).unwrap_or(0);
+                        warn!("batch_id={batch_id}: {errored} segment(s) errored — fetching results for the rest individually");
+                        break;
+                    }
+                    _ => continue,
+                }
+            }
+        }
+    }
+
+    if batch_not_found {
+        for job_id in &job_ids {
+            let job_url = format!("{synth_base_url}/jobs/{job_id}");
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                let mut poll_req = poll_client.get(&batch_url);
+                let mut poll_req = poll_client.get(&job_url);
                 if let Some(ref s) = secret {
                     poll_req = poll_req.bearer_auth(s);
                 }
                 match poll_req.send().await {
                     Err(e) => {
-                        warn!("poll batch_id={batch_id}: {e} — retrying");
+                        warn!("poll job_id={job_id}: {e} — retrying");
                         continue;
                     }
-                    Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
-                        warn!("batch_id={batch_id} not found (instance churn?) — falling back to per-job polling");
-                        batch_not_found = true;
+                    Ok(r) if !r.status().is_success() => {
+                        warn!("GET /jobs/{job_id} returned HTTP {} — giving up on this job", r.status());
                         break;
                     }
-                    Ok(r) if !r.status().is_success() => {
-                        anyhow::bail!("GET /batches/{batch_id} returned HTTP {}", r.status());
-                    }
                     Ok(r) => {
-                        let j: serde_json::Value = r.json().await.context("reading batch status")?;
-                        let status = j["status"].as_str().unwrap_or("unknown");
-                        let elapsed = synth_start.elapsed().as_secs_f64();
-                        info!("batch_id={batch_id} status={status} elapsed={elapsed:.0}s");
-                        match status {
-                            "done" => break,
-                            "error" => {
-                                let errored = j["errored_job_ids"].as_array().map(|a| a.len()).unwrap_or(0);
-                                warn!("batch_id={batch_id}: {errored} segment(s) errored — fetching results for the rest individually");
-                                break;
-                            }
+                        let j: serde_json::Value = r.json().await.unwrap_or_default();
+                        match j["status"].as_str().unwrap_or("unknown") {
+                            "done" | "error" => break,
                             _ => continue,
                         }
                     }
                 }
             }
+        }
+    }
 
-            if batch_not_found {
-                for job_id in &job_ids {
-                    let job_url = format!("{synth_base_url}/jobs/{job_id}");
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                        let mut poll_req = poll_client.get(&job_url);
-                        if let Some(ref s) = secret {
-                            poll_req = poll_req.bearer_auth(s);
-                        }
-                        match poll_req.send().await {
-                            Err(e) => {
-                                warn!("poll job_id={job_id}: {e} — retrying");
-                                continue;
-                            }
-                            Ok(r) if !r.status().is_success() => {
-                                warn!("GET /jobs/{job_id} returned HTTP {} — giving up on this job", r.status());
-                                break;
-                            }
-                            Ok(r) => {
-                                let j: serde_json::Value = r.json().await.unwrap_or_default();
-                                match j["status"].as_str().unwrap_or("unknown") {
-                                    "done" | "error" => break,
-                                    _ => continue,
-                                }
-                            }
-                        }
-                    }
+    // Fetch + finalize each segment individually — reuses the
+    // same per-job wav/transcript/report fetch path as the
+    // single-segment branch above.
+    for (job_id, name) in job_ids.iter().zip(&names) {
+        match fetch_job_result(&http, &synth_base_url, &secret, job_id, name, &data_dir).await {
+            Ok((seed_used, wall, audio_secs, rtf)) => {
+                if let Some(d) = audio_secs {
+                    info!("{name}: audio {d:.1}s  RTF: {:.2}x", rtf.unwrap_or(wall / d));
                 }
+                segment::record_synthesis(&data_dir, name, &speaker);
+                let entry = serde_json::json!({
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "segment": name,
+                    "pod_id": pod_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                    "gpu_name": gpu_name,
+                    "gpu_vram_mb": gpu_vram_mb,
+                    "gpu_price_per_hr": gpu_price,
+                    "speaker": speaker,
+                    "cfg_scale": cfg_scale,
+                    "temp": temp,
+                    "speed": speed,
+                    "seed": seed_used,
+                    "inference_wall_secs": wall,
+                    "audio_duration_secs": audio_secs,
+                    "rtf": rtf,
+                    "via": via,
+                });
+                if let Err(e) = append_run_log(entry) {
+                    warn!("failed to write run log for {name}: {e}");
+                }
+                info!("done: {data_dir}/{name}_generated.wav");
             }
-
-            // Fetch + finalize each segment individually — reuses the
-            // same per-job wav/transcript/report fetch path as the
-            // single-segment branch above.
-            for (job_id, name) in job_ids.iter().zip(&names) {
-                match fetch_job_result(&http, &synth_base_url, &secret, job_id, name, &data_dir).await {
-                    Ok((seed_used, wall, audio_secs, rtf)) => {
-                        if let Some(d) = audio_secs {
-                            info!("{name}: audio {d:.1}s  RTF: {:.2}x", rtf.unwrap_or(wall / d));
-                        }
-                        segment::record_synthesis(&data_dir, name, &speaker);
-                        let entry = serde_json::json!({
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                            "segment": name,
-                            "pod_id": pod_id,
-                            "job_id": job_id,
-                            "batch_id": batch_id,
-                            "gpu_name": gpu_name,
-                            "gpu_vram_mb": gpu_vram_mb,
-                            "gpu_price_per_hr": gpu_price,
-                            "speaker": speaker,
-                            "cfg_scale": cfg_scale,
-                            "temp": temp,
-                            "speed": speed,
-                            "seed": seed_used,
-                            "inference_wall_secs": wall,
-                            "audio_duration_secs": audio_secs,
-                            "rtf": rtf,
-                            "via": via,
-                        });
-                        if let Err(e) = append_run_log(entry) {
-                            warn!("failed to write run log for {name}: {e}");
-                        }
-                        info!("done: {data_dir}/{name}_generated.wav");
-                    }
-                    Err(e) => {
-                        warn!("segment {name} (job_id={job_id}) failed: {e}");
-                    }
-                }
+            Err(e) => {
+                warn!("segment {name} (job_id={job_id}) failed: {e}");
             }
         }
     }
