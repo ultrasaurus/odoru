@@ -15,12 +15,23 @@ odoru/
 ```
 
 ## Running
+Run commands from root of workspace
+
+authoring web app, code in `odoru/app`
 ```bash
 source .venv/bin/activate
 cargo run -p app                          # Kokoro only (default)
 ODORU_BACKEND=f5 cargo run -p app         # F5 only
 ODORU_BACKEND=both cargo run -p app       # Both backends simultaneously
+```
+
+cli, code in  `odoru/cli`
+```bash
 cargo run --bin dl -- --audio --backend f5 --voice sarah data/abstract.txt
+```
+
+testing:
+```bash
 cargo test
 cargo test --test integration -- --ignored  # needs venv active
 ```
